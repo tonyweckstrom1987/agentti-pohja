@@ -3,6 +3,7 @@
 Muoto perustuu [Keep a Changelogiin](https://keepachangelog.com/fi/1.0.0/).
 
 ## Unreleased
+- yojono: tehtavakohtainen `malli` (kehitys, tarkkailu): LiteLLM-alias valitaan jonosta (KEHITYS_MALLI/TARKKAILU_MALLI), mallivertailua varten. +2 testia.
 - salaisuus.sh: LC_ALL=C (merkkialue ei riipu localesta; korjaa test-macos-kaatumisen oletettu syy).
 - yojono: tyhja/liian lyhyt raportti (<200 tavua, ei kehitys) ei ole VALMIS; Telegram-HALYTYS kun >=3 epaonnistuu tai yritykset loppuvat; kulut.md saa taasmaysrivit (tehtavat vs kirjattu paivakulu). +6 testia.
 - isanta: `tila` suodattaa LXC-mount-kohinan (tmp, run-lock, dev-mqueue).

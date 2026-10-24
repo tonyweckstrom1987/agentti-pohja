@@ -709,3 +709,28 @@ class TestLuotettavuus(Pohja):
         vuoro = iter([False, True])
         teksti, _ = self.aja(lambda *a: ajuri.Tulos(next(vuoro), 0.1, "x.md" if False else "", "x"))
         self.assertNotIn("HALYTYS", teksti)
+
+
+class TestTehtavaMalli(Pohja):
+    def test_malli_hyvaksytaan_kehitykselle_ja_hylataan_muilta(self):
+        k = {"id": "k", "tyyppi": "kehitys", "aihe": "testit", "repo": "llm-stopcheck", "budjetti": 1.0, "malli": "deepseek-pro"}
+        ajuri.tarkista_jono({"tehtavat": [k]})
+        for huono in ("Deep Seek", "../x", "", 5, "a" * 41):
+            with self.subTest(malli=huono):
+                with self.assertRaises(ajuri.JonoVirhe):
+                    ajuri.tarkista_jono({"tehtavat": [dict(k, malli=huono)]})
+        with self.assertRaises(ajuri.JonoVirhe):
+            ajuri.tarkista_jono({"tehtavat": [dict(t("a"), malli="haiku")]})
+
+    def test_malli_valitetaan_ymparistona(self):
+        skripti = self.perus / "kehitys.sh"
+        skripti.write_text("#!/bin/sh\n"
+                           f'echo "$KEHITYS_MALLI" > {self.perus}/malli\n'
+                           f'mkdir -p {self.perus}/raportit\n'
+                           f'echo \'{{"total_cost_usd": 0.1}}\' > "{self.perus}/raportit/{PVM}-kehitys-testit-$1.json"\n'
+                           f'yes "- PR: https://x" | head -n 30 > "{self.perus}/raportit/{PVM}-kehitys-testit-$1.md"\n')
+        skripti.chmod(skripti.stat().st_mode | stat.S_IXUSR)
+        tehtava = {"id": "k", "tyyppi": "kehitys", "aihe": "testit", "repo": "llm-stopcheck", "budjetti": 1.0, "malli": "deepseek-pro"}
+        tulos = ajuri.suorita_katselmointi(tehtava, PVM, self.perus, skripti)
+        self.assertTrue(tulos.ok, tulos.viesti)
+        self.assertEqual((self.perus / "malli").read_text().strip(), "deepseek-pro")

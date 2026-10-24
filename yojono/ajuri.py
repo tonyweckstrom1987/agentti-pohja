@@ -105,6 +105,11 @@ def tarkista_jono(jono):
             teema = t["teema"]
             if not isinstance(teema, str) or not teema.strip() or len(teema) > TEEMA_MAX or any(c in teema for c in "\r\n\x00"):
                 raise JonoVirhe(f"teema ({t['id']}) pitaa olla yksirivinen teksti, 1-{TEEMA_MAX} merkkia")
+        if "malli" in t:
+            if t["tyyppi"] not in ("kehitys", "tarkkailu"):
+                raise JonoVirhe(f"malli kuuluu vain kehitys- ja tarkkailu-tehtavalle ({t['id']})")
+            if not isinstance(t["malli"], str) or not MALLI_RE.match(t["malli"]):
+                raise JonoVirhe(f"malli ({t['id']}) pitaa olla LiteLLM-alias, esim. sonnet tai deepseek-pro")
         toisto = t.get("toisto_pv")
         if toisto is not None and (isinstance(toisto, bool) or not isinstance(toisto, int) or not 1 <= toisto <= TOISTO_MAX_PV):
             raise JonoVirhe(f"toisto_pv ({t['id']}) pitaa olla kokonaisluku 1-{TOISTO_MAX_PV}")
@@ -171,6 +176,7 @@ def valitse_ajettavat(tehtavat, tila, pvm):
 
 
 RAPORTTI_MIN_KOKO = 200
+MALLI_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,39}$")
 
 
 def syy_viestiksi(md_polku, loppu):
@@ -202,6 +208,8 @@ def suorita_katselmointi(tehtava, pvm, perus, skripti, aikaraja=TEHTAVA_AIKARAJA
     try:
         # Telegram-tunnukset eivat kuulu alaprosessille (katselmoija ei tarvitse niita)
         ymparisto = {k: v for k, v in os.environ.items() if not k.startswith("YOJONO_TELEGRAM_")}
+        if tehtava.get("malli"):  # mallivertailu: tehtavakohtainen malli ohittaa oletuksen (LiteLLM-alias)
+            ymparisto["KEHITYS_MALLI" if tyyppi == "kehitys" else "TARKKAILU_MALLI"] = tehtava["malli"]
         if teema:  # skripti lukee teeman ymparistosta ja kirjoittaa raportin nimella $YOJONO_RAPORTTI.json|md
             ymparisto["YOJONO_TEEMA"] = teema
             ymparisto["YOJONO_RAPORTTI"] = nimi
