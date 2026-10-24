@@ -60,6 +60,21 @@ class IsantaTesti(unittest.TestCase):
         self.assertIn(["pct", "exec", "111", "--", "systemctl", "list-units", "--failed", "--no-legend", "--no-pager"], kutsut)
         self.assertFalse(os.path.exists(self.loki))  # tila ei kirjaa snapshot-ottoja
 
+    def test_tila_suodattaa_lxc_mount_kohinan(self):
+        kohina = "* tmp.mount loaded failed failed Temporary Directory\n* dev-mqueue.mount loaded failed failed x\n* run-lock.mount loaded failed failed y"
+
+        def f(komento, capture_output=True, text=True, timeout=None):
+            if komento == ["pct", "list"]:
+                return subprocess.CompletedProcess(komento, 0, "VMID Status Lock Name\n117 running a\n119 running b\n", "")
+            if "systemctl" not in komento:
+                return subprocess.CompletedProcess(komento, 0, "ok", "")
+            ulos = kohina + "\n* oma.service loaded failed failed Oma" if "119" in komento else kohina
+            return subprocess.CompletedProcess(komento, 0, ulos, "")
+        t = si.aja("tila", suorita=f, loki=self.loki)["tila"]
+        self.assertIn("(ei epaonnistuneita palveluita)", t)
+        self.assertIn("oma.service", t)
+        self.assertNotIn("tmp.mount", t)
+
     def test_tila_yksittainen_virhe_ei_kaada(self):
         def f(komento, capture_output=True, text=True, timeout=None):
             if komento[0] == "pvesm":

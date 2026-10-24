@@ -72,6 +72,13 @@ TILA_KOMENNOT = (
     ("Viimeisimmat varmuuskopiot", ["sh", "-c", "ls -lt /var/lib/vz/dump 2>/dev/null | head -6"]),
 )
 TILA_MAX = 6000
+# LXC-konteissa nama mountit ovat aina failed-tilassa (kohinaa, ei vika)
+TILA_KOHINA = ("dev-mqueue.mount", "run-lock.mount", "tmp.mount")
+
+
+def _suodata_kohina(teksti):
+    rivit = [r for r in teksti.splitlines() if not any(k in r for k in TILA_KOHINA)]
+    return "\n".join(rivit).strip()
 
 
 def kerro_tila(suorita=subprocess.run):
@@ -94,7 +101,7 @@ def kerro_tila(suorita=subprocess.run):
         try:
             r = suorita(["pct", "exec", ct, "--", "systemctl", "list-units", "--failed", "--no-legend", "--no-pager"],
                         capture_output=True, text=True, timeout=30)
-            ulos = (r.stdout or r.stderr or "").strip() or "(ei epaonnistuneita palveluita)"
+            ulos = _suodata_kohina((r.stdout or r.stderr or "").strip()) or "(ei epaonnistuneita palveluita)"
         except (OSError, subprocess.TimeoutExpired):
             ulos = "(ei saatavilla)"
         osat.append("## CT%s epaonnistuneet palvelut\n%s" % (ct, ulos[:600]))

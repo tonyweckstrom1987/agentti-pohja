@@ -3,6 +3,7 @@
 Muoto perustuu [Keep a Changelogiin](https://keepachangelog.com/fi/1.0.0/).
 
 ## Unreleased
+- isanta: `tila` suodattaa LXC-mount-kohinan (tmp, run-lock, dev-mqueue).
 - isanta: vain luku -komento `tila` (pct list, pvesm status, levy, kuorma, epaonnistuneet palvelut ajossa olevissa konteissa, varmuuskopiot); `snapshot_kutsu tila`; tilannekuva kirjoittaa `isanta.md`.
 
 ## [Julkaisematon]
