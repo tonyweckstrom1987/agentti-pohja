@@ -1,6 +1,6 @@
 """Snapshot-asiakas: pyytaa Proxmox-isantaa ottamaan CT115:n snapshotin (pakotettu ssh-komento).
 
-Ajetaan CT115:ssa. Isannan /root/snapshot-kutsu.py sallii vain 'listaa' ja 'snapshot ennen-<nimi>'.
+Ajetaan CT115:ssa. Isannan /root/snapshot-kutsu.py sallii vain 'tila' (vain luku), 'listaa' ja 'snapshot ennen-<nimi>'.
 
   python3 -m agentti.snapshot_kutsu listaa
   python3 -m agentti.snapshot_kutsu ota ennen-halytin
@@ -49,6 +49,14 @@ def listaa():
     return _suorita("listaa")
 
 
+def tila():
+    """Isannan ja konttien tila tekstina (vain luku, isannan pakotettu komento 'tila')."""
+    tulos = _suorita("tila", aikaraja=180)
+    if not tulos.get("ok"):
+        raise SnapshotVirhe(str(tulos.get("virhe", "?")))
+    return str(tulos.get("tila", ""))
+
+
 def ota(nimi):
     if not NIMI_RE.match(nimi):
         raise SnapshotVirhe("nimen pitaa olla muotoa ennen-<a-z0-9-> (8-47 merkkia)")
@@ -58,6 +66,9 @@ def ota(nimi):
 def main(argv=None):
     a = sys.argv[1:] if argv is None else argv
     try:
+        if a == ["tila"]:
+            print(tila())
+            return 0
         if a == ["listaa"]:
             tulos = listaa()
         elif len(a) == 2 and a[0] == "ota":

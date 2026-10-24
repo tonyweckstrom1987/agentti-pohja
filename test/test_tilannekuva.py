@@ -79,8 +79,9 @@ class OsioTesti(unittest.TestCase):
 
     def test_keraa_kaikki_kirjoittaa_tiedostot(self):
         kohde = Path(tempfile.mkdtemp()) / "kuva"
-        nimet = tk.keraa_kaikki(kohde, self.t, None, hae_tekoinen)
-        self.assertEqual(sorted(nimet), ["github.md", "kulut.md", "palvelin.md", "yojono.md"])
+        nimet = tk.keraa_kaikki(kohde, self.t, None, hae_tekoinen, lambda: "kontti 111 running")
+        self.assertEqual(sorted(nimet), ["github.md", "isanta.md", "kulut.md", "palvelin.md", "yojono.md"])
+        self.assertIn("kontti 111 running", (kohde / "isanta.md").read_text())
         for n in nimet:
             self.assertTrue((kohde / n).read_text())
         self.assertTrue((kohde / "aika.txt").exists())
@@ -92,11 +93,17 @@ class OsioTesti(unittest.TestCase):
         orig = tk.palvelin_osio
         tk.palvelin_osio = lambda: (_ for _ in ()).throw(RuntimeError("x"))
         try:
-            tk.keraa_kaikki(kohde, self.t, None, rikki)
+            tk.keraa_kaikki(kohde, self.t, None, rikki, lambda: "x")
         finally:
             tk.palvelin_osio = orig
         self.assertIn("osio epaonnistui", (kohde / "palvelin.md").read_text())
         self.assertIn("# Yojono", (kohde / "yojono.md").read_text())
+
+    def test_isanta_osio_virhe_ei_kaada(self):
+        def rikki():
+            raise RuntimeError("ei yhteytta")
+        self.assertIn("isantaa ei saatavilla: ei yhteytta", tk.isanta_osio(rikki))
+        self.assertIn("kontit ok", tk.isanta_osio(lambda: "kontit ok"))
 
     def test_main_vaatii_yhden_argumentin(self):
         self.assertEqual(tk.main([]), 2)

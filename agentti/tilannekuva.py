@@ -1,7 +1,7 @@
 """Tilannekuva: tarkkailija-agenttien syote (VAIN LUKU, ei kirjoita mihinkaan muualle kuin annettuun hakemistoon).
 
 Keraa tekstitiedostoiksi: GitHubin julkiset tiedot, yojonon tila ja raportit, kulut ja palvelimen perustila.
-Agentti lukee vain nama tiedostot; salaisuuden nakoiset merkkijonot siivotaan pois ennen kirjoitusta.
+Isannan tila tulee CT115:n ssh-avaimella isannan pakotetusta vain luku -komennosta (isanta/snapshot_isanta.py). Agentti lukee vain nama tiedostot; salaisuuden nakoiset merkkijonot siivotaan pois ennen kirjoitusta.
 Kaytto: python3 -m agentti.tilannekuva <kohdehakemisto>   (ymparisto: YOJONO_PERUS, PORTTI_TILA)
 """
 import json
@@ -148,7 +148,18 @@ def palvelin_osio():
     return "\n".join(rivit)
 
 
-def keraa_kaikki(kohde, perus="/var/lib/yojono", portti_tila="/var/lib/agentti/portti", hae=None):
+def isanta_osio(hae_tila=None):
+    """Proxmox-isannan tila CT115:sta isannan pakotetun vain luku -komennon kautta. Epaonnistuminen ei kaada: osio kertoo syyn."""
+    try:
+        if hae_tila is None:
+            from . import snapshot_kutsu
+            hae_tila = snapshot_kutsu.tila
+        return "# Proxmox-isanta ja kontit\n" + hae_tila()
+    except Exception as e:
+        return "# Proxmox-isanta ja kontit\n(isantaa ei saatavilla: %s)" % str(e)[:200]
+
+
+def keraa_kaikki(kohde, perus="/var/lib/yojono", portti_tila="/var/lib/agentti/portti", hae=None, hae_isanta=None):
     """Kirjoittaa tilannekuvan tiedostot kohdehakemistoon; palauttaa kirjoitettujen nimien listan."""
     kohde = Path(kohde)
     kohde.mkdir(parents=True, exist_ok=True)
@@ -157,6 +168,7 @@ def keraa_kaikki(kohde, perus="/var/lib/yojono", portti_tila="/var/lib/agentti/p
         "yojono.md": lambda: yojono_osio(perus),
         "kulut.md": lambda: kulut_osio(perus, portti_tila),
         "palvelin.md": palvelin_osio,
+        "isanta.md": lambda: isanta_osio(hae_isanta),
     }
     nimet = []
     for nimi, f in osat.items():

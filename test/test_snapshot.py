@@ -34,6 +34,40 @@ class IsantaTesti(unittest.TestCase):
         self.assertEqual(si.jasenna("listaa"), ("listaa", None))
         self.assertEqual(si.jasenna("snapshot ennen-halytin"), ("snapshot", "ennen-halytin"))
 
+    def test_tila_on_sallittu_vain_ilman_argumentteja(self):
+        self.assertEqual(si.jasenna("tila"), ("tila", None))
+        for k in ("tila 111", "tila; id", "tila $(id)", "tilaa"):
+            with self.subTest(k=k):
+                with self.assertRaises(si.Virhe):
+                    si.jasenna(k)
+
+    def test_tila_ajaa_vain_kiintean_listan_eika_muuta(self):
+        kutsut = []
+        PCT_LIST = "VMID Status Lock Name\n111 running litellm\n113 stopped gitea\n115 running agentscope\n"
+
+        def f(komento, capture_output=True, text=True, timeout=None):
+            kutsut.append(komento)
+            ulos = PCT_LIST if komento == ["pct", "list"] else "ok"
+            return subprocess.CompletedProcess(komento, 0, ulos, "")
+        t = si.aja("tila", suorita=f, loki=self.loki)
+        self.assertTrue(t["ok"])
+        self.assertIn("111 running litellm", t["tila"])
+        self.assertIn("## CT111 epaonnistuneet palvelut", t["tila"])
+        self.assertIn("## CT115 epaonnistuneet palvelut", t["tila"])
+        self.assertNotIn("CT113", t["tila"])  # pysaytettyyn konttiin ei kosketa
+        for k in kutsut:
+            self.assertNotIn(k[:2], (["pct", "snapshot"], ["pct", "rollback"], ["pct", "delsnapshot"], ["pct", "stop"], ["pct", "start"]))
+        self.assertIn(["pct", "exec", "111", "--", "systemctl", "list-units", "--failed", "--no-legend", "--no-pager"], kutsut)
+        self.assertFalse(os.path.exists(self.loki))  # tila ei kirjaa snapshot-ottoja
+
+    def test_tila_yksittainen_virhe_ei_kaada(self):
+        def f(komento, capture_output=True, text=True, timeout=None):
+            if komento[0] == "pvesm":
+                raise OSError("puuttuu")
+            return subprocess.CompletedProcess(komento, 0, "VMID Status Lock Name\n", "")
+        t = si.aja("tila", suorita=f, loki=self.loki)
+        self.assertIn("(ei saatavilla)", t["tila"])
+
     def test_kielletyt_komennot(self):
         for k in ("", "rollback ennen-xy", "snapshot", "snapshot ennen-a b", "snapshot muu-nimi",
                   "snapshot ennen-", "snapshot ennen-A", "snapshot ennen-x; id", "snapshot $(id)",
