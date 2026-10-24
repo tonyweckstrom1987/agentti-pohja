@@ -50,6 +50,13 @@ class SalaisuusTesti(unittest.TestCase):
         self.assertEqual(r.returncode, 2)
         self.assertFalse(self.f.exists())
 
+    def test_tulostettavuustarkistus_ei_riipu_localesta(self):
+        for loc in ("C", "en_US.UTF-8", "fi_FI.UTF-8"):
+            with self.subTest(loc=loc):
+                r = aja(self.f, "A", "a\tb\n", env=dict(os.environ, LC_ALL=loc))
+                self.assertNotEqual(r.returncode, 0)
+                self.assertFalse(self.f.exists())
+
     def test_ascii(self):
         SKRIPTI.read_bytes().decode("ascii")
 

@@ -5,6 +5,8 @@
 # Arvo kysytaan piilotettuna (read -s), kirjoitetaan atomisesti (tmp + mv), vanha rivi korvataan, oikeudet asetetaan.
 # Tulosteeseen ei koskaan tule arvoa, vain pituus. Claude tai terminal-Claude EI aja tata puolestasi: arvon kirjoitat sina.
 set -eu
+LC_ALL=C
+export LC_ALL
 TIEDOSTO="${1:-}"
 MUUTTUJA="${2:-}"
 OMISTAJA="${3:-root:root}"
