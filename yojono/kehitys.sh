@@ -63,6 +63,13 @@ testaa() {
     else
       timeout 600 npm install --ignore-scripts --no-audit --no-fund || return 1
     fi
+    # Natiivipaketit (esim. better-sqlite3) tarvitsevat asennusskriptinsa: rakennetaan vain sallitut, ei kaikkia.
+    for pkg in ${YOJONO_NATIIVIT:-better-sqlite3}; do
+      case "$pkg" in *[!A-Za-z0-9._-]*|"") continue ;; esac
+      if [ -d "node_modules/$pkg" ]; then
+        timeout 600 npm rebuild "$pkg" --no-audit --no-fund || return 1
+      fi
+    done
     timeout 600 npm test
   else
     timeout 600 python3 -B -m unittest discover -s . -t . -p 'test_*.py'

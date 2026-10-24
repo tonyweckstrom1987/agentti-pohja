@@ -200,6 +200,7 @@ class Ajo(Pohja):
         git(r, "commit", "-q", "-m", "js")
         bin_ = self.perus.parent / "bin"
         kirjoita(bin_ / "npm", '#!/bin/sh\necho "$@" >> "' + str(self.perus.parent / "npm.kutsut") + '"\n'
+                 'if [ "$1" = "install" ]; then mkdir -p node_modules/better-sqlite3; fi\n'
                  'if [ "$1" = "test" ]; then exit ' + str(npm_test_koodi) + '; fi\nexit 0\n', True)
         return dict(PATH=str(bin_) + os.pathsep + os.environ["PATH"])
 
@@ -212,6 +213,8 @@ class Ajo(Pohja):
         kutsut = (self.perus.parent / "npm.kutsut").read_text().splitlines()
         self.assertTrue(kutsut[0].startswith("install --ignore-scripts"), kutsut)
         self.assertEqual(kutsut[-1], "test")
+        self.assertTrue(any(k.startswith("rebuild better-sqlite3") for k in kutsut), kutsut)
+        self.assertLess([k.split()[0] for k in kutsut].index("rebuild"), len(kutsut) - 1)
         self.assertIn(REPO, self.kutsut())
 
     def test_js_repo_punainen_npm_test_estaa_prn(self):
