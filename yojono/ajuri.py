@@ -331,7 +331,7 @@ def skripti_tyypille(skripti, tyyppi):
 
 
 def aja(perus, skripti, laheta=print, suorita=suorita_katselmointi, nyt=time.monotonic, pvm=None, kuiva=False,
-        telegram=laheta_telegram):
+        telegram=laheta_telegram, fork_tarkista=None):
     """Ajaa jonon. Palauttaa tekstiyhteenvedon. Paivakatto: ennen tehtavaa varataan sen koko budjetti."""
     pvm = pvm or date.today().isoformat()
     perus = Path(perus)
@@ -372,6 +372,11 @@ def aja(perus, skripti, laheta=print, suorita=suorita_katselmointi, nyt=time.mon
                 # Ei kalliin mallikutsun jalkeen hukkaan menevaa tyota: PR-paivaraja on taynna, yritys ei kulu
                 rivit.append(f"- {t['id']}: ohitettu (PR-paivaraja taynna, ajetaan seuraavana paivana)")
                 continue
+            if t["tyyppi"] == "kehitys" and fork_tarkista is not None:
+                fork_ok, selitys = fork_tarkista(t["repo"])
+                if not fork_ok:  # ei kulua eika yritysta: mallikutsu menisi hukkaan, kun PR ei voi avautua
+                    rivit.append(f"- {t['id']}: ohitettu ({selitys})")
+                    continue
             tulos = suorita(t, pvm, perus, skripti_tyypille(skripti, t["tyyppi"]))
             ajetut.append(t["id"])
             tila["kulut"][pvm] = round(kulu_nyt + tulos.kulu, 4)
@@ -418,7 +423,7 @@ def main(argv=None):
         print(json.dumps(lue_json(Path(perus) / "tila.json", {}), indent=2, ensure_ascii=False))
         return 0
     try:
-        tulos = aja(perus, skripti, kuiva=a.komento == "kuiva")
+        tulos = aja(perus, skripti, kuiva=a.komento == "kuiva", fork_tarkista=pr_kutsu.fork_valmis)
         if a.komento == "kuiva":
             print(tulos)
         elif a.komento == "ajo":

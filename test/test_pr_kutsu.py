@@ -382,3 +382,65 @@ class OletushaaraTesti(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ForkEsitarkistusTesti(unittest.TestCase):
+    ENV = {"YOJONO_BOT_KAYTTAJA": "agenttifirma-bot", "YOJONO_BOT_TUNNUS": "/ei/ole"}
+
+    @staticmethod
+    def vastaus(data):
+        class V:
+            def __enter__(self_):
+                return self_
+
+            def __exit__(self_, *a):
+                return False
+
+            def read(self_):
+                return json.dumps(data).encode()
+        return V()
+
+    def test_ajan_tasalla_on_ok_ilman_tunnusta(self):
+        ok, _ = pk.fork_valmis("llm-stopcheck", self.ENV, avaa=lambda p, timeout=0: self.vastaus({"behind_by": 0}))
+        self.assertTrue(ok)
+
+    def test_ei_selvia_tietoa_ei_estaa_ajoa(self):
+        def rikki(p, timeout=0):
+            raise urllib.error.URLError("ei verkkoa")
+        self.assertTrue(pk.fork_valmis("llm-stopcheck", self.ENV, avaa=rikki)[0])
+
+    def test_jaljessa_ilman_tunnusta_ei_estaa_ajoa(self):
+        # tunnustiedostoa ei voi lukea -> PrVirhe -> epavarma -> sallitaan (push nostaa selkean virheen)
+        ok, _ = pk.fork_valmis("llm-stopcheck", self.ENV, avaa=lambda p, timeout=0: self.vastaus({"behind_by": 3}))
+        self.assertTrue(ok)
+
+    def test_jaljessa_ja_synkka_ei_onnistu_estaa(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tunnus = os.path.join(tmp, "token")
+            with open(tunnus, "w") as f:
+                f.write("ghp_" + "a" * 30)
+            env = dict(self.ENV, YOJONO_BOT_TUNNUS=tunnus)
+
+            def avaa(p, timeout=0):
+                if p.full_url.endswith("/merge-upstream"):
+                    raise urllib.error.HTTPError(p.full_url, 422, "x", {}, None)
+                return self.vastaus({"behind_by": 3})
+            ok, selitys = pk.fork_valmis("llm-stopcheck", env, avaa=avaa)
+        self.assertFalse(ok)
+        self.assertIn("Sync fork", selitys)
+        self.assertIn("3 commitia", selitys)
+
+    def test_jaljessa_mutta_synkka_onnistuu(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tunnus = os.path.join(tmp, "token")
+            with open(tunnus, "w") as f:
+                f.write("ghp_" + "a" * 30)
+            env = dict(self.ENV, YOJONO_BOT_TUNNUS=tunnus)
+            kutsut = []
+
+            def avaa(p, timeout=0):
+                kutsut.append(p.full_url)
+                if p.full_url.endswith("/merge-upstream"):
+                    return self.vastaus({})
+                return self.vastaus({"behind_by": 0 if any(u.endswith("/merge-upstream") for u in kutsut) else 3})
+            self.assertTrue(pk.fork_valmis("llm-stopcheck", env, avaa=avaa)[0])

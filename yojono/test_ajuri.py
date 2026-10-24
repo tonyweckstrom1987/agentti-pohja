@@ -734,3 +734,23 @@ class TestTehtavaMalli(Pohja):
         tulos = ajuri.suorita_katselmointi(tehtava, PVM, self.perus, skripti)
         self.assertTrue(tulos.ok, tulos.viesti)
         self.assertEqual((self.perus / "malli").read_text().strip(), "deepseek-pro")
+
+
+class TestForkEsitarkistus(Pohja):
+    def kehitys(self):
+        return {"id": "k", "tyyppi": "kehitys", "aihe": "testit", "repo": "llm-stopcheck", "budjetti": 1.0}
+
+    def test_fork_jaljessa_ohittaa_ilman_kulua_ja_yritysta(self):
+        self.kirjoita_jono(jono([self.kehitys()], katto=9.0))
+        kutsut = []
+        teksti, _ = self.aja(lambda *a: kutsut.append(1) or ajuri.Tulos(True, 0.5, "x.md", "ok"),
+                             fork_tarkista=lambda repo: (False, "fork jaljessa: Sync fork kasin"))
+        self.assertEqual(kutsut, [])
+        self.assertIn("ohitettu (fork jaljessa: Sync fork kasin)", teksti)
+        self.assertNotIn("k", self.tila().get("tehtavat", {}))
+
+    def test_fork_ok_ajaa_normaalisti(self):
+        self.kirjoita_jono(jono([self.kehitys()], katto=9.0))
+        with mock.patch("yojono.ajuri.pr_kutsu.paikkoja_jaljella", return_value=10):
+            teksti, _ = self.aja(lambda *a: ajuri.Tulos(True, 0.5, "", "ok"), fork_tarkista=lambda repo: (True, ""))
+        self.assertIn("k: VALMIS", teksti)

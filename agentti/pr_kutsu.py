@@ -193,6 +193,38 @@ def paivita_fork(repo, botti, tunnus, avaa=urllib.request.urlopen):
         return type(e).__name__
 
 
+def fork_jaljessa(repo, botti, avaa=urllib.request.urlopen):
+    """Montako commitia botin fork on jaljessa ylavirrasta (julkinen compare-haku, ei tunnusta) tai None jos ei saada selville."""
+    pohja = pohja_haara(repo)
+    pyynto = urllib.request.Request(
+        f"https://api.github.com/repos/{OMISTAJA}/{repo}/compare/{pohja}...{botti}:{pohja}",
+        headers={"Accept": "application/vnd.github+json", "User-Agent": "yojono-pr-kutsu"})
+    try:
+        with avaa(pyynto, timeout=20) as vastaus:
+            luku = json.loads(vastaus.read().decode("utf-8")).get("behind_by")
+        return luku if isinstance(luku, int) and not isinstance(luku, bool) else None
+    except (urllib.error.URLError, ValueError, OSError):
+        return None
+
+
+def fork_valmis(repo, env=None, avaa=urllib.request.urlopen):
+    """Esitarkistus ennen mallikutsua: onko fork ajan tasalla tai saadaanko se synkattua. Palauttaa (ok, selitys).
+    Epavarmuus (ei verkkoa, ei tunnusta) ei esta ajoa: silloin ok=True, ja itse push nostaa selkean virheen."""
+    env = os.environ if env is None else env
+    try:
+        botti = botti_kayttaja(env)
+        jalessa = fork_jaljessa(repo, botti, avaa=avaa)
+        if not jalessa:
+            return True, ""
+        tunnus = lue_tunnus(env.get("YOJONO_BOT_TUNNUS", OLETUS_TUNNUS))
+        paivita_fork(repo, botti, tunnus, avaa=avaa)
+        if not fork_jaljessa(repo, botti, avaa=avaa):
+            return True, ""
+        return False, "fork %s/%s on %s commitia jaljessa eika API-synkka onnistu: Sync fork kasin" % (botti, repo, jalessa)
+    except PrVirhe:
+        return True, ""
+
+
 def avaa_pr(repo, haara, botti, otsikko, kuvaus, tunnus, avaa=urllib.request.urlopen):
     """Avaa PR forkista alkuperaiseen repoon. Palauttaa PR:n osoitteen."""
     runko = {
