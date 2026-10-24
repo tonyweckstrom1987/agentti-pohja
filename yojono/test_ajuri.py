@@ -256,7 +256,7 @@ class TestKatselmointiSkripti(Pohja):
     def test_onnistunut_ajo_lukee_kulun_json_ista_ja_saa_budjetin_argumenttina(self):
         s = self.skripti(f'echo "$1 $2" > {self.perus}/argumentit\n'
                          f'echo \'{{"total_cost_usd": 0.58, "result": "x"}}\' > "{self.perus}/raportit/{PVM}-$1.json"\n'
-                         f'echo raportti > "{self.perus}/raportit/{PVM}-$1.md"\n')
+                         f'yes raportti | head -n 40 > "{self.perus}/raportit/{PVM}-$1.md"\n')
         tulos = ajuri.suorita_katselmointi(t("a", repo="mcp-homelab", budjetti=2.0), PVM, self.perus, s)
         self.assertTrue(tulos.ok)
         self.assertAlmostEqual(tulos.kulu, 0.58)
@@ -265,7 +265,7 @@ class TestKatselmointiSkripti(Pohja):
 
     def test_ideointi_raportti_on_nimetty_tyypin_mukaan(self):
         s = self.skripti(f'echo \'{{"total_cost_usd": 0.3}}\' > "{self.perus}/raportit/{PVM}-ideointi-$1.json"\n'
-                         f'echo raportti > "{self.perus}/raportit/{PVM}-ideointi-$1.md"\n')
+                         f'yes raportti | head -n 40 > "{self.perus}/raportit/{PVM}-ideointi-$1.md"\n')
         tehtava = dict(t("i", repo="agenttifirma", budjetti=1.0), tyyppi="ideointi")
         tulos = ajuri.suorita_katselmointi(tehtava, PVM, self.perus, s)
         self.assertTrue(tulos.ok)
@@ -509,7 +509,7 @@ class TestTarkkailu(Pohja):
                            f'echo "$#|$YOJONO_TEEMA|$YOJONO_TUNNUS|$YOJONO_RAPORTTI" > {self.perus}/tiedot\n'
                            f'mkdir -p {self.perus}/raportit\n'
                            f'echo \'{{"total_cost_usd": 0.3}}\' > "{self.perus}/raportit/$YOJONO_RAPORTTI.json"\n'
-                           f'echo raportti > "{self.perus}/raportit/$YOJONO_RAPORTTI.md"\n')
+                           f'yes raportti | head -n 40 > "{self.perus}/raportit/$YOJONO_RAPORTTI.md"\n')
         skripti.chmod(skripti.stat().st_mode | stat.S_IXUSR)
         tulos = ajuri.suorita_katselmointi(self.tt(), PVM, self.perus, skripti)
         self.assertTrue(tulos.ok, tulos.viesti)
@@ -544,7 +544,7 @@ class TestTeema(Pohja):
                          f'mkdir -p {self.perus}/raportit\n'
                          f'N="${{YOJONO_RAPORTTI:-{PVM}-ideointi-$1}}"\n'
                          f'echo \'{{"total_cost_usd": 0.2}}\' > "{self.perus}/raportit/$N.json"\n'
-                         f'echo r > "{self.perus}/raportit/$N.md"\n')
+                         f'yes r | head -n 150 > "{self.perus}/raportit/$N.md"\n')
         polku.chmod(polku.stat().st_mode | stat.S_IXUSR)
         return polku
 
@@ -670,3 +670,42 @@ class Kuukausikatto(Pohja):
         (self.perus / "tila.json").write_text(json.dumps({"kulut": {"2026-10-01": 100.0}, "tehtavat": {}}))
         teksti, _ = self.aja(lambda *_: ajuri.Tulos(True, 0.1, "x.md", "ok"))
         self.assertIn("a: VALMIS", teksti)
+
+
+class TestLuotettavuus(Pohja):
+    def skripti(self, koko_komento):
+        polku = self.perus / "katselmoi.sh"
+        polku.write_text("#!/bin/sh\n"
+                         f'mkdir -p {self.perus}/raportit\n'
+                         f'echo \'{{"total_cost_usd": 0.3}}\' > "{self.perus}/raportit/{PVM}-$1.json"\n'
+                         f'{koko_komento} > "{self.perus}/raportit/{PVM}-$1.md"\n')
+        polku.chmod(polku.stat().st_mode | stat.S_IXUSR)
+        return polku
+
+    def test_tyhja_raportti_ei_ole_valmis(self):
+        tulos = ajuri.suorita_katselmointi(t("a", repo="r"), PVM, self.perus, self.skripti("echo x"))
+        self.assertFalse(tulos.ok)
+        self.assertIn("tyhja", tulos.viesti)
+        self.assertAlmostEqual(tulos.kulu, 0.3)  # kulu on jo syntynyt ja kirjataan
+
+    def test_riittavan_pitka_raportti_on_valmis(self):
+        tulos = ajuri.suorita_katselmointi(t("a", repo="r"), PVM, self.perus, self.skripti("yes raportti | head -n 60"))
+        self.assertTrue(tulos.ok)
+
+    def test_halytys_kun_kolme_epaonnistuu(self):
+        self.kirjoita_jono(jono([t("a"), t("b"), t("c")], katto=9.0))
+        teksti, _ = self.aja(lambda *a: ajuri.Tulos(False, 0.1, "", "rikki"))
+        self.assertTrue(teksti.startswith("HALYTYS: 3 epaonnistui"))
+
+    def test_halytys_kun_yritykset_loppuvat(self):
+        self.kirjoita_jono(jono([t("a")], katto=9.0))
+        (self.perus / "tila.json").write_text(json.dumps({"tehtavat": {"a": {"tila": "epaonnistui", "yrityksia": ajuri.MAX_YRITYKSIA - 1,
+                                                                            "pvm": "2026-10-18"}}, "kulut": {}}))
+        teksti, _ = self.aja(lambda *a: ajuri.Tulos(False, 0.1, "", "rikki"))
+        self.assertIn("HALYTYS: 1 epaonnistui; yritykset loppu: a", teksti)
+
+    def test_ei_halytysta_kun_yksi_epaonnistuu_ensimmaista_kertaa(self):
+        self.kirjoita_jono(jono([t("a"), t("b")], katto=9.0))
+        vuoro = iter([False, True])
+        teksti, _ = self.aja(lambda *a: ajuri.Tulos(next(vuoro), 0.1, "x.md" if False else "", "x"))
+        self.assertNotIn("HALYTYS", teksti)

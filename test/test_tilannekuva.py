@@ -99,6 +99,13 @@ class OsioTesti(unittest.TestCase):
         self.assertIn("osio epaonnistui", (kohde / "palvelin.md").read_text())
         self.assertIn("# Yojono", (kohde / "yojono.md").read_text())
 
+    def test_kulut_taasmays_merkitsee_eron(self):
+        (self.t / "tila.json").write_text(json.dumps({"tehtavat": {"a": {"pvm": "2026-10-20", "kulu": 0.5}, "b": {"pvm": "2026-10-21", "kulu": 0.5}},
+                                                      "kulut": {"2026-10-20": 0.5, "2026-10-21": 0.9}}))
+        teksti = tk.kulut_osio(self.t, None)
+        self.assertIn("2026-10-20: tehtavien viimeisimmat ajot 0.50, kirjattu 0.50 -> OK", teksti)
+        self.assertIn("2026-10-21: tehtavien viimeisimmat ajot 0.50, kirjattu 0.90 -> ERO", teksti)
+
     def test_isanta_osio_virhe_ei_kaada(self):
         def rikki():
             raise RuntimeError("ei yhteytta")

@@ -113,6 +113,12 @@ def kulut_osio(perus, portti_tila):
         ennuste = " (keskim. %.2f/pv, 30 pv ennuste %.1f)" % (kk[kuu] / paivia, kk[kuu] / paivia * 30) if paivia else ""
         rivit.append("kuukausi %s yhteensa: %.2f, kirjattuja paivia %d%s" % (kuu, kk[kuu], paivia, ennuste))
     rivit.append("paivakatto: %s, kuukausikatto: %s" % (jono.get("paivakatto"), jono.get("kuukausikatto")))
+    rivit.append("\n## Taasmays (tehtavien kulut vs kirjattu paivakulu)")
+    for pvm in sorted(kulut)[-7:]:
+        summa = sum(s.get("kulu") or 0 for s in (tila.get("tehtavat") or {}).values() if s.get("pvm") == pvm and isinstance(s.get("kulu"), (int, float)))
+        kirjattu = kulut[pvm] if isinstance(kulut[pvm], (int, float)) else 0
+        merkki = "OK" if abs(summa - kirjattu) < 0.01 else "ERO (uudelleenajot ja aiemmat yritykset voivat selittaa)"
+        rivit.append("- %s: tehtavien viimeisimmat ajot %.2f, kirjattu %.2f -> %s" % (pvm, summa, kirjattu, merkki))
     if portti_tila:
         data = _json(Path(portti_tila) / "portti-kulu.json", {})
         rivit.append("\n## Portti (paivakirjanpito)")

@@ -170,6 +170,9 @@ def valitse_ajettavat(tehtavat, tila, pvm):
     return ulos
 
 
+RAPORTTI_MIN_KOKO = 200
+
+
 def syy_viestiksi(md_polku, loppu):
     """Epaonnistuneen ajon viestiksi raportin `- Syy:`-rivi (jos on) ja ilman claude-tyokalun yleista `unrecognized_model`-kohinaa."""
     syy = ""
@@ -224,7 +227,11 @@ def suorita_katselmointi(tehtava, pvm, perus, skripti, aikaraja=TEHTAVA_AIKARAJA
         if kulu is None:
             kulu = budjetti  # ajo alkoi mutta kulua ei saada: katto ei saa alittua arvauksella
     ok = koodi == 0 and md_polku.exists() and paivittyi
-    if not ok:
+    tyhja = ok and tyyppi != "kehitys" and md_polku.stat().st_size < RAPORTTI_MIN_KOKO
+    if tyhja:  # tyhja raportti ei ole tulos: ei merkita valmiiksi, yritys kuluu (kulu on jo syntynyt)
+        ok = False
+        loppu = f"raportti tyhja tai liian lyhyt (<{RAPORTTI_MIN_KOKO} tavua)"
+    elif not ok:
         loppu = syy_viestiksi(md_polku if paivittyi else None, loppu)
     return Tulos(ok, kulu, str(md_polku) if ok else "", "ok" if ok else (loppu or f"poistumiskoodi {koodi}"))
 
@@ -266,9 +273,26 @@ def laheta_telegram(teksti, env=None):
         return False
 
 
-def yhteenveto(rivit, kulu_tanaan, katto, pvm):
+HALYTYS_EPAONNISTUNUTTA = 3
+
+
+def halytys(tila, ajetut_idt):
+    """Rivi yhteenvedon alkuun, jos taman ajon tehtavista epaonnistui vahintaan HALYTYS_EPAONNISTUNUTTA tai jokin
+    on kayttanut kaikki yrityksensa (ei enaa yritetaan). Tyhja merkkijono jos kaikki hyvin."""
+    tehtavat = tila.get("tehtavat", {})
+    kaatuneet = [i for i in ajetut_idt if tehtavat.get(i, {}).get("tila") == "epaonnistui"]
+    loppuun = [i for i in kaatuneet if tehtavat[i].get("yrityksia", 0) >= MAX_YRITYKSIA]
+    if len(kaatuneet) >= HALYTYS_EPAONNISTUNUTTA or loppuun:
+        osat = [f"{len(kaatuneet)} epaonnistui"]
+        if loppuun:
+            osat.append("yritykset loppu: " + ", ".join(loppuun))
+        return "HALYTYS: " + "; ".join(osat)
+    return ""
+
+
+def yhteenveto(rivit, kulu_tanaan, katto, pvm, halytysrivi=""):
     otsikko = f"Yojono {pvm}: kulu tanaan {kulu_tanaan:.2f} / {katto:.2f} USD"
-    return "\n".join([otsikko] + (rivit or ["Ei ajettavia tehtavia."]))
+    return "\n".join(([halytysrivi] if halytysrivi else []) + [otsikko] + (rivit or ["Ei ajettavia tehtavia."]))
 
 
 def kirjaa_lokiin(t, tulos, pvm, polku=None):
@@ -323,6 +347,7 @@ def aja(perus, skripti, laheta=print, suorita=suorita_katselmointi, nyt=time.mon
             return yhteenveto(rivit or ["Ei ajettavia tehtavia."], tila["kulut"].get(pvm, 0.0), katto, pvm)
         alku = nyt()
         rivit = []
+        ajetut = []
         for t in ajettavat:
             kulu_nyt = tila["kulut"].get(pvm, 0.0)
             if nyt() - alku > ILTA_AIKARAJA_S:
@@ -340,6 +365,7 @@ def aja(perus, skripti, laheta=print, suorita=suorita_katselmointi, nyt=time.mon
                 rivit.append(f"- {t['id']}: ohitettu (PR-paivaraja taynna, ajetaan seuraavana paivana)")
                 continue
             tulos = suorita(t, pvm, perus, skripti_tyypille(skripti, t["tyyppi"]))
+            ajetut.append(t["id"])
             tila["kulut"][pvm] = round(kulu_nyt + tulos.kulu, 4)
             vanha = tila["tehtavat"].get(t["id"], {})
             tila["tehtavat"][t["id"]] = {
@@ -353,7 +379,7 @@ def aja(perus, skripti, laheta=print, suorita=suorita_katselmointi, nyt=time.mon
                          + (f" raportti {tulos.raportti}" if tulos.ok else f" syy: {tulos.viesti}")
                          + (raportin_lisatiedot(t["tyyppi"], tulos.raportti) if tulos.ok else ""))
         kirjoita_tila(tila_polku, tila)
-        teksti = yhteenveto(rivit, tila["kulut"].get(pvm, 0.0), katto, pvm)
+        teksti = yhteenveto(rivit, tila["kulut"].get(pvm, 0.0), katto, pvm, halytys(tila, ajetut))
     laheta(teksti)
     if ajettavat:
         telegram(teksti)
