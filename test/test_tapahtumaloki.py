@@ -153,7 +153,7 @@ class PuhdistaJaTallennusTarkkaTest(unittest.TestCase):
                 os.chdir(vanha)
 
     def test_tiedot_ascii_ja_avaimet_jarjestyksessa(self):
-        tl.kirjaa(self.y, "l", "a", "t", "r", tiedot={"b": 1, "a": "ä"})
+        tl.kirjaa(self.y, "l", "a", "t", "r", tiedot={"b": 1, "a": "\u00e4"})
         self.assertEqual(self.rivi()[4], '{"a": "\\u00e4", "b": 1}')
 
     def test_kenttien_pituusrajat(self):
