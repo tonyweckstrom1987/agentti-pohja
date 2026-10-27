@@ -112,6 +112,55 @@ class TarkkailuTesti(Pohja):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("Tilannekuvan tiedostoja: 0", self.raportti())
 
+    def _koko_loki(self):
+        kayttoloki = self.t / "koot"
+        self.agentti_skripti(f'wc -c *.md > {kayttoloki}\necho \'{{"total_cost_usd": 0, "result": "ok"}}\'')
+        return kayttoloki
+
+    def _koot(self, loki):
+        return {r.split()[1]: int(r.split()[0]) for r in loki.read_text().splitlines() if r.strip() and not r.strip().endswith("total")}
+
+    def test_iso_tiedosto_katkaistaan_ja_pieni_jaa_ennalleen(self):
+        loki = self._koko_loki()
+        kuva = 'python3 -c "print((\'rivi\\n\') * 5000, end=\'\')" > "$0/github.md"; echo pieni > "$0/yojono.md"'
+        r = self.aja(TARKKAILU_KUVAKOMENTO=kuva, TARKKAILU_TIEDOSTO_MAX="1000", TARKKAILU_KUVA_MAX="100000")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        koot = self._koot(loki)
+        self.assertLessEqual(koot["github.md"], 1000 + 60)
+        self.assertGreater(koot["github.md"], 500)
+        self.assertEqual(koot["yojono.md"], len("pieni\n"))
+
+    def test_katkaisu_nakyy_agentille_tiedostossa_eika_katkaise_riveja(self):
+        self.agentti_skripti(f'cat github.md > {self.t / "sisalto"}\necho \'{{"total_cost_usd": 0, "result": "ok"}}\'')
+        kuva = 'python3 -c "print((\'abcdefghij\\n\') * 500, end=\'\')" > "$0/github.md"'
+        r = self.aja(TARKKAILU_KUVAKOMENTO=kuva, TARKKAILU_TIEDOSTO_MAX="105")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        teksti = (self.t / "sisalto").read_text()
+        self.assertTrue(teksti.endswith("(katkaistu: tilannekuva ylitti rajan)\n"), teksti[-80:])
+        self.assertEqual(teksti.count("abcdefghij\n"), 9)           # 105 tavua -> 9 taytta rivia (99 tavua), ei puolikasta rivia
+
+    def test_kokonaisraja_rajaa_koko_hakemiston(self):
+        loki = self._koko_loki()
+        kuva = 'for n in a b c d; do python3 -c "print((\'x\' * 99 + \'\\n\') * 8, end=\'\')" > "$0/$n.md"; done'
+        r = self.aja(TARKKAILU_KUVAKOMENTO=kuva, TARKKAILU_TIEDOSTO_MAX="10000", TARKKAILU_KUVA_MAX="1000")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        koot = self._koot(loki)
+        self.assertEqual(set(koot), {"a.md", "b.md", "c.md", "d.md"})
+        self.assertLessEqual(sum(koot.values()), 1000 + 4 * 60)    # raja + katkaisumerkit
+        self.assertLess(sum(koot.values()), 4 * 800)
+
+    def test_oletusrajat_eivat_koske_tavalliseen_tilannekuvaan(self):
+        loki = self._koko_loki()
+        r = self.aja()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self._koot(loki), {"github.md": len("kuva\n"), "yojono.md": len("x\n")})
+
+    def test_kehote_neuvoo_lukemaan_tiedostot_kerran(self):
+        kayttoloki = self.t / "kutsut"
+        self.agentti_skripti(f'echo "$@" > {kayttoloki}\necho \'{{"total_cost_usd": 0, "result": "ok"}}\'')
+        self.assertEqual(self.aja().returncode, 0)
+        self.assertIn("Lue jokainen tiedosto kerran", kayttoloki.read_text())
+
     def test_skripti_on_ascii_ja_ei_anna_agentille_kirjoitusoikeutta(self):
         teksti = SKRIPTI.read_bytes()
         teksti.decode("ascii")
