@@ -36,6 +36,7 @@ Muoto perustuu [Keep a Changelogiin](https://keepachangelog.com/fi/1.0.0/).
 - testit: `tools/automerge.py` mutanttiaukot suljettu: 148 mutanttia, ennen 18 selvisi, nyt 0 (1 ekvivalentti sallittu). Uudet testit kattavat tyhjan polun, repon nimen, README-haaran, gh-kutsun parametrit, virheviestien 200 merkin rajan ja yhteenvetotiedoston.
 - testit: `agentti/pr_kutsu.py` viimeiset 3 selviytyjaa: oletusarvoinen synkronointiviesti testattu, kaksi ekvivalenttia (`tila.get("n", 0)`) sallittu.
 - yojono: mallikutsun ohitus kulun pienentamiseksi. `kehitys.sh` ohittaa tuloksettoman ajon, jos repon HEAD ei ole muuttunut (max 7 vrk); `tarkkailu.sh` ohittaa roolin, jos GitHub-tilannekuva on identtinen (max 2 vrk). Vain onnistuneet ajot kirjataan; `YOJONO_PAKOTA=1` ohittaa.
+- testit: sydan, telegram, skeema, tulos ja snapshot_kutsu mutanttiaukot suljettu (37 selviytyjaa -> 0, paitsi 2 ekvivalenttia skeeman 10**9-oletusrajassa, jotka sallitaan erikseen). Uudet testit kattavat HTTP-tilakoodien rajat, aikakatkaisut, tyyppitarkistukset, CLI-koodit ja virheviestit.
 
 ## [Julkaisematon]
 
