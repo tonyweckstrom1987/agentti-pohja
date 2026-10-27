@@ -290,6 +290,13 @@ class MainTarkkaTest(unittest.TestCase):
         self.assertEqual([r[0] for r in y.execute("SELECT kulu_usd FROM tapahtuma ORDER BY id")], [None, 0.25])
         y.close()
 
+    def test_kirjaa_kentat_oikeassa_jarjestyksessa(self):
+        self.aja("kirjaa", "lahde1", "agentti1", "tyyppi1", "tulos1")
+        y = tl.avaa(self.polku)
+        self.assertEqual(y.execute("SELECT lahde,agentti,tyyppi,tulos FROM tapahtuma").fetchone(),
+                         ("lahde1", "agentti1", "tyyppi1", "tulos1"))
+        y.close()
+
     def test_kirjaa_vaara_maara_argumentteja(self):
         self.assertEqual(self.aja("kirjaa", "l", "a", "t")[0], 2)
         self.assertEqual(self.aja("kirjaa", "l", "a", "t", "ok", "1", "extra")[0], 2)
