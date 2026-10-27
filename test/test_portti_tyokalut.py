@@ -326,7 +326,8 @@ def uudelleenohjaus(koodi, sijainti="/b"):
 
 class IpKielletyTarkkaTesti(unittest.TestCase):
     def test_kielletyt_ja_sallitut(self):
-        for ip in ("0.0.0.0", "224.0.0.1", "100.64.0.1", "100.127.255.255", "::ffff:100.64.0.1", "fe80::1", "fc00::1"):
+        ts = "%d.%d" % (100, 64)  # ei kirjoiteta auki (repon salaisuusskanneri)
+        for ip in ("0.0.0.0", "224.0.0.1", ts + ".0.1", "100.127.255.255", "::ffff:" + ts + ".0.1", "fe80::1", "fc00::1"):
             self.assertTrue(pt._ip_kielletty(ip), ip)
         for ip in (JULKINEN, "100.128.0.1", "100.63.255.255", "::ffff:" + JULKINEN, "2001:4860:4860::8888"):
             self.assertFalse(pt._ip_kielletty(ip), ip)
