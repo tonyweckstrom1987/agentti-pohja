@@ -80,5 +80,19 @@ class MaaritysTest(unittest.TestCase):
                 m.lue(os.path.join(d, "puuttuu.json"))
 
 
+class MaaritysRajatTarkkaTest(unittest.TestCase):
+    def test_tekstikenttien_pituusrajat(self):
+        for kentta, raja in (("kuvaus", 300), ("tulosmuoto", 60), ("mittari", 300)):
+            self.assertEqual(virheet(ok(**{kentta: "x"})), [], kentta)
+            self.assertEqual(virheet(ok(**{kentta: "x" * raja})), [], kentta)
+            self.assertTrue(virheet(ok(**{kentta: "x" * (raja + 1)})), kentta)
+            self.assertTrue(virheet(ok(**{kentta: "   "})), kentta)
+
+    def test_max_tokens_ja_budjetti_alarajat(self):
+        self.assertEqual(virheet(ok(max_tokens=1)), [])
+        self.assertTrue(virheet(ok(max_tokens=0)))
+        self.assertEqual(virheet(ok(budjetti_usd_paivassa=0.001)), [])
+
+
 if __name__ == "__main__":
     unittest.main()

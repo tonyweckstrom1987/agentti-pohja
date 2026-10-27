@@ -100,5 +100,15 @@ class AjoTesti(unittest.TestCase):
         self.assertEqual(oct(os.stat(self.tila).st_mode & 0o777), "0o700")
 
 
+class OletusliputTesti(AjoTesti):
+    def test_oletuksena_kuiva_ajo_ilman_llm_ja_lahetysta(self):
+        t = ajo.suorita(esimerkki, ENV, self.tila, kello=kello(),
+                        hae_llm=lambda *a: self.fail("LLM:aa ei saa kutsua"),
+                        hae_tg=lambda *a: self.fail("Telegramia ei saa kutsua"),
+                        hae_sydan=lambda *a: self.fail("Sydanta ei saa kutsua"))
+        self.assertEqual((t["koodi"], t["virhe"], t["lahetys"]), (0, None, None))
+        self.assertIn("kuiva-ajo", t["teksti"])
+
+
 if __name__ == "__main__":
     unittest.main()

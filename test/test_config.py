@@ -36,5 +36,16 @@ class ConfigTesti(unittest.TestCase):
             config.lue_env("/ei/ole/tata")
 
 
+class EnvTarkkaTesti(unittest.TestCase):
+    def test_arvossa_voi_olla_yhtasuuruusmerkki(self):
+        import os
+        import tempfile
+        with tempfile.TemporaryDirectory() as t:
+            polku = os.path.join(t, "a.env")
+            with open(polku, "w") as f:
+                f.write("URL=http://x/?a=b&c=d\nK=a=b=c\n")
+            self.assertEqual(config.lue_env(polku), {"URL": "http://x/?a=b&c=d", "K": "a=b=c"})
+
+
 if __name__ == "__main__":
     unittest.main()

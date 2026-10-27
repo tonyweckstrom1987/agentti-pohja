@@ -1,7 +1,11 @@
+import http.server
+import json
 import socket
+import threading
 import tempfile
 import unittest
 import urllib.error
+from unittest import mock
 
 from agentti import kulu, llm, rajat
 from test.apu import ENV, kello, llm_vastaus
@@ -132,6 +136,80 @@ class VerkkovirheTesti(unittest.TestCase):
 
     def test_uudelleenohjauksia_ei_seurata(self):
         self.assertIsNone(llm._EiUudelleenohjauksia().redirect_request(None, None, 302, "m", {}, "http://muu"))
+
+
+class ArvioiTarkkaTesti(unittest.TestCase):
+    def test_hinnaston_mukainen_kulu(self):
+        with mock.patch.dict(rajat.HINNAT_USD_PER_MILJOONA, {"m": (0.5, 1.5)}):
+            self.assertEqual(llm.arvioi_usd({"prompt_tokens": 3_000_000, "completion_tokens": 1_000_000}, "m"), 3.0)
+            self.assertIsNone(llm.arvioi_usd({"prompt_tokens": 1}, "m"))
+            self.assertIsNone(llm.arvioi_usd({"prompt_tokens": "x", "completion_tokens": 1}, "m"))
+            self.assertIsNone(llm.arvioi_usd(None, "m"))
+            self.assertIsNone(llm.arvioi_usd({"prompt_tokens": 1, "completion_tokens": 1}, "tuntematon"))
+
+
+class ValintaTarkkaTesti(LLMTesti):
+    def test_lampotila_on_nolla(self):
+        self.kysy(llm_vastaus("x"))
+        self.assertEqual(self.kutsut[0][2]["temperature"], 0)
+
+    def test_ensimmainen_vaihtoehto_valitaan(self):
+        vastaus = {"choices": [{"message": {"content": "eka"}}, {"message": {"content": "toka"}}], "usage": {}}
+        self.assertEqual(self.kysy(vastaus)[0], "eka")
+
+
+class _Palvelin(http.server.BaseHTTPRequestHandler):
+    vastaus = (200, b'{"choices": []}', {})
+    nahty = {}
+
+    def do_POST(self):
+        n = int(self.headers.get("Content-Length", 0))
+        type(self).nahty = {"auth": self.headers.get("Authorization"), "tyyppi": self.headers.get("Content-Type"),
+                            "runko": json.loads(self.rfile.read(n)), "polku": self.path}
+        koodi, runko, otsakkeet = type(self).vastaus
+        self.send_response(koodi)
+        for k, v in otsakkeet.items():
+            self.send_header(k, v)
+        self.send_header("Content-Length", str(len(runko)))
+        self.end_headers()
+        self.wfile.write(runko)
+
+    def log_message(self, *a):
+        pass
+
+
+class HttpPostTesti(unittest.TestCase):
+    def setUp(self):
+        self.srv = http.server.HTTPServer(("127.0.0.1", 0), _Palvelin)
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+        self.addCleanup(self.srv.server_close)
+        self.addCleanup(self.srv.shutdown)
+        self.url = "http://127.0.0.1:%d/x" % self.srv.server_address[1]
+
+    def laheta(self, vastaus):
+        _Palvelin.vastaus = vastaus
+        return llm._http_post(self.url, "avain", {"a": 1})
+
+    def test_onnistunut_pyynto_palauttaa_jsonin_ja_lahettaa_otsakkeet(self):
+        self.assertEqual(self.laheta((200, b'{"choices": [1]}', {})), {"choices": [1]})
+        n = _Palvelin.nahty
+        self.assertEqual((n["auth"], n["tyyppi"], n["runko"], n["polku"]), ("Bearer avain", "application/json", {"a": 1}, "/x"))
+
+    def test_http_virheet_ja_uudelleenohjausta_ei_seurata(self):
+        for koodi, odotettu in ((500, "llm_http_500"), (401, "llm_http_401"), (302, "llm_http_302")):
+            with self.assertRaises(llm.LLMVirhe, msg=koodi) as e:
+                self.laheta((koodi, b"{}", {"Location": "http://127.0.0.1:1/"}))
+            self.assertEqual(e.exception.koodi, odotettu)
+
+    def test_ei_jsonia_ja_ei_yhteytta(self):
+        with self.assertRaises(llm.LLMVirhe) as e:
+            self.laheta((200, b"ei json", {}))
+        self.assertEqual(e.exception.koodi, "llm_vastaus_rakenne")
+        self.srv.shutdown()
+        self.srv.server_close()
+        with self.assertRaises(llm.LLMVirhe) as e:
+            llm._http_post(self.url, "avain", {})
+        self.assertEqual(e.exception.koodi, "llm_yhteys")
 
 
 if __name__ == "__main__":
