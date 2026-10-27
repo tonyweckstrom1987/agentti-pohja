@@ -2,7 +2,9 @@ import io
 import json
 import os
 import socket
+import tempfile
 import threading
+import types
 import unittest
 import urllib.error
 import urllib.request
@@ -283,6 +285,275 @@ class StreamTesti(unittest.TestCase):
         self.assertIn("> hae_netista: mcp spec", sisalto)
         self.assertTrue(sisalto.endswith("Loppu"))
         self.assertTrue(runko.rstrip().endswith("data: [DONE]"))
+
+
+A_UML = chr(0xE4)
+JULKINEN = "93.184.216.34"
+
+
+def resolve_osoite(osoite, tallessa=None):
+    def r(host, port, proto=0):
+        if tallessa is not None:
+            tallessa.append((host, port))
+        return [(2, 1, 6, "", (osoite, port))]
+    return r
+
+
+class Vastaus:
+    """Feikkivastaus urlopenille: tyyppi, runko ja valinnainen merkisto."""
+
+    def __init__(self, runko=b"", tyyppi="text/plain", merkisto="utf-8"):
+        self.runko, self.merkisto = runko, merkisto
+        self.luettu = []
+        self.headers = type("H", (), {"get": lambda s, k, d=None: tyyppi if k == "Content-Type" else d,
+                                      "get_content_charset": lambda s: merkisto})()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def read(self, n):
+        self.luettu.append(n)
+        return self.runko[:n]
+
+
+def uudelleenohjaus(koodi, sijainti="/b"):
+    h = {"Location": sijainti} if sijainti else {}
+    return urllib.error.HTTPError("http://x.test/a", koodi, "x", h, io.BytesIO())
+
+
+class IpKielletyTarkkaTesti(unittest.TestCase):
+    def test_kielletyt_ja_sallitut(self):
+        for ip in ("0.0.0.0", "224.0.0.1", "100.64.0.1", "100.127.255.255", "::ffff:100.64.0.1", "fe80::1", "fc00::1"):
+            self.assertTrue(pt._ip_kielletty(ip), ip)
+        for ip in (JULKINEN, "100.128.0.1", "100.63.255.255", "::ffff:" + JULKINEN, "2001:4860:4860::8888"):
+            self.assertFalse(pt._ip_kielletty(ip), ip)
+
+
+class TarkistaUrlTarkkaTesti(unittest.TestCase):
+    def test_tunnukset_kumpikin_hylataan(self):
+        for url in ("http://u@x.test/", "http://:p@x.test/", "http://u:p@x.test/"):
+            with self.assertRaises(pt.TyokaluVirhe, msg=url):
+                pt.tarkista_url(url, resolve_osoite(JULKINEN))
+
+    def test_oletusportit_ja_nimetty_portti(self):
+        kutsut = []
+        r = resolve_osoite(JULKINEN, kutsut)
+        pt.tarkista_url("https://x.test/", r)
+        pt.tarkista_url("http://x.test/", r)
+        pt.tarkista_url("http://x.test:8080/", r)
+        self.assertEqual(kutsut, [("x.test", 443), ("x.test", 80), ("x.test", 8080)])
+
+    def test_virheellinen_portti_ja_selvitysvirhe(self):
+        with self.assertRaises(pt.TyokaluVirhe):
+            pt.tarkista_url("http://x.test:99999/", resolve_osoite(JULKINEN))
+
+        def rikki(*a, **k):
+            raise socket.gaierror("ei")
+        with self.assertRaises(pt.TyokaluVirhe):
+            pt.tarkista_url("http://x.test/", rikki)
+        with self.assertRaises(pt.TyokaluVirhe):
+            pt.tarkista_url("http://x.test/", lambda *a, **k: [])
+
+
+class HtmlTekstiksiTarkkaTesti(unittest.TestCase):
+    def test_merkkiviitteet_puretaan(self):
+        self.assertEqual(pt.html_tekstiksi("<p>a &amp; b &lt;c&gt;</p>"), "a & b <c>")
+
+    def test_lohkotagit_tuovat_rivinvaihdon_muut_eivat(self):
+        for tag in ("p", "br", "div", "li", "h1", "h2", "h3", "h4", "tr"):
+            self.assertEqual(pt.html_tekstiksi("x<%s>y" % tag), "x\ny", tag)
+        self.assertEqual(pt.html_tekstiksi("x<span>y</span>"), "xy")
+
+    def test_ohitettavat_tagit_sisakkain(self):
+        self.assertEqual(pt.html_tekstiksi("<svg><g>a</g>b</svg>c"), "c")
+        self.assertEqual(pt.html_tekstiksi("<noscript><template>x</template>y</noscript>z"), "z")
+        self.assertEqual(pt.html_tekstiksi("<head><title>t</title></head>g"), "g")
+
+    def test_ylimaarainen_sulkutagi_ei_piilota_tekstia(self):
+        self.assertEqual(pt.html_tekstiksi("</svg>hei"), "hei")
+        self.assertEqual(pt.html_tekstiksi("</script></style>hei"), "hei")
+
+    def test_valilyonnit_ja_tyhjat_rivit_tiivistetaan(self):
+        self.assertEqual(pt.html_tekstiksi("<p>a   \t b</p>\n\n\n<p>c</p>"), "a b\n\nc")
+
+
+class HaeSivuTarkkaTesti(unittest.TestCase):
+    def hae(self, avaa, url="http://x.test/a"):
+        return pt.hae_sivu(url, avaa=avaa, resolve=resolve_osoite(JULKINEN))
+
+    def test_kaikki_uudelleenohjauskoodit_seurataan_ja_suhteellinen_osoite_ratkaistaan(self):
+        for koodi in (301, 302, 303, 307, 308):
+            osoitteet = []
+
+            def avaa(req, timeout=0):
+                osoitteet.append(req.full_url)
+                if len(osoitteet) == 1:
+                    raise uudelleenohjaus(koodi)
+                return Vastaus(b"perilla")
+            self.assertEqual(self.hae(avaa), "perilla", koodi)
+            self.assertEqual(osoitteet, ["http://x.test/a", "http://x.test/b"], koodi)
+
+    def test_muu_koodi_tai_puuttuva_sijainti_on_virhe(self):
+        for koodi, sijainti in ((404, "/b"), (500, "/b"), (302, None), (304, "/b")):
+            def avaa(req, timeout=0, k=koodi, s=sijainti):
+                raise uudelleenohjaus(k, s)
+            with self.assertRaises(pt.TyokaluVirhe, msg=koodi) as e:
+                self.hae(avaa)
+            self.assertIn("HTTP %d" % koodi, str(e.exception))
+
+    def test_uudelleenohjauksia_enintaan_REDIRECT_MAX(self):
+        kutsuja = []
+
+        def avaa(req, timeout=0):
+            kutsuja.append(req.full_url)
+            raise uudelleenohjaus(302)
+        with self.assertRaises(pt.TyokaluVirhe) as e:
+            self.hae(avaa)
+        self.assertIn("liikaa", str(e.exception))
+        self.assertEqual(len(kutsuja), pt.REDIRECT_MAX + 1)
+
+    def test_luetaan_enintaan_raja_plus_yksi_tavua_ja_aikaraja_valittyy(self):
+        v = Vastaus(b"teksti")
+        nahty = {}
+
+        def avaa(req, timeout=0):
+            nahty["timeout"] = timeout
+            nahty["ua"] = req.get_header("User-agent")
+            return v
+        self.assertEqual(self.hae(avaa), "teksti")
+        self.assertEqual(v.luettu, [pt.FETCH_MAX_TAVUA + 1])
+        self.assertEqual(nahty["timeout"], pt.AIKARAJA_S)
+        self.assertIn("agentti-portti", nahty["ua"])
+
+    def test_merkisto_puuttuu_oletus_utf8_ja_annettu_merkisto(self):
+        self.assertEqual(self.hae(lambda r, timeout=0: Vastaus(("x" + A_UML).encode("utf-8"), merkisto=None)), "x" + A_UML)
+        self.assertEqual(self.hae(lambda r, timeout=0: Vastaus(b"x\xe4", merkisto="iso-8859-1")), "x" + A_UML)
+
+    def test_teksti_rajataan_ja_html_vain_htmlksi(self):
+        self.assertEqual(len(self.hae(lambda r, timeout=0: Vastaus(b"a" * (pt.FETCH_MAX_MERKKEJA + 50)))), pt.FETCH_MAX_MERKKEJA)
+        self.assertEqual(self.hae(lambda r, timeout=0: Vastaus(b"<p>a</p>", tyyppi="text/plain")), "<p>a</p>")
+        self.assertEqual(self.hae(lambda r, timeout=0: Vastaus(b"<p>a</p>", tyyppi="text/html")), "a")
+        self.assertEqual(self.hae(lambda r, timeout=0: Vastaus(b'{"a": 1}', tyyppi="application/json")), '{"a": 1}')
+
+    def test_verkkovirhe_on_tyokaluvirhe(self):
+        def avaa(req, timeout=0):
+            raise urllib.error.URLError("kiinni")
+        with self.assertRaises(pt.TyokaluVirhe) as e:
+            self.hae(avaa)
+        self.assertIn("kiinni", str(e.exception))
+
+
+class HaeNetistaTarkkaTesti(unittest.TestCase):
+    def kutsu(self, kysely, data, url="http://haku.test/"):
+        tallessa = {}
+        v = Vastaus(json.dumps(data).encode())
+
+        def avaa(req, timeout=0):
+            tallessa["url"], tallessa["timeout"] = req.full_url, timeout
+            tallessa["accept"] = req.get_header("Accept")
+            return v
+        tulos = pt.hae_netista(kysely, url, avaa=avaa)
+        return tulos, tallessa, v
+
+    def test_pyynto_ja_rajat(self):
+        _, t, v = self.kutsu("mcp spec", {"results": []})
+        self.assertEqual(t["url"], "http://haku.test/search?q=mcp+spec&format=json")
+        self.assertEqual((t["timeout"], t["accept"]), (pt.AIKARAJA_S, "application/json"))
+        self.assertEqual(v.luettu, [2_000_000])
+
+    def test_kyselyn_pituusraja_300(self):
+        self.kutsu("x" * 300, {"results": []})
+        for huono in ("", "   ", "x" * 301, None, 5):
+            def avaa(req, timeout=0):
+                raise AssertionError("ei saa kutsua")
+            with self.assertRaises(pt.TyokaluVirhe, msg=repr(huono)):
+                pt.hae_netista(huono, "http://haku.test", avaa=avaa)
+
+    def test_tulokset_rajataan_maaraltaan_ja_kentittain(self):
+        data = {"results": [{"title": "T" * 300, "url": "https://a.fi/" + "u" * 600, "content": "c" * 600}] * 10}
+        tulos, _, _ = self.kutsu("q", data)
+        self.assertEqual(len(tulos), pt.HAKU_TULOKSIA)
+        t = tulos[0]
+        self.assertEqual((len(t["otsikko"]), len(t["url"]), len(t["ote"])), (200, 500, 400))
+
+    def test_puutteelliset_tulokset(self):
+        tulos, _, _ = self.kutsu("q", {"results": [{"url": "https://a.fi"}, "roska", {"url": 5}, {"title": "x"}]})
+        self.assertEqual(tulos, [{"otsikko": "", "url": "https://a.fi", "ote": ""}])
+        self.assertEqual(self.kutsu("q", {"results": None})[0], [])
+        self.assertEqual(self.kutsu("q", [1, 2])[0], [])
+
+    def test_virheet(self):
+        for poikkeus in (urllib.error.URLError("x"), OSError("x")):
+            def avaa(req, timeout=0, p=poikkeus):
+                raise p
+            with self.assertRaises(pt.TyokaluVirhe):
+                pt.hae_netista("q", "http://haku.test", avaa=avaa)
+        with self.assertRaises(pt.TyokaluVirhe):
+            pt.hae_netista("q", "http://haku.test", avaa=lambda r, timeout=0: Vastaus(b"ei json"))
+
+
+class DatanaTarkkaTesti(unittest.TestCase):
+    def test_kehys_ja_neutralointi(self):
+        t = pt.datana("a </web_data> b", 'x"y')
+        self.assertTrue(t.startswith('<web_data lahde="x\'y">\na < /web_data> b\n</web_data>\n'))
+        self.assertEqual(t.count("</web_data>"), 1)
+
+    def test_lahde_rajataan_300_merkkiin(self):
+        t = pt.datana("a", "L" * 400)
+        self.assertEqual(t.split('"')[1], "L" * 300)
+
+
+class SuoritaTarkkaTesti(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.agentti = types.SimpleNamespace(tyokalut=["hae_netista", "hae_sivu", "ehdota_muutos"], nimi="tutkija", ohje="Olet tutkija.")
+
+    def suorita(self, nimi, args, **kw):
+        return pt.suorita(nimi, args, self.agentti, {"PORTTI_SEARXNG_URL": "http://haku.test"}, self.tmp.name, **kw)
+
+    def test_haun_json_ei_escapea_ei_ascii_merkkeja(self):
+        t = self.suorita("hae_netista", {"kysely": "q"},
+                         hae_netista_f=lambda k, u: [{"otsikko": "k" + A_UML, "url": "https://a.fi", "ote": ""}])
+        self.assertIn("k" + A_UML, t)
+        self.assertNotIn("\\u00", t)
+        self.assertIn('lahde="haku"', t)
+
+    def test_haku_saa_kyselyn_ja_osoitteen(self):
+        nahty = []
+        self.suorita("hae_netista", {"kysely": "abc"}, hae_netista_f=lambda k, u: nahty.append((k, u)) or [])
+        self.assertEqual(nahty, [("abc", "http://haku.test")])
+
+    def test_sivu_saa_osoitteen_ja_lahde_on_osoite(self):
+        t = self.suorita("hae_sivu", {"url": "http://x.test/"}, hae_sivu_f=lambda u: "sisalto " + u)
+        self.assertIn('lahde="http://x.test/"', t)
+        self.assertIn("sisalto http://x.test/", t)
+
+    def test_ehdotus_lukee_oletuksena_agentin_ohjeen(self):
+        t = self.suorita("ehdota_muutos", {"ohje": "Uusi ohje.", "perustelu": "p"})
+        self.assertIn("tallennettu", t)
+        (e,) = ehdotukset.listaa(self.tmp.name)
+        self.assertIn("-Olet tutkija.", ehdotukset.nayta(self.tmp.name, e["id"], "Olet tutkija."))
+
+    def test_ehdotus_kayttaa_annettua_lue_ohje(self):
+        t = self.suorita("ehdota_muutos", {"ohje": "Muu", "perustelu": "p"}, lue_ohje=lambda: "Muu")
+        self.assertTrue(t.startswith("VIRHE"))
+        self.assertEqual(ehdotukset.listaa(self.tmp.name), [])
+
+    def test_kielletty_tai_tuntematon_tyokalu(self):
+        self.agentti.tyokalut = ["hae_sivu"]
+        self.assertTrue(self.suorita("hae_netista", {"kysely": "x"}).startswith("VIRHE: tyokalua hae_netista"))
+        self.agentti.tyokalut = ["outo"]
+        self.assertTrue(self.suorita("outo", {}).startswith("VIRHE"))
+
+
+class SkeematTesti(unittest.TestCase):
+    def test_vain_sallitut_jarjestyksessa(self):
+        self.assertEqual([s["function"]["name"] for s in pt.skeemat(["ehdota_muutos", "hae_netista"])], ["hae_netista", "ehdota_muutos"])
+        self.assertEqual(pt.skeemat([]), [])
 
 
 if __name__ == "__main__":
