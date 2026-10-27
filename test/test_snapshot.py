@@ -1,6 +1,7 @@
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import time
 import unittest
@@ -202,6 +203,106 @@ class AsiakasTesti(unittest.TestCase):
         self.assertIn("raja", pr.call_args[0][0])
         with mock.patch("builtins.print"):
             self.assertEqual(sk.main(["muuta"]), 2)
+
+
+class AsiakasTarkkaTesti(unittest.TestCase):
+    def tallentava(self, tulos, koodi=0, stderr=b""):
+        def f(komento, capture_output=None, timeout=None):
+            f.kutsut.append((komento, capture_output, timeout))
+            return subprocess.CompletedProcess(komento, koodi, json.dumps(tulos).encode(), stderr)
+        f.kutsut = []
+        return f
+
+    def test_aikarajat_ja_capture_output(self):
+        f = self.tallentava({"ok": True, "tila": "t"})
+        with mock.patch.object(sk.subprocess, "run", f):
+            sk.listaa()
+            sk.tila()
+        (_, cap1, aika1), (_, cap2, aika2) = f.kutsut
+        self.assertIs(cap1, True)
+        self.assertIs(cap2, True)
+        self.assertEqual((aika1, aika2), (330, 180))
+
+    def test_aikakatko_viesti_nayttaa_rajan(self):
+        def f(komento, capture_output=None, timeout=None):
+            raise subprocess.TimeoutExpired(komento, timeout)
+        with mock.patch.object(sk.subprocess, "run", f):
+            with self.assertRaises(sk.SnapshotVirhe) as e:
+                sk.listaa()
+            self.assertIn("(330 s)", str(e.exception))
+            with self.assertRaises(sk.SnapshotVirhe) as e:
+                sk.tila()
+            self.assertIn("(180 s)", str(e.exception))
+
+    def test_ei_json_virhe_rajataan_300_merkkiin_ja_nayttaa_koodin(self):
+        stderr = ("a" * 100 + "b" * 300).encode()
+
+        def f(komento, capture_output=None, timeout=None):
+            return subprocess.CompletedProcess(komento, 255, b"", stderr)
+        with mock.patch.object(sk.subprocess, "run", f):
+            with self.assertRaises(sk.SnapshotVirhe) as e:
+                sk.listaa()
+        self.assertEqual(str(e.exception), "ei JSON-vastausta (koodi 255): " + "b" * 300)
+
+    def test_ei_json_ilman_stderria_nayttaa_stdoutin(self):
+        def f(komento, capture_output=None, timeout=None):
+            return subprocess.CompletedProcess(komento, 1, b"roskaa", b"")
+        with mock.patch.object(sk.subprocess, "run", f):
+            with self.assertRaises(sk.SnapshotVirhe) as e:
+                sk.listaa()
+        self.assertEqual(str(e.exception), "ei JSON-vastausta (koodi 1): roskaa")
+
+    def test_json_ei_olio_hylataan(self):
+        def f(komento, capture_output=None, timeout=None):
+            return subprocess.CompletedProcess(komento, 0, b"[1]", b"")
+        with mock.patch.object(sk.subprocess, "run", f):
+            with self.assertRaisesRegex(sk.SnapshotVirhe, "odottamaton vastaus"):
+                sk.listaa()
+
+    def test_tila_palauttaa_tekstin_ja_virheen_syyn(self):
+        with mock.patch.object(sk.subprocess, "run", self.tallentava({"ok": True, "tila": "kaikki ok"})):
+            self.assertEqual(sk.tila(), "kaikki ok")
+        with mock.patch.object(sk.subprocess, "run", self.tallentava({"ok": True})):
+            self.assertEqual(sk.tila(), "")
+        with mock.patch.object(sk.subprocess, "run", self.tallentava({"ok": False, "virhe": "pct kaatui"})):
+            with self.assertRaisesRegex(sk.SnapshotVirhe, "^pct kaatui$"):
+                sk.tila()
+        with mock.patch.object(sk.subprocess, "run", self.tallentava({"ok": False})):
+            with self.assertRaisesRegex(sk.SnapshotVirhe, r"^\?$"):
+                sk.tila()
+
+    def ajaa(self, argv, tulos):
+        with mock.patch.object(sk.subprocess, "run", self.tallentava(tulos)), mock.patch("builtins.print") as pr:
+            koodi = sk.main(argv)
+        return koodi, [c[0][0] for c in pr.call_args_list]
+
+    def test_main_tila_tulostaa_ja_palauttaa_nollan(self):
+        self.assertEqual(self.ajaa(["tila"], {"ok": True, "tila": "ct115 running"}), (0, ["ct115 running"]))
+
+    def test_main_listaa_tulostaa_snapshotit(self):
+        self.assertEqual(self.ajaa(["listaa"], {"ok": True, "snapshotit": ["a", "b"]}), (0, ["snapshotit: a, b"]))
+        self.assertEqual(self.ajaa(["listaa"], {"ok": True}), (0, ["snapshotit: "]))
+
+    def test_main_kayttovirheet_palauttavat_2(self):
+        for argv in (["ota"], ["x", "y"], ["ota", "ennen-ab", "kolmas"], [], ["tila", "x"]):
+            with self.subTest(argv=argv):
+                koodi, ulos = self.ajaa(argv, {"ok": True})
+                self.assertEqual(koodi, 2)
+                self.assertTrue(ulos[0].startswith("kaytto:"))
+
+    def test_main_virheet_palauttavat_1_ja_tulostavat_syyn(self):
+        koodi, ulos = self.ajaa(["ota", "huono"], {"ok": True})
+        self.assertEqual(koodi, 1)
+        self.assertTrue(ulos[0].startswith("VIRHE: nimen pitaa"))
+        koodi, ulos = self.ajaa(["listaa"], {"ok": False})
+        self.assertEqual((koodi, ulos), (1, ["EI ONNISTUNUT: ?"]))
+
+    def test_main_ilman_argumenttia_lukee_sys_argv(self):
+        with mock.patch.object(sys, "argv", ["x", "tila"]), \
+                mock.patch.object(sk.subprocess, "run", self.tallentava({"ok": True, "tila": "t"})), \
+                mock.patch("builtins.print") as pr:
+            self.assertEqual(sk.main(), 0)
+        self.assertEqual(pr.call_args[0][0], "t")
 
 
 if __name__ == "__main__":

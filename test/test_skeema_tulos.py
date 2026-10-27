@@ -42,6 +42,57 @@ class SkeemaTesti(unittest.TestCase):
             skeema.tarkista(1, {"type": "foo"})
 
 
+class SkeemaTarkkaTesti(unittest.TestCase):
+    def kelpaa(self, arvo, skeema_):
+        skeema.tarkista(arvo, skeema_)
+
+    def hylkaa(self, arvo, skeema_):
+        with self.assertRaises(skeema.SkeemaVirhe):
+            skeema.tarkista(arvo, skeema_)
+
+    def test_number_hyvaksyy_int_ja_float_mutta_ei_boolia(self):
+        self.kelpaa(1, {"type": "number"})
+        self.kelpaa(1.5, {"type": "number"})
+        self.hylkaa(True, {"type": "number"})
+        self.hylkaa(False, {"type": "number"})
+        self.hylkaa("1", {"type": "number"})
+
+    def test_integer_ei_hyvaksy_floatia(self):
+        self.kelpaa(3, {"type": "integer"})
+        self.hylkaa(3.5, {"type": "integer"})
+
+    def test_boolean_hyvaksyy_vain_boolit(self):
+        self.kelpaa(True, {"type": "boolean"})
+        self.kelpaa(False, {"type": "boolean"})
+        self.hylkaa(1, {"type": "boolean"})
+        self.hylkaa("true", {"type": "boolean"})
+
+    def test_tyhja_merkkijono_kelpaa_ilman_minlengthia(self):
+        self.kelpaa("", {"type": "string"})
+        self.hylkaa("", {"type": "string", "minLength": 1})
+        self.kelpaa("a", {"type": "string", "minLength": 1})
+
+    def test_maxlength_raja_on_tarkka(self):
+        self.kelpaa("abcde", {"type": "string", "maxLength": 5})
+        self.hylkaa("abcdef", {"type": "string", "maxLength": 5})
+
+    def test_lista_oletusraja_on_miljoona_alkiota(self):
+        self.kelpaa([0] * 1000000, {"type": "array"})
+        self.hylkaa([0] * 1000001, {"type": "array"})
+
+    def test_maxitems_raja_on_tarkka_ja_virhepolku_nakyy(self):
+        s_ = {"type": "array", "maxItems": 2, "items": {"type": "integer"}}
+        self.kelpaa([1, 2], s_)
+        with self.assertRaisesRegex(skeema.SkeemaVirhe, r"^\$\[1\]: odotettiin integer$"):
+            skeema.tarkista([1, "x"], s_)
+        with self.assertRaisesRegex(skeema.SkeemaVirhe, r"^\$: liian monta alkiota$"):
+            skeema.tarkista([1, 2, 3], s_)
+
+    def test_additional_properties_sallii_ylimaaraiset(self):
+        self.kelpaa({"x": 1}, {"type": "object", "additionalProperties": True})
+        self.hylkaa({"x": 1}, {"type": "object"})
+
+
 SIS = {"type": "object", "required": ["t"], "properties": {"t": {"type": "string"}}}
 
 
@@ -81,6 +132,16 @@ class TulosTesti(unittest.TestCase):
     def test_tuntematon_tila(self):
         with self.assertRaises(tulos.TulosVirhe):
             tulos.lue(json.dumps({"tila": "ehka", "sisalto": {"t": "a"}}), SIS)
+
+
+class TulosTarkkaTesti(unittest.TestCase):
+    def test_syyn_enimmaispituus_on_500(self):
+        def lue(n):
+            return tulos.lue(json.dumps({"tila": "ei_tietoa", "syy": "x" * n}), SIS)
+        self.assertEqual(lue(500).syy, "x" * 500)
+        with self.assertRaises(tulos.TulosVirhe) as e:
+            lue(501)
+        self.assertEqual(e.exception.koodi, "llm_skeema")
 
 
 if __name__ == "__main__":
