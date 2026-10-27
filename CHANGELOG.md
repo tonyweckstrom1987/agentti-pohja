@@ -29,6 +29,7 @@ Muoto perustuu [Keep a Changelogiin](https://keepachangelog.com/fi/1.0.0/).
 - testit: `agentti/tapahtumaloki.py` mutanttiaukot suljettu: 123 mutanttia, ennen 33 selvisi, nyt 0. Uudet testit kattavat ohjausmerkkien poiston, kenttien pituusrajat, ASCII-JSON:n avainjärjestyksen, ehdotuksen tilan ja tuloksen päivityksen, `siivoa`n ja `yhteenveto`n päivärajat ja pyöristyksen, hyväksymisprosentin sekä `main`in argumentit. +17 testiä.
 - testit: `agentti/portti_tyokalut.py` mutanttiaukot suljettu: 104 mutanttia, ennen 32 selvisi, nyt 0. Uudet testit kattavat IP-estolistan (Tailscale, IPv4-mapped), osoitteen tunnukset ja oletusportit, HTML-tekstin purun (merkkiviitteet, lohkotagit, sisäkkäiset ohitettavat tagit), uudelleenohjaukset (kaikki koodit, raja, suhteellinen osoite), merkistön, haun pyynnön ja rajat, `datana`n kehyksen sekä `suorita`n oletushaarat. +20 testiä.
 - testit: `agentti/sandbox_kutsu.py` mutanttiaukot suljettu: 105 mutanttia, ennen 38 selvisi, nyt 0 (1 vastaava perusteluineen). Uudet testit kattavat aikarajat ja `capture_output`in, virheviestien rajaukset, `git_tiedostot`in paluuarvon ja vaarallisten polkujen ohituksen, `tiivista`n rivirajan sekä `main`in komentohaarat ja käyttövirheet. +17 testiä.
+- testit: `agentti/peilaus.py` mutanttiaukot suljettu: 46 mutanttia, ennen 11 selvisi, nyt 0. Uudet testit kattavat päivärajan tarkan rajan, sisäkkäisen kohdehakemiston, siivouksen ja hakemistojen luonnin, tila- ja jonotiedostojen kopioinnin, päivitysajan sekä `main`in argumentit, oletuspäivät ja virheet. +9 testiä.
 
 ## [Julkaisematon]
 
