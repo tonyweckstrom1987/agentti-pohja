@@ -110,7 +110,7 @@ class KirjoitaAtomisestiTesti(unittest.TestCase):
 
     def test_tiedosto_on_ehja_myos_pitkalla_sisallolla(self):
         polku = os.path.join(self.tmp.name, "iso.txt")
-        teksti = "rivi åäö\n" * 5000
+        teksti = "rivi \u00e5\u00e4\u00f6\n" * 5000
         lukko.kirjoita_atomisesti(polku, teksti)
         with open(polku, encoding="utf-8") as f:
             self.assertEqual(f.read(), teksti)
