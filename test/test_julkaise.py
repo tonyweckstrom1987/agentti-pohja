@@ -739,6 +739,38 @@ class EsitarkistusTesti(Pohja):
     def test_tyhja_paketti(self):
         self._vaarallinen("puuttuu vaadittu tiedosto", [("x/", None, "hak")])
 
+    def test_paketissa_liikaa_tiedostoja(self):
+        jasenet = [("x/run.py", "VERSIO = 9\n", "tied")] + [("x/t%d.txt" % i, "", "tied") for i in range(3000)]
+        self._vaarallinen("liikaa tiedostoja (3001)", jasenet)
+
+    def test_tiedostomaaran_raja_3000_riittaa(self):
+        self.ennen()
+        jasenet = [("x/", None, "hak"), ("x/run.py", "VERSIO = 9\n", "tied")] + [("x/t%d.txt" % i, "", "tied") for i in range(2998)]
+        p, c, s = self._tee_paketti("raja.tgz", jasenet)
+        rc, ulos = self.l.aja(p, c, s)
+        self.assertNotIn("liikaa tiedostoja", ulos)
+
+    def test_paketti_yli_50_mt_hylataan(self):
+        self.ennen()
+        self._ennen = self.l.tilannekuva()
+        p, c, s = self._tee_paketti("iso.tgz", [("x/run.py", "VERSIO = 9\n", "tied")])
+        with open(p, "ab") as f:
+            f.write(b"\0" * (50 * 1024 * 1024 + 1))  # gzipin perassa oleva roska: koko ylittaa rajan ennen sisallon tarkistusta
+        s = hashlib.sha256(p.read_bytes()).hexdigest()
+        rc, ulos = self.l.aja(p, c, s)
+        self.assertEpa(rc, ulos, "paketti on liian suuri")
+        self.assertEqual(self.l.tilannekuva(), self._ennen)
+
+    def test_levytila_ei_riita(self):
+        self.ennen()
+        self.l.kirjoita_konf(LEVY_MIN_MT="999999999")
+        self._ennen = self.l.tilannekuva()
+        p, c, s = self.l.paketoi()
+        rc, ulos = self.l.aja(p, c, s)
+        self.assertEpa(rc, ulos, "levya vapaana vain")
+        self.assertIn("vaaditaan 999999999", ulos)
+        self.assertEqual(self.l.tilannekuva(), self._ennen)
+
 
 class KuivaTesti(Pohja):
     def laitteen_tila(self):

@@ -37,6 +37,7 @@ Muoto perustuu [Keep a Changelogiin](https://keepachangelog.com/fi/1.0.0/).
 - testit: `agentti/pr_kutsu.py` viimeiset 3 selviytyjaa: oletusarvoinen synkronointiviesti testattu, kaksi ekvivalenttia (`tila.get("n", 0)`) sallittu.
 - yojono: mallikutsun ohitus kulun pienentamiseksi. `kehitys.sh` ohittaa tuloksettoman ajon, jos repon HEAD ei ole muuttunut (max 7 vrk); `tarkkailu.sh` ohittaa roolin, jos GitHub-tilannekuva on identtinen (max 2 vrk). Vain onnistuneet ajot kirjataan; `YOJONO_PAKOTA=1` ohittaa.
 - testit: sydan, telegram, skeema, tulos ja snapshot_kutsu mutanttiaukot suljettu (37 selviytyjaa -> 0, paitsi 2 ekvivalenttia skeeman 10**9-oletusrajassa, jotka sallitaan erikseen). Uudet testit kattavat HTTP-tilakoodien rajat, aikakatkaisut, tyyppitarkistukset, CLI-koodit ja virheviestit.
+- testit: `isanta/julkaise.sh` esitarkistusten rajat: paketin tiedostomaara (3000), paketin koko (50 Mt) ja kontin levytila (`LEVY_MIN_MT`) testattu.
 
 ## [Julkaisematon]
 
