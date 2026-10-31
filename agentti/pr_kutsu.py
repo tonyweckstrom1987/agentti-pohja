@@ -10,6 +10,7 @@ Turva ("koodi on laki"):
 - ei force-pushia (refspec ilman `+`), ei paikallisia koukkuja (core.hooksPath=/dev/null)
 - ei suojattuja polkuja (.github/, tools/, systemd/, isanta/, rajat.py, config.py, salaisuuden nakoiset tiedostot)
 - enintaan RAJA_PAIVASSA PR-yritysta paivassa; vain stdlib
+- enintaan RAJA_AVOIMIA_PR botin avointa PR:aa samassa repossa (julkinen API ilman tunnusta); lukuvirhe estaa PR:n (suljettu virhetila)
 - forkin synkkaus (synkkaa_fork): vain kyseisen repon pohjahaara (main; ai-pr-reviewer-action: master), vain fast-forward, ei force-pushia
   (refspec ilman `+`), ei muita haaroja; jos fork-main eroaa ylavirrasta, ei tehda mitaan (fork_ei_ff); sama tunnus kuin PR:ssa, ei uusia oikeuksia
 
@@ -41,6 +42,7 @@ TUNNUS_RE = re.compile(r"^(github_pat_|ghp_|ghs_)[A-Za-z0-9_]{20,}$")      # ghs
 OLETUS_TUNNUS = "/etc/yojono/github-bot.token"
 OLETUS_TILA = "/var/lib/yojono/pr-tila.json"
 RAJA_PAIVASSA = 100
+RAJA_AVOIMIA_PR = 2
 MAX_TIEDOSTOJA = 40
 OTSIKKO_MAX = 120
 KUVAUS_MAX = 4000
@@ -389,6 +391,36 @@ def avaa_pr(repo, haara, botti, otsikko, kuvaus, tunnus, avaa=urllib.request.url
     return osoite
 
 
+def avoimet_botin_prt(repo, botti, avaa=urllib.request.urlopen):
+    """Botin avointen PR:ien numerot repossa. Julkinen API ilman tunnusta (ei Authorization-otsikkoa); max 100 avointa luetaan.
+    Virhe nostaa PrVirhe: epaselvassa tilanteessa uutta PR:aa ei avata."""
+    pyynto = urllib.request.Request(
+        f"https://api.github.com/repos/{OMISTAJA}/{repo}/pulls?state=open&per_page=100",
+        headers={"Accept": "application/vnd.github+json", "User-Agent": "yojono-pr-kutsu"})
+    try:
+        with avaa(pyynto, timeout=30) as vastaus:
+            data = json.loads(vastaus.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        raise PrVirhe("avointen PR:ien luku epaonnistui (HTTP %s)" % e.code)
+    except (urllib.error.URLError, ValueError, OSError) as e:
+        raise PrVirhe("avointen PR:ien luku epaonnistui: " + type(e).__name__)
+    if not isinstance(data, list):
+        raise PrVirhe("avointen PR:ien luku epaonnistui: odottamaton vastaus")
+    return [p.get("number") for p in data
+            if isinstance(p, dict) and isinstance(p.get("user"), dict)
+            and str(p["user"].get("login", "")).lower() == botti.lower()]
+
+
+def tarkista_avoimet(repo, botti, avaa=urllib.request.urlopen):
+    """Estaa uuden PR:n, jos botilla on repossa jo RAJA_AVOIMIA_PR avointa PR:aa."""
+    avoimet = avoimet_botin_prt(repo, botti, avaa=avaa)
+    if len(avoimet) >= RAJA_AVOIMIA_PR:
+        raise PrVirhe(
+            "avoimia botin PR:ita repossa %s jo %d (raja %d): uutta ei avattu. Lisaa muutos johonkin olemassa olevaan "
+            "yo/-haaraan (PR: %s) tai odota, etta Tony yhdistaa tai sulkee niita"
+            % (repo, len(avoimet), RAJA_AVOIMIA_PR, ", ".join("#%s" % n for n in avoimet)))
+
+
 def luo_pr(repo, hakemisto, haara, otsikko, kuvaus, env=None, suorita=subprocess.run, avaa=urllib.request.urlopen):
     """Koko ketju: tarkistukset, paivaraja, push, PR. Palauttaa PR:n osoitteen."""
     env = os.environ if env is None else env
@@ -397,6 +429,7 @@ def luo_pr(repo, hakemisto, haara, otsikko, kuvaus, env=None, suorita=subprocess
     with tempfile.TemporaryDirectory() as tmp:
         forkpolku = tunnus_tiedosto(env, repo, "fork", tmp)
         forktunnus = lue_tunnus(forkpolku)                 # puuttuva/virheellinen tunnus ei kuluta paivarajaa
+        tarkista_avoimet(repo, botti, avaa=avaa)
         if not varaa_paikka(env.get("YOJONO_PR_TILA", OLETUS_TILA)):
             raise PrVirhe("paivaraja %d PR-yritysta taynna" % RAJA_PAIVASSA)
         sync = paivita_fork(repo, botti, forktunnus, avaa=avaa)

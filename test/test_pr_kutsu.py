@@ -276,7 +276,7 @@ class KokoketjuTest(unittest.TestCase):
             return subprocess.run(cmd, **kw)
         with tee_repo({"docs/a.md": "x"}) as hak:
             osoite = pk.luo_pr("agentti-pohja", hak, "yo/koe", "o", "k", env=self.env, suorita=suorita,
-                               avaa=lambda p, timeout: Vastaus({"html_url": "https://github.com/a/b/pull/1"}))
+                               avaa=lambda p, timeout: Vastaus([] if p.get_method() == "GET" else {"html_url": "https://github.com/a/b/pull/1"}))
         self.assertEqual(osoite, "https://github.com/a/b/pull/1")
         self.assertTrue(any("push" in c for c in komennot))
 
@@ -290,6 +290,8 @@ class KokoketjuTest(unittest.TestCase):
             return subprocess.run(cmd, **kw)
 
         def avaa(pyynto, timeout):
+            if pyynto.get_method() == "GET":
+                return Vastaus([])
             if pyynto.full_url.endswith("/merge-upstream"):
                 tapahtumat.append("sync")
                 self.assertEqual(json.loads(pyynto.data.decode()), {"branch": "main"})
@@ -320,6 +322,66 @@ class KokoketjuTest(unittest.TestCase):
             with self.assertRaises(pk.PrVirhe):
                 pk.luo_pr("agentti-pohja", hak, "yo/koe", "o", "k", env=self.env)
         self.assertFalse(os.path.exists(self.env["YOJONO_PR_TILA"]))
+
+
+def pr_lista(*kayttajat):
+    return [{"number": i + 1, "user": {"login": k}} for i, k in enumerate(kayttajat)]
+
+
+class AvoimetPrtTest(unittest.TestCase):
+    def test_laskee_vain_botin_prt_ilman_tunnusta(self):
+        pyynnot = []
+
+        def avaa(p, timeout):
+            pyynnot.append(p)
+            return Vastaus(pr_lista("Agenttifirma-Bot", "tonyweckstrom1987", "agenttifirma-bot"))
+        self.assertEqual(pk.avoimet_botin_prt("agentti-pohja", "agenttifirma-bot", avaa=avaa), [1, 3])
+        self.assertIn("/repos/tonyweckstrom1987/agentti-pohja/pulls?state=open", pyynnot[0].full_url)
+        self.assertIsNone(pyynnot[0].get_header("Authorization"))
+
+    def test_alle_rajan_sallitaan_rajalla_estetaan(self):
+        pk.tarkista_avoimet("r", "b", avaa=lambda p, timeout: Vastaus(pr_lista("b", "muu", "muu")))
+        with self.assertRaises(pk.PrVirhe) as ctx:
+            pk.tarkista_avoimet("r", "b", avaa=lambda p, timeout: Vastaus(pr_lista("b", "b")))
+        self.assertIn("olemassa olevaan", str(ctx.exception))
+        self.assertIn("#1, #2", str(ctx.exception))
+
+    def test_raja_on_oletuksena_2(self):
+        self.assertEqual(pk.RAJA_AVOIMIA_PR, 2)
+
+    def test_lukuvirheet_estavat_pr_n(self):
+        def http(p, timeout):
+            raise urllib.error.HTTPError(p.full_url, 403, "x", {}, None)
+
+        def verkko(p, timeout):
+            raise urllib.error.URLError("ei")
+        for avaa in (http, verkko, lambda p, timeout: Vastaus({"message": "x"})):
+            with self.assertRaises(pk.PrVirhe):
+                pk.avoimet_botin_prt("r", "b", avaa=avaa)
+
+    def test_roskaa_listassa_ei_kaada(self):
+        data = [1, None, {"user": None}, {"number": 5, "user": {"login": "b"}}]
+        self.assertEqual(pk.avoimet_botin_prt("r", "b", avaa=lambda p, timeout: Vastaus(data)), [5])
+
+
+class KokoketjuAvoimetTest(unittest.TestCase):
+    def test_raja_taynna_ei_pushaa_eika_kuluta_paivarajaa(self):
+        with tempfile.TemporaryDirectory() as d:
+            tunnus = os.path.join(d, "tunnus")
+            with open(tunnus, "w") as f:
+                f.write(TUNNUS)
+            env = {"YOJONO_BOT_TUNNUS": tunnus, "YOJONO_PR_TILA": os.path.join(d, "tila.json"), "YOJONO_BOT_KAYTTAJA": "botti-x"}
+            komennot = []
+
+            def suorita(cmd, **kw):
+                komennot.append(cmd)
+                return subprocess.run(cmd, **kw)
+            with tee_repo({"docs/a.md": "x"}) as hak:
+                with self.assertRaises(pk.PrVirhe):
+                    pk.luo_pr("agentti-pohja", hak, "yo/koe", "o", "k", env=env, suorita=suorita,
+                              avaa=lambda p, timeout: Vastaus(pr_lista("botti-x", "botti-x")))
+            self.assertFalse(any("push" in c for c in komennot))
+            self.assertFalse(os.path.exists(env["YOJONO_PR_TILA"]))
 
 
 class MainTest(unittest.TestCase):
