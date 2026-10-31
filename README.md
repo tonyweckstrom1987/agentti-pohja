@@ -81,6 +81,21 @@ Pohjan päälle on rakennettu osat, joilla agentit tekevät tarkistettavaa työt
 
 Periaate on sama kuin pohjassa: koodi on laki. Raja ei ole kehotteessa vaan tarkistuksessa, ja jokainen automaattinen muutos on katselmoitavissa PR:nä.
 
+## Koulun muistutukset
+
+`agentti/koulu_muistutus.py` lukee `koulu.md`-tiedoston ja tulostaa tekstin: myöhässä olevat palautukset, tänään, huomenna ja seuraavat 7 päivää. Ei verkkoa, ei mallikutsuja eikä lähetystä.
+
+Muokkaa `koulu.md`:ta (mallina `docs/koulu.esimerkki.md`, keksittyä dataa). Yksi rivi per tapahtuma:
+
+```
+PVM | kurssi | tapahtuma | tyyppi | tehty
+2026-11-06 | Ohjelmointi | Välikoe | tentti
+```
+
+PVM on `VVVV-KK-PP`, tyyppi on `tentti`, `palautus` tai `kertaus`. Viides sarake on valinnainen: `x` merkitsee palautuksen tehdyksi, jolloin se ei näy myöhässä-listassa. Rivit, jotka alkavat `#`, ja tyhjät rivit ohitetaan. Myöhässä-listaan tulevat vain tekemättömät palautukset.
+
+Ajo: `python3 -m agentti.koulu_muistutus --tiedosto koulu.md --pvm 2026-11-02` (ilman `--pvm`:ää käytetään tätä päivää). Virheellinen rivi antaa virheen rivinumerolla ja poistumiskoodin 1. Testit: `python3 -m unittest test.test_koulu_muistutus`.
+
 ## Keskustelu agenttien kanssa: portti Open WebUI:hin
 
 `python -m agentti.portti --config portti.json --tila <hakemisto> --env <env> --host <ip> --port 8810`
