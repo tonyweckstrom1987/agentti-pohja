@@ -158,7 +158,7 @@ class MuotoiluJaMainTesti(unittest.TestCase):
     def ajaa(self, argv, env=None, laheta=True):
         ulos, virhe = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(ulos), contextlib.redirect_stderr(virhe), mock.patch.object(ap.telegram, "laheta", return_value=laheta) as t:
-            rc = ap.main(argv, hae=feikki({}, {}), env=env or {})
+            rc = ap.main(argv, hae=feikki({}, {}), env=env or {}, suorita=lambda *a: "")
         return rc, ulos.getvalue(), virhe.getvalue(), t
 
     def test_oletushaku_lukee_json_ja_pyytaa_user_agentin(self):
@@ -242,6 +242,52 @@ class MuotoiluJaMainTesti(unittest.TestCase):
         rc, ulos, virhe, _ = self.ajaa(["--muu"])
         self.assertEqual((rc, ulos), (2, ""))
         self.assertIn("kaytto:", virhe)
+
+
+def feikki_systemctl(lista, aika="Thu 2026-10-29 06:00:01 UTC"):
+    def suorita(*args):
+        if args[0] == "list-units":
+            return lista
+        return "StateChangeTimestamp=%s\nActiveEnterTimestamp=\n" % aika
+    return suorita
+
+
+class FailedTesti(unittest.TestCase):
+    def test_tyhja_ei_osiota(self):
+        self.assertEqual(ap.failed_yksikot(feikki_systemctl("")), [])
+        self.assertEqual(ap.muotoile_failed([]), "")
+
+    def test_kaksi_yksikkoa(self):
+        lista = "* a.service loaded failed failed A\n  b.timer loaded failed failed B\n"
+        tulos = ap.failed_yksikot(feikki_systemctl(lista))
+        self.assertEqual([n for n, _ in tulos], ["a.service", "b.timer"])
+        teksti = ap.muotoile_failed(tulos)
+        self.assertIn("Epaonnistuneet palvelut: 2", teksti)
+        self.assertIn("- a.service (failed alkaen Thu 2026-10-29 06:00:01 UTC)", teksti)
+
+    def test_kohinamountti_suodattuu(self):
+        lista = "* tmp.mount loaded failed failed T\n* run-lock.mount loaded failed failed L\n* x.service loaded failed failed X\n"
+        self.assertEqual([n for n, _ in ap.failed_yksikot(feikki_systemctl(lista))], ["x.service"])
+        self.assertEqual(ap.failed_yksikot(feikki_systemctl("* dev-mqueue.mount loaded failed failed M\n")), [])
+
+    def test_komento_kaatuu(self):
+        def kaatuu(*a):
+            raise OSError("salainen viesti")
+        tulos = ap.failed_yksikot(kaatuu)
+        self.assertEqual(ap.muotoile_failed(tulos), "Epaonnistuneet palvelut:\n- failed-tarkistus ei onnistunut: OSError")
+        self.assertNotIn("salainen", ap.muotoile_failed(tulos))
+
+    def test_main_nayttaa_osion_ja_kaatuminen_ei_kaada(self):
+        ulos = io.StringIO()
+        with contextlib.redirect_stdout(ulos):
+            rc = ap.main([], hae=feikki({}, {}), env={}, suorita=feikki_systemctl("* a.service loaded failed failed A\n"))
+        self.assertEqual(rc, 0)
+        self.assertIn("- a.service (failed alkaen", ulos.getvalue())
+        ulos = io.StringIO()
+        with contextlib.redirect_stdout(ulos):
+            rc = ap.main([], hae=feikki({}, {}), env={}, suorita=mock.Mock(side_effect=OSError))
+        self.assertEqual(rc, 0)
+        self.assertIn("failed-tarkistus ei onnistunut: OSError", ulos.getvalue())
 
 
 if __name__ == "__main__":

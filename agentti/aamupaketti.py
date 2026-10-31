@@ -6,11 +6,13 @@ ja muut (luonnos, CI kesken tai punainen). Kaytto: python3 -m agentti.aamupakett
 import json
 import os
 import posixpath
+import subprocess
 import sys
 import urllib.request
 
 from . import pr_laatu, telegram
 from .pr_kutsu import REPOT, suojattu as _kriittinen_polku
+from .yksikot import suodata_kohina
 
 OMISTAJA = "tonyweckstrom1987"
 MAX_PR_REPOA_KOHDEN = 15
@@ -159,13 +161,53 @@ def muotoile(ryhmat):
     return "\n".join(osat)
 
 
-def main(argv=None, hae=None, env=None):
+def _systemctl(*args):
+    """Vain luku -systemctl-kutsu; palauttaa stdoutin, virheesta nostaa poikkeuksen."""
+    return subprocess.run(["systemctl", *args], capture_output=True, text=True, timeout=15, check=True).stdout
+
+
+def failed_yksikot(suorita=None):
+    """Failed-yksikot: lista (nimi, aikaleima) tai tyypin nimi (str) jos tarkistus ei onnistunut. Kohinamountit suodatetaan.
+    Aikaleima = StateChangeTimestamp (milloin yksikko meni failed-tilaan), muuten ActiveEnterTimestamp."""
+    suorita = suorita or _systemctl
+    try:
+        ulos = suodata_kohina(suorita("list-units", "--failed", "--no-legend", "--no-pager", "--plain"))
+        yksikot = []
+        for rivi in ulos.splitlines():
+            kentat = [k for k in rivi.split() if k not in ("*", "\u25cf")]
+            if kentat:
+                yksikot.append(kentat[0])
+        tulos = []
+        for nimi in yksikot:
+            arvot = {}
+            for r in suorita("show", "-p", "StateChangeTimestamp", "-p", "ActiveEnterTimestamp", nimi).splitlines():
+                avain, _, arvo = r.partition("=")
+                arvot[avain.strip()] = arvo.strip()
+            tulos.append((nimi, arvot.get("StateChangeTimestamp") or arvot.get("ActiveEnterTimestamp") or "?"))
+        return tulos
+    except Exception as e:
+        return type(e).__name__
+
+
+def muotoile_failed(tulos):
+    """Osio tekstina; tyhja lista = tyhja merkkijono (ei ilmoitusmelua)."""
+    if isinstance(tulos, str):
+        return "Epaonnistuneet palvelut:\n- failed-tarkistus ei onnistunut: %s" % tulos
+    if not tulos:
+        return ""
+    return "\n".join(["Epaonnistuneet palvelut: %d" % len(tulos)] + ["- %s (failed alkaen %s)" % t for t in tulos])
+
+
+def main(argv=None, hae=None, env=None, suorita=None):
     a = sys.argv[1:] if argv is None else argv
     env = os.environ if env is None else env
     if any(x not in ("--laheta",) for x in a):
         print("kaytto: python3 -m agentti.aamupaketti [--laheta]", file=sys.stderr)
         return 2
     teksti = muotoile(keraa(hae))
+    osio = muotoile_failed(failed_yksikot(suorita))
+    if osio:
+        teksti += "\n\n" + osio
     try:   # laatumittari on lisa: virhe ei esta aamupakettia
         laatu = pr_laatu.keraa(hae)
         teksti += "\n\n" + pr_laatu.muotoile(laatu)

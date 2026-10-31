@@ -16,6 +16,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from .pr_kutsu import REPOT
+from .yksikot import suodata_kohina
 
 OMISTAJA = "tonyweckstrom1987"
 RAJA_RIVEJA = 400
@@ -181,7 +182,7 @@ def palvelin_osio():
     except OSError:
         rivit.append("(muisti/kuorma ei saatavilla)")
     rivit.append("\n## Epaonnistuneet palvelut (systemctl --failed)")
-    rivit.append(_komento("systemctl", "list-units", "--failed", "--no-legend", "--no-pager") or "(ei yhtaan)")
+    rivit.append(suodata_kohina(_komento("systemctl", "list-units", "--failed", "--no-legend", "--no-pager")) or "(ei yhtaan)")
     rivit.append("\n## Ajastimet")
     rivit.append(_komento("systemctl", "list-timers", "--no-pager", "--no-legend")[:1500])
     rivit.append("\n## Versiot")
