@@ -1,0 +1,37 @@
+---
+# Hiekkalaatikko: tyhja = oikea tiedostojarjestelma. Testeissa esim. /tmp/xyz, jolloin kaikki polut siirtyvat sen alle.
+claudejono_fs_root: ""
+# Hiekkalaatikossa (ei root-oikeuksia) kayttajien luonti, omistajat ja systemd pois
+claudejono_manage_users: true
+claudejono_manage_systemd: true
+
+# Tilit (arvot luettu CT115:sta 31.10.2026)
+claudejono_user: claudejono
+claudejono_group: claudejono
+claudejono_home: /var/lib/claudejono
+claudejono_prbotti_user: prbotti
+claudejono_prbotti_group: prbotti
+claudejono_extra_groups: [systemd-journal]   # journalctl-lukuoikeus diagnostiikkaan
+claudejono_root_owner: root
+claudejono_root_group: root
+
+# Polut
+claudejono_sudoers_file: /etc/sudoers.d/claudejono
+claudejono_wrapper_path: /usr/local/sbin/claudejono-pr
+claudejono_systemd_dir: /etc/systemd/system
+claudejono_timer_wants_dir: /etc/systemd/system/timers.target.wants
+
+# Hakemistot: path, owner-avain (user|root), group-avain (user|prbotti|root), mode
+# Sisalto (deploy key, botin tunnus, docs-klooni) EI kuulu rooliin: ne kirjoittaa Tony itse.
+claudejono_dirs:
+  - { path: /var/lib/claudejono, owner: "{{ claudejono_user }}", group: "{{ claudejono_group }}", mode: "0700" }
+  - { path: /var/lib/claudejono-pr, owner: "{{ claudejono_prbotti_user }}", group: "{{ claudejono_prbotti_group }}", mode: "0700" }
+  - { path: /etc/claudejono-pr, owner: "{{ claudejono_prbotti_user }}", group: "{{ claudejono_prbotti_group }}", mode: "0700" }
+  - { path: /etc/claude-jono, owner: "{{ claudejono_root_owner }}", group: "{{ claudejono_root_group }}", mode: "0700" }
+  - { path: /var/lib/claude-jono, owner: "{{ claudejono_root_owner }}", group: "{{ claudejono_root_group }}", mode: "0755" }
+  - { path: /opt/agentscope/tyo, owner: "{{ claudejono_user }}", group: "{{ claudejono_group }}", mode: "0755" }
+
+# Salaisuustiedostot, joita rooli vain TARKISTAA (stat, ei sisaltoa): puuttuminen tulostetaan varoituksena
+claudejono_secret_files:
+  - /etc/claude-jono/deploy_key
+  - /etc/claudejono-pr/token

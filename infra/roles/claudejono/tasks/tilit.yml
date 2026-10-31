@@ -1,0 +1,32 @@
+---
+# Jarjestelmatilit (uid < 1000). Numeroita ei kiinnita: uudelleenrakennuksessa ne voivat olla eri, mikaan ei riipu niista.
+- name: Ryhma claudejono
+  ansible.builtin.group:
+    name: "{{ claudejono_group }}"
+    system: true
+
+- name: Ryhma prbotti
+  ansible.builtin.group:
+    name: "{{ claudejono_prbotti_group }}"
+    system: true
+
+- name: Kayttaja claudejono (agentin ajotili, bash, koti 0700)
+  ansible.builtin.user:
+    name: "{{ claudejono_user }}"
+    group: "{{ claudejono_group }}"
+    groups: "{{ claudejono_extra_groups }}"
+    append: true
+    system: true
+    home: "{{ claudejono_home }}"
+    shell: /bin/bash
+    create_home: true
+
+# prbotti on ainoa tili, joka lukee botin GitHub-tunnuksen. Ei kirjautumista, ei kotia.
+- name: Kayttaja prbotti (ei kirjautumista)
+  ansible.builtin.user:
+    name: "{{ claudejono_prbotti_user }}"
+    group: "{{ claudejono_prbotti_group }}"
+    system: true
+    home: /nonexistent
+    shell: /usr/sbin/nologin
+    create_home: false

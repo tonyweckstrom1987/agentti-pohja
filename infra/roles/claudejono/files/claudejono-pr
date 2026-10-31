@@ -1,0 +1,29 @@
+#!/bin/sh
+# claudejono-pr: claude-jonon agentin ainoa tie avata PR (Tonyn paatos 30.10.2026).
+# Asennus: /usr/local/sbin/claudejono-pr (root:root 0755); sudoers sallii claudejono -> prbotti vain taman.
+# Ajetaan prbotti-kayttajana, joka yksin lukee botin tunnuksen. Agentin repoa ei kasitella suoraan:
+# haarat haetaan ensin prbotin omaan tilapaiseen repoon (git fetch), jotta agentin .git/config (esim. core.fsmonitor)
+# ei voi ajaa komentoja prbottina. Tarkistukset (repo-lista, yo/-haara, suojatut polut, paivaraja) tekee pr_kutsu.
+# Kaytto: sudo -u prbotti /usr/local/sbin/claudejono-pr REPO HAKEMISTO yo/HAARA "OTSIKKO" KUVAUSTIEDOSTO
+set -eu
+umask 077
+[ "$#" -eq 5 ] || { echo "kaytto: claudejono-pr REPO HAKEMISTO yo/HAARA OTSIKKO KUVAUSTIEDOSTO" >&2; exit 2; }
+TYO=/opt/agentscope/tyo
+HAK=$(realpath -e -- "$2")
+KUV=$(realpath -e -- "$5")
+case "$HAK/" in "$TYO"/*/) ;; *) echo "claudejono-pr: hakemiston pitaa olla $TYO:n alla" >&2; exit 2 ;; esac
+case "$KUV" in "$TYO"/*) ;; *) echo "claudejono-pr: kuvaustiedoston pitaa olla $TYO:n alla" >&2; exit 2 ;; esac
+T=$(mktemp -d)
+trap 'rm -rf "$T"' EXIT INT TERM
+git init -q "$T/r"
+# safe.directory tilapaiseen globaaliin tiedostoon: paikallinen siirto ajaa upload-packin, joka ei peri GIT_CONFIG_COUNT-
+# muuttujia (git tyhjentaa ne), ja tarkistus koskee polkua .git (vika 31.10.2026: "dubious ownership ... /.git").
+# Testattu: agentin core.fsmonitor ja core.hooksPath eivat suoritu fetchissa.
+printf '[safe]\n\tdirectory = %s\n\tdirectory = %s/.git\n' "$HAK" "$HAK" > "$T/gitconfig"
+GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL="$T/gitconfig" \
+  git -C "$T/r" fetch -q --no-tags --update-head-ok -- "$HAK" '+refs/heads/*:refs/heads/*'
+head -c 60000 -- "$KUV" > "$T/kuvaus.md"
+cd /opt/agentti-pohja
+YOJONO_BOT_TUNNUS=/etc/claudejono-pr/token YOJONO_PR_TILA=/var/lib/claudejono-pr/pr-tila.json HOME="$T" \
+  /usr/bin/python3 -I -c 'import sys; sys.path.insert(0, "/opt/agentti-pohja"); from agentti.pr_kutsu import main; sys.exit(main(sys.argv[1:]))' \
+  pr "$1" "$T/r" "$3" "$4" "$T/kuvaus.md"

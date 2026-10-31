@@ -1,0 +1,22 @@
+# Mallitiedosto: ei asenna mitaan. Asennus README.md:n mukaan (Tonyn paatos, doc 71).
+[Unit]
+Description=Claude-jono: yksi tehtava docs-repon claude-jono/-kansiosta
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Ajuri on root (git, deploy key, Telegram). Agentti ajetaan kayttajana claudejono (runuser), ks. asenna-kayttaja.sh (Tonyn paatos 30.10.2026).
+WorkingDirectory=/opt/agentti-pohja
+Environment=CLAUDEJONO_REPO=/var/lib/claude-jono/docs
+Environment=CLAUDEJONO_TYOHAK=/opt/agentscope
+Environment=CLAUDEJONO_KAYTTAJA=claudejono
+Environment=CLAUDEJONO_CLAUDE=/var/lib/claudejono/.local/bin/claude
+# Testattu CT115:ssa 30.10.2026: auto-tila toimii headless-ajossa ilman lupakyselya
+Environment=CLAUDEJONO_LUPATILA=auto
+Environment="GIT_SSH_COMMAND=ssh -i /etc/claude-jono/deploy_key -o IdentitiesOnly=yes"
+EnvironmentFile=-/etc/yojono/telegram.env
+ExecStart=/usr/bin/python3 -B -m claudejono ajo
+TimeoutStartSec=3600
+# Ei NoNewPrivileges: agentin ainoa sudo-oikeus (claudejono-pr prbottina) tarvitsee sen.
+PrivateTmp=true

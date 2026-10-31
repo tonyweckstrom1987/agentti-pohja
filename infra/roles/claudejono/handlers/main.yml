@@ -1,0 +1,5 @@
+---
+- name: Lataa systemd uudelleen
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+  when: claudejono_manage_systemd | bool

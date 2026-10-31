@@ -1,0 +1,21 @@
+---
+- name: Yksikko ja ajastin
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "{{ claudejono_fs_root }}{{ claudejono_systemd_dir }}/{{ item }}"
+    owner: "{{ claudejono_root_owner }}"
+    group: "{{ claudejono_root_group }}"
+    mode: "0644"
+  loop:
+    - claude-jono.service
+    - claude-jono.timer
+  notify: Lataa systemd uudelleen
+
+# Palvelua itse ei kayteta kayntiin: se on oneshot, jonka ajastin kaynnistaa.
+- name: Ajastin paalle ja kayntiin
+  ansible.builtin.systemd_service:
+    name: claude-jono.timer
+    enabled: true
+    state: started
+    daemon_reload: false
+  when: claudejono_manage_systemd | bool

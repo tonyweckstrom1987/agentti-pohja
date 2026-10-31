@@ -1,0 +1,19 @@
+---
+# Rooli EI luo eika lue salaisuuksia. Tama vain kertoo, puuttuuko jokin uudelleenrakennuksen jalkeen (Tony kirjoittaa ne itse).
+# Vaatii root-oikeuden (hakemistot ovat 0700); muuten ohitetaan.
+- name: Salaisuustiedostojen olemassaolo (stat, ei sisaltoa)
+  ansible.builtin.stat:
+    path: "{{ claudejono_fs_root }}{{ item }}"
+    get_checksum: false
+    get_mime: false
+  loop: "{{ claudejono_secret_files }}"
+  register: claudejono_secret_stat
+  when: claudejono_manage_users | bool and ansible_facts.user_id == 'root'
+
+- name: Varoitus puuttuvista salaisuuksista
+  ansible.builtin.debug:
+    msg: "PUUTTUU (Tony kirjoittaa itse): {{ item.item }}"
+  loop: "{{ claudejono_secret_stat.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item | default('') }}"
+  when: item.stat is defined and not item.stat.exists

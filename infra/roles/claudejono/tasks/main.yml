@@ -1,0 +1,21 @@
+---
+- name: Tilit
+  ansible.builtin.import_tasks: tilit.yml
+  when: claudejono_manage_users | bool
+  tags: [tilit]
+
+- name: Hakemistot
+  ansible.builtin.import_tasks: hakemistot.yml
+  tags: [hakemistot]
+
+- name: Sudoers ja PR-wrapper
+  ansible.builtin.import_tasks: sudo.yml
+  tags: [sudo]
+
+- name: Systemd-yksikot
+  ansible.builtin.import_tasks: systemd.yml
+  tags: [systemd]
+
+- name: Salaisuuksien olemassaolo (vain tarkistus)
+  ansible.builtin.import_tasks: salaisuudet.yml
+  tags: [salaisuudet]

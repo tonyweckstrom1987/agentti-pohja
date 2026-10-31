@@ -1,0 +1,21 @@
+---
+# Agentin ainoa sudo-oikeus: ajaa yksi wrapper prbotti-tilina. Ei muuta (ei ALL, ei SETENV).
+# validate: visudo tarkistaa tiedoston ENNEN kuin se kirjoitetaan paikalleen (virheellinen sudoers lukitsisi sudon).
+- name: Sudoers claudejono -> prbotti vain claudejono-pr
+  ansible.builtin.copy:
+    dest: "{{ claudejono_fs_root }}{{ claudejono_sudoers_file }}"
+    content: |
+      # Hallinnoi Ansible (infra/roles/claudejono). Ala muokkaa kasin.
+      {{ claudejono_user }} ALL=({{ claudejono_prbotti_user }}) NOPASSWD: {{ claudejono_wrapper_path }}
+    owner: "{{ claudejono_root_owner }}"
+    group: "{{ claudejono_root_group }}"
+    mode: "0440"
+    validate: /usr/sbin/visudo -cf %s
+
+- name: PR-wrapper (root-omisteinen, agentti ei voi muokata)
+  ansible.builtin.copy:
+    src: claudejono-pr
+    dest: "{{ claudejono_fs_root }}{{ claudejono_wrapper_path }}"
+    owner: "{{ claudejono_root_owner }}"
+    group: "{{ claudejono_root_group }}"
+    mode: "0755"

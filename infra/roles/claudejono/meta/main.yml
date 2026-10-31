@@ -1,0 +1,10 @@
+---
+galaxy_info:
+  author: tonyweckstrom1987
+  description: claude-jono CT115:ssa (kayttajat, sudoers, PR-wrapper, systemd, hakemistot)
+  license: MIT
+  min_ansible_version: "2.14"
+  platforms:
+    - name: Debian
+      versions: [trixie]
+dependencies: []

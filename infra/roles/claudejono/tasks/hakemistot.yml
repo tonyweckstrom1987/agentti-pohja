@@ -1,0 +1,23 @@
+---
+- name: Hakemistot (vain rakenne ja oikeudet, ei sisaltoa)
+  ansible.builtin.file:
+    path: "{{ claudejono_fs_root }}{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ item.group }}"
+    mode: "{{ item.mode }}"
+  loop: "{{ claudejono_dirs }}"
+  loop_control:
+    label: "{{ item.path }}"
+
+# Vain hiekkalaatikossa: oikealla koneella nama kuuluvat kayttojarjestelmaan (sudo, systemd), ei tahan rooliin.
+- name: Hiekkalaatikon ylahakemistot
+  ansible.builtin.file:
+    path: "{{ claudejono_fs_root }}{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - /etc/sudoers.d
+    - /usr/local/sbin
+    - "{{ claudejono_systemd_dir }}"
+  when: claudejono_fs_root | length > 0

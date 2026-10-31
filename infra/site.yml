@@ -1,0 +1,8 @@
+---
+# Aja: sudo ansible-playbook site.yml --check --diff   (ensin AINA --check)
+- name: CT115 claude-jono
+  hosts: ct115
+  gather_facts: true
+  gather_subset: [min]
+  roles:
+    - claudejono
