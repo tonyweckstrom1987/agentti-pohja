@@ -1,0 +1,5 @@
+# Mallitiedosto: drop-in valvotulle yksikolle. Asennus: /etc/systemd/system/<yksikko>.service.d/korjaaja.conf
+# Esim. claude-jono.service, yojono.service, trendit-paiva.service, trendit-viikko.service.
+# %n = kaatuneen yksikon koko nimi -> korjaaja@claude-jono.service.service. EI KOSKAAN korjaaja@.service:lle itselleen.
+[Unit]
+OnFailure=korjaaja@%n.service

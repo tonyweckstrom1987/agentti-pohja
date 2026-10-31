@@ -1,0 +1,23 @@
+# Mallitiedosto: ei asenna mitaan. Asennus README.md:n "Korjaaja"-osion mukaan (Tonyn paatos).
+# Kaynnistyy vain valvotun yksikon OnFailure=-kautta: korjaaja@claude-jono.service.service (%i = kaatunut yksikko).
+# TARKOITUKSELLA EI OnFailure=: korjaajan oma kaatuminen ei saa laukaista korjaajaa (silmukan esto; koodissa toinen este).
+[Unit]
+Description=Korjaaja: diagnoosi kaatuneelle yksikolle %i
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/agentti-pohja
+Environment=CLAUDEJONO_REPO=/var/lib/claude-jono/docs
+Environment=CLAUDEJONO_TYOHAK=/opt/agentscope
+Environment=CLAUDEJONO_KAYTTAJA=claudejono
+Environment=CLAUDEJONO_CLAUDE=/var/lib/claudejono/.local/bin/claude
+Environment=CLAUDEJONO_LUPATILA=auto
+Environment=KORJAAJA_TILA=/var/lib/korjaaja/tila.json
+Environment="GIT_SSH_COMMAND=ssh -i /etc/claude-jono/deploy_key -o IdentitiesOnly=yes"
+EnvironmentFile=-/etc/yojono/telegram.env
+StateDirectory=korjaaja
+ExecStart=/usr/bin/python3 -B -m claudejono.korjaaja %i
+# Kova katto: Clauden aikaraja on 10 min (koodissa), tama on varmistus koko ketjulle (git, Telegram). KillMode=control-group tappaa lapset.
+TimeoutStartSec=900
+PrivateTmp=true
+# Ei NoNewPrivileges: agentin PR-polku (sudo -u prbotti claudejono-pr) tarvitsee sen, kuten claude-jonolla.
