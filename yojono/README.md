@@ -7,7 +7,7 @@ Vain standardikirjasto, Python 3.10+. Testit: `python -m unittest discover -s . 
 ## Mitä se tekee
 
 1. Lukee `jono.json`-tiedoston ja tarkistaa jokaisen kentän (id, repo-nimi, budjetti).
-2. Ohittaa valmiit tehtävät. Epäonnistunutta yritetään uudelleen vain myöhempänä päivänä ja enintään kaksi kertaa.
+2. Ohittaa valmiit tehtävät. Epäonnistunutta yritetään uudelleen vain myöhempänä päivänä ja enintään kaksi kertaa. Budjettiin kaatunutta (`budjetti_loppui`) ei uusita samalla budjetilla: uusinta vasta, kun budjetti on nostettu yli edellisen kulun (toistuva tehtävä ajetaan taas `toisto_pv`:n jälkeen).
 3. Varaa ennen jokaista tehtävää sen koko budjetin päiväkatosta. Jos jäljellä on vähemmän, tehtävä ohitetaan (pienempi voi mahtua).
 4. Kutsuu tehtävätyypin skriptiä (`katselmointi` = `katselmoi.sh <repo> <budjetti>`), ilman shelliä, aikarajalla (30 min / tehtävä, 3 h / yö).
 5. Lukee todellisen kulun skriptin tuottamasta JSON:sta (`total_cost_usd`), myös epäonnistuneesta ajosta. Jos ajo alkoi mutta kulua ei saada selville (aikakatkaisu, rikkinäinen JSON), kirjataan koko budjetti: katto ei saa alittua arvauksella.

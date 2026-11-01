@@ -171,9 +171,22 @@ def _paivia_valissa(alku, loppu):
         return 0
 
 
+def budjetti_uusinta_turha(tehtava, edellinen):
+    """Budjettiin kaatunut ajo kaatuisi samalla budjetilla todennakoisesti uudelleen (30.10. katselmointi-agentti-pohja 2,60/2,50 USD,
+    diagnoosi 1.11.: 9 budjettiin kaatunutta ajoa, 11,64 USD ilman tulosta). Seuraavan paivan uusinta ohitetaan, kunnes Tony nostaa
+    tehtavan budjetin yli edellisen ajon kulun. Toistuva tehtava ajetaan silti taas, kun toisto_pv on kulunut (yksi yritys per jakso)."""
+    if edellinen.get("koodi") != "budjetti_loppui":
+        return False
+    try:
+        return float(tehtava["budjetti"]) <= float(edellinen.get("kulu", 0))
+    except (KeyError, TypeError, ValueError):
+        return False
+
+
 def valitse_ajettavat(tehtavat, tila, pvm):
     """Valmiit ohitetaan, paitsi toistuva tehtava (`toisto_pv`), joka ajetaan taas kun edellisesta valmiista ajosta on
-    vahintaan toisto_pv paivaa. Epaonnistunut yritetaan uudelleen vain myohempana paivana ja enintaan MAX_YRITYKSIA kertaa."""
+    vahintaan toisto_pv paivaa. Epaonnistunut yritetaan uudelleen vain myohempana paivana ja enintaan MAX_YRITYKSIA kertaa,
+    budjettiin kaatunut vain, jos budjettia on nostettu (budjetti_uusinta_turha)."""
     ulos = []
     for t in tehtavat:
         s = tila.get("tehtavat", {}).get(t["id"])
@@ -183,7 +196,7 @@ def valitse_ajettavat(tehtavat, tila, pvm):
             if t.get("toisto_pv") and _paivia_valissa(s.get("pvm"), pvm) >= t["toisto_pv"]:
                 ulos.append(t)
             continue
-        elif s.get("yrityksia", 0) < MAX_YRITYKSIA and s.get("pvm") != pvm:
+        elif s.get("yrityksia", 0) < MAX_YRITYKSIA and s.get("pvm") != pvm and not budjetti_uusinta_turha(t, s):
             ulos.append(t)
         elif t.get("toisto_pv") and _paivia_valissa(s.get("pvm"), pvm) >= t["toisto_pv"]:
             ulos.append(t)   # toistuva tehtava ei jumiudu: yritykset loppuneena yritetaan taas, kun toisto_pv on kulunut (laskuri nollataan ajossa)

@@ -3,6 +3,7 @@
 Muoto perustuu [Keep a Changelogiin](https://keepachangelog.com/fi/1.0.0/).
 
 ## Unreleased
+- yojono: budjettiin kaatunutta tehtävää (`budjetti_loppui`) ei uusita seuraavana päivänä samalla budjetilla. Uusinta tehdään vasta, kun tehtävän budjetti on nostettu yli edellisen ajon kulun; toistuva tehtävä ajetaan taas, kun `toisto_pv` on kulunut (yksi yritys per jakso). Diagnoosi 1.11.: 9 budjettiin kaatunutta ajoa maksoi 11,64 USD (24 % yöjonon kulusta) ilman tulosta, ja katselmointi-agentti-pohja kaatui kahdesti peräkkäin (1,86 ja 2,60 USD). Budjetteja ja kattoja ei muutettu. +5 testiä.
 - claudejono: itsesuunnittelun tauko. Tyhjän kierroksen (0 tehtävää, virheellinen JSON tai aikakatkaisu) jälkeen uutta suunnittelua ei ajeta 3 tuntiin (`CLAUDEJONO_SUUNNITTELU_TAUKO_S`), ellei uusi tulos ole tullut. 1.11. tyhjä kierros toistui noin 10 minuutin välein ja lisäsi `tonylle.md`:hen lähes saman kohdan kymmeniä kertoja (ja kulutti tilauksen kiintiötä). Tila tiedostossa `<työhakemisto>/suunnittelu-tila.json`. +7 testiä.
 - claudejono: yli 60 000 tavun raportti merkitään katkaistuksi (alkuperäinen koko näkyy). 1.11. koulumatka-äänikirjan M02-lähde katkesi kesken sanan ilman merkintää. +2 testiä.
 - claudejono: itsesuunnittelu lukee myos `valitavoitteet.md`:n (unelmat -> kvartaalin valitavoitteet), Tonyn paatos 1.11.2026.

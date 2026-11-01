@@ -93,6 +93,35 @@ class TestValinta(unittest.TestCase):
         self.assertEqual(ids, ["uusi", "kaatui-eilen"])
 
 
+class TestBudjettiUusinta(unittest.TestCase):
+    """Budjettiin kaatunutta ei uusita samalla budjetilla (diagnoosi 1.11.: 9 ajoa, 11,64 USD ilman tulosta)."""
+
+    def _tila(self, kulu, koodi="budjetti_loppui"):
+        return {"tehtavat": {"k": {"tila": "epaonnistui", "yrityksia": 1, "pvm": "2026-10-30", "kulu": kulu, "koodi": koodi}}}
+
+    def test_samalla_budjetilla_ei_uusita(self):
+        tehtavat = [{"id": "k", "tyyppi": "katselmointi", "repo": "r", "budjetti": 2.5}]
+        self.assertEqual(ajuri.valitse_ajettavat(tehtavat, self._tila(2.6), "2026-10-31"), [])
+
+    def test_nostetulla_budjetilla_uusitaan(self):
+        tehtavat = [{"id": "k", "tyyppi": "katselmointi", "repo": "r", "budjetti": 3.5}]
+        self.assertEqual([x["id"] for x in ajuri.valitse_ajettavat(tehtavat, self._tila(2.6), "2026-10-31")], ["k"])
+
+    def test_muu_virhe_uusitaan_kuten_ennen(self):
+        tehtavat = [{"id": "k", "tyyppi": "katselmointi", "repo": "r", "budjetti": 2.5}]
+        self.assertEqual([x["id"] for x in ajuri.valitse_ajettavat(tehtavat, self._tila(2.6, "aikakatkaisu"), "2026-10-31")], ["k"])
+
+    def test_toistuva_ajetaan_taas_kun_jakso_kulunut(self):
+        tehtavat = [{"id": "k", "tyyppi": "katselmointi", "repo": "r", "budjetti": 2.5, "toisto_pv": 5}]
+        self.assertEqual(ajuri.valitse_ajettavat(tehtavat, self._tila(2.6), "2026-11-03"), [])
+        self.assertEqual([x["id"] for x in ajuri.valitse_ajettavat(tehtavat, self._tila(2.6), "2026-11-04")], ["k"])
+
+    def test_vanha_tila_ilman_kulua_ei_esta(self):
+        tehtavat = [{"id": "k", "tyyppi": "katselmointi", "repo": "r", "budjetti": 2.5}]
+        tila = {"tehtavat": {"k": {"tila": "epaonnistui", "yrityksia": 1, "pvm": "2026-10-30", "koodi": "budjetti_loppui", "kulu": "roskaa"}}}
+        self.assertEqual([x["id"] for x in ajuri.valitse_ajettavat(tehtavat, tila, "2026-10-31")], ["k"])
+
+
 class TestAjo(Pohja):
     def test_toistuva_tehtava_ajetaan_taas_kun_paivia_kulunut(self):
         tehtavat = [{"id": "a", "tyyppi": "ideointi", "repo": "r", "budjetti": 1.0, "toisto_pv": 7}]
