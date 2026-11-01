@@ -150,10 +150,22 @@ def kulut_osio(perus, portti_tila):
         rivit.append("kuukausi %s yhteensa: %.2f, kirjattuja paivia %d%s" % (kuu, kk[kuu], paivia, ennuste))
     rivit.append("paivakatto: %s, kuukausikatto: %s" % (jono.get("paivakatto"), jono.get("kuukausikatto")))
     rivit.append("\n## Taasmays (tehtavien kulut vs kirjattu paivakulu)")
+    erittely = tila.get("kuluerittely") if isinstance(tila.get("kuluerittely"), dict) else {}
     for pvm in sorted(kulut)[-7:]:
-        summa = sum(s.get("kulu") or 0 for s in (tila.get("tehtavat") or {}).values() if s.get("pvm") == pvm and isinstance(s.get("kulu"), (int, float)))
         kirjattu = kulut[pvm] if isinstance(kulut[pvm], (int, float)) else 0
-        merkki = "OK" if abs(summa - kirjattu) < 0.01 else "ERO (uudelleenajot ja aiemmat yritykset voivat selittaa)"
+        ajot = [a for a in (erittely.get(pvm) or []) if isinstance(a, dict) and isinstance(a.get("kulu"), (int, float))
+                and not isinstance(a.get("kulu"), bool)]
+        if ajot:  # ajokohtainen kirjanpito: jokainen yritys mukana, myos saman paivan uusinnat
+            summa = sum(a["kulu"] for a in ajot)
+            uusinnat = len(ajot) - len({a.get("id") for a in ajot})
+            arvioitu = sum(a["kulu"] for a in ajot if a.get("arvio") is True)
+            kesken = sum(a["kulu"] for a in ajot if a.get("ok") is not True)
+            merkki = "OK" if abs(summa - kirjattu) < 0.01 else "ERO (erittely ei kata koko paivaa: kirjaus alkoi kesken paivan?)"
+            rivit.append("- %s: ajoja %d (uusintoja %d), ajojen summa %.2f, josta ilman tulosta %.2f ja arvioitu budjetiksi %.2f, "
+                         "kirjattu %.2f -> %s" % (pvm, len(ajot), uusinnat, summa, kesken, arvioitu, kirjattu, merkki))
+            continue
+        summa = sum(s.get("kulu") or 0 for s in (tila.get("tehtavat") or {}).values() if s.get("pvm") == pvm and isinstance(s.get("kulu"), (int, float)))
+        merkki = "OK" if abs(summa - kirjattu) < 0.01 else "ERO (uudelleenajot ja aiemmat yritykset voivat selittaa; ajokohtaista erittelya ei ole talta paivalta)"
         rivit.append("- %s: tehtavien viimeisimmat ajot %.2f, kirjattu %.2f -> %s" % (pvm, summa, kirjattu, merkki))
     if portti_tila:
         data = _json(Path(portti_tila) / "portti-kulu.json", {})

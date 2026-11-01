@@ -171,6 +171,32 @@ class OsioTesti(unittest.TestCase):
         self.assertIn("2026-10-20: tehtavien viimeisimmat ajot 0.50, kirjattu 0.50 -> OK", teksti)
         self.assertIn("2026-10-21: tehtavien viimeisimmat ajot 0.50, kirjattu 0.90 -> ERO", teksti)
 
+    def test_kulut_taasmays_erittelysta_nayttaa_uusinnat_ja_arvion(self):
+        """27.10.: tila.json 11.05 USD vs raporttien summa 5.73. Erittely kertoo, mista ero tulee."""
+        (self.t / "tila.json").write_text(json.dumps({
+            "tehtavat": {"a": {"pvm": "2026-10-27", "kulu": 0.4}},
+            "kulut": {"2026-10-27": 3.2},
+            "kuluerittely": {"2026-10-27": [
+                {"id": "a", "kulu": 1.3, "ok": False, "arvio": True},
+                {"id": "a", "kulu": 0.4, "ok": True, "arvio": False},
+                {"id": "b", "kulu": 1.5, "ok": False, "arvio": False}]}}))
+        teksti = tk.kulut_osio(self.t, None)
+        self.assertIn("2026-10-27: ajoja 3 (uusintoja 1), ajojen summa 3.20, josta ilman tulosta 2.80 ja arvioitu budjetiksi 1.30, "
+                      "kirjattu 3.20 -> OK", teksti)
+
+    def test_kulut_taasmays_vajaa_erittely_on_ero_ja_roska_ohitetaan(self):
+        (self.t / "tila.json").write_text(json.dumps({
+            "kulut": {"2026-10-28": 2.0},
+            "kuluerittely": {"2026-10-28": [{"id": "a", "kulu": 0.5}, {"id": "x", "kulu": True}, "roska"]}}))
+        teksti = tk.kulut_osio(self.t, None)
+        self.assertIn("2026-10-28: ajoja 1 (uusintoja 0), ajojen summa 0.50", teksti)
+        self.assertIn("kirjattu 2.00 -> ERO", teksti)
+
+    def test_kulut_taasmays_erittely_vaaraa_tyyppia_ei_kaada(self):
+        (self.t / "tila.json").write_text(json.dumps({"kulut": {"2026-10-20": 0.5}, "kuluerittely": ["x"],
+                                                      "tehtavat": {"a": {"pvm": "2026-10-20", "kulu": 0.5}}}))
+        self.assertIn("2026-10-20: tehtavien viimeisimmat ajot 0.50, kirjattu 0.50 -> OK", tk.kulut_osio(self.t, None))
+
     def test_isanta_osio_virhe_ei_kaada(self):
         def rikki():
             raise RuntimeError("ei yhteytta")

@@ -63,6 +63,7 @@ class Tulos:
     raportti: str
     viesti: str
     koodi: str = ""     # epaonnistuneen ajon vakaa virhekoodi (ks. VIRHEKOODIT); tyhja kun ok
+    arvio: bool = False  # kulu on arvioitu budjetiksi (aikakatkaisu, lukukelvoton JSON), ei mitattu
 
 
 def tarkista_jono(jono):
@@ -277,11 +278,13 @@ def suorita_katselmointi(tehtava, pvm, perus, skripti, aikaraja=TEHTAVA_AIKARAJA
                            check=False, env=ymparisto)
         koodi, loppu = r.returncode, (r.stdout + r.stderr).strip()[-300:]
     except subprocess.TimeoutExpired:
-        return Tulos(False, budjetti, "", f"aikakatkaisu: ei valmis {aikaraja} s jalkeen (kulu arvioitu budjetiksi)", "aikakatkaisu")
+        return Tulos(False, budjetti, "", f"aikakatkaisu: ei valmis {aikaraja} s jalkeen (kulu arvioitu budjetiksi)", "aikakatkaisu",
+                     arvio=True)
     except OSError as virhe:
         return Tulos(False, 0.0, "", f"skripti_ei_kaynnisty: ajuria ei voitu kaynnistaa: {virhe}", "skripti_ei_kaynnisty")
     paivittyi = json_polku.exists() and json_polku.stat().st_mtime != vanha_mtime
     meta = {}
+    arvio = False
     if not paivittyi:
         kulu = 0.0  # claude ei ehtinyt alkaa (esim. kloonaus epaonnistui): katselmoi.sh luo JSON:n vasta claude-kutsussa
     else:
@@ -296,10 +299,11 @@ def suorita_katselmointi(tehtava, pvm, perus, skripti, aikaraja=TEHTAVA_AIKARAJA
             pass
         if kulu is None:
             kulu = budjetti  # ajo alkoi mutta kulua ei saada: katto ei saa alittua arvauksella
+            arvio = True
     ok = koodi == 0 and md_polku.exists() and paivittyi
     tyhja = ok and tyyppi != "kehitys" and md_polku.stat().st_size < RAPORTTI_MIN_KOKO
     if ok and not tyhja:
-        return Tulos(True, kulu, str(md_polku), "ok")
+        return Tulos(True, kulu, str(md_polku), "ok", arvio=arvio)
     if tyhja:  # tyhja raportti ei ole tulos: ei merkita valmiiksi, yritys kuluu (kulu on jo syntynyt)
         syy, virhekoodi = f"raportti tyhja tai liian lyhyt (<{RAPORTTI_MIN_KOKO} tavua)", "raportti_tyhja"
         juuri = luokittele_virhe("", True, True, meta)      # claude-tulos kertoo todellisen syyn (budjetti, malli) tyhjan raportin takana
@@ -317,7 +321,7 @@ def suorita_katselmointi(tehtava, pvm, perus, skripti, aikaraja=TEHTAVA_AIKARAJA
     elif virhekoodi == "malli_virhe" and (meta.get("is_error") is True or meta.get("subtype") not in (None, "success")):
         subtype = meta.get("subtype")
         syy = "claude palautti virheen (subtype: %s)" % (subtype if isinstance(subtype, str) and SUBTYPE_RE.match(subtype) else "?")
-    return Tulos(False, kulu, "", syy if virhekoodi in syy else f"{virhekoodi}: {syy}", virhekoodi)
+    return Tulos(False, kulu, "", syy if virhekoodi in syy else f"{virhekoodi}: {syy}", virhekoodi, arvio=arvio)
 
 
 def raportin_lisatiedot(tyyppi, md_polku):
@@ -449,6 +453,23 @@ def kirjaa_ohitus(t, koodi, pvm, polku=None):
 VARAUSKERROIN = 1.3
 
 
+ERITTELY_PAIVIA = 31   # kuluerittely (ajo kerrallaan) sailytetaan nain monelta ajopaivalta; paivasummat `kulut` pysyvat kokonaan
+
+
+def kirjaa_erittely(tila, pvm, tehtava_id, tulos):
+    """Ajokohtainen kulurivi tila.json:iin, jotta paivasumman voi tasmayttaa: raportti-JSON ylikirjoittuu saman paivan
+    uusinnassa (sama nimi), joten raporttien summa aliarvioi. Rivi kertoo myos, onko kulu mitattu vai arvioitu budjetiksi."""
+    erittely = tila.setdefault("kuluerittely", {})
+    if not isinstance(erittely, dict):
+        erittely = tila["kuluerittely"] = {}
+    rivit = erittely.setdefault(pvm, [])
+    if not isinstance(rivit, list):
+        rivit = erittely[pvm] = []
+    rivit.append({"id": tehtava_id, "kulu": round(tulos.kulu, 4), "ok": bool(tulos.ok), "arvio": bool(getattr(tulos, "arvio", False))})
+    for vanha in sorted(erittely)[:-ERITTELY_PAIVIA]:
+        del erittely[vanha]
+
+
 def varattava(budjetti):
     """Paiva- ja kuukausikatosta ennen tehtavaa varattava summa (USD)."""
     return round(budjetti * VARAUSKERROIN, 4)
@@ -518,6 +539,7 @@ def aja(perus, skripti, laheta=print, suorita=suorita_katselmointi, nyt=time.mon
             tulos = suorita(t, pvm, perus, skripti_tyypille(skripti, t["tyyppi"]))
             ajetut.append(t["id"])
             tila["kulut"][pvm] = round(kulu_nyt + tulos.kulu, 4)
+            kirjaa_erittely(tila, pvm, t["id"], tulos)
             vanha = tila["tehtavat"].get(t["id"], {})
             if t.get("toisto_pv") and vanha.get("tila") == "epaonnistui" and vanha.get("yrityksia", 0) >= MAX_YRITYKSIA:
                 vanha = {**vanha, "yrityksia": 0}   # uusi jakso: edellisen jakson loppuneet yritykset eivat esta

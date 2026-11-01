@@ -189,6 +189,31 @@ class TestAjo(Pohja):
     def test_varauskerroin_ei_alle_laissa_sovitun(self):
         self.assertGreaterEqual(ajuri.VARAUSKERROIN, 1.3)
 
+    def test_kuluerittely_kirjaa_jokaisen_ajon_ja_summa_tasmaa(self):
+        """Raportti-JSON ylikirjoittuu saman paivan uusinnassa; tila.json:n erittely sailyttaa jokaisen yrityksen."""
+        self.kirjoita_jono(jono([t("a", budjetti=1.0), t("b", budjetti=0.5)]))
+        tulokset = iter([ajuri.Tulos(False, 1.0, "", "aikakatkaisu", "aikakatkaisu", arvio=True), ajuri.Tulos(True, 0.3, "x.md", "ok")])
+        self.aja(lambda *_: next(tulokset))
+        tila = self.tila()
+        self.assertEqual(tila["kuluerittely"][PVM], [
+            {"id": "a", "kulu": 1.0, "ok": False, "arvio": True},
+            {"id": "b", "kulu": 0.3, "ok": True, "arvio": False}])
+        self.assertAlmostEqual(sum(r["kulu"] for r in tila["kuluerittely"][PVM]), tila["kulut"][PVM])
+
+    def test_kuluerittely_sailyttaa_vain_viimeiset_paivat(self):
+        vanhat = {f"2026-09-{p:02d}": [{"id": "x", "kulu": 0.1, "ok": True, "arvio": False}] for p in range(1, 31)}
+        vanhat["2026-10-01"] = []
+        tila = {"kuluerittely": vanhat}
+        ajuri.kirjaa_erittely(tila, PVM, "a", ajuri.Tulos(True, 0.2, "x.md", "ok"))
+        self.assertEqual(len(tila["kuluerittely"]), ajuri.ERITTELY_PAIVIA)
+        self.assertIn(PVM, tila["kuluerittely"])
+        self.assertNotIn("2026-09-01", tila["kuluerittely"])
+
+    def test_kuluerittely_korjaa_vaaran_tyypin(self):
+        tila = {"kuluerittely": ["roska"]}
+        ajuri.kirjaa_erittely(tila, PVM, "a", ajuri.Tulos(True, 0.2, "x.md", "ok"))
+        self.assertEqual(tila["kuluerittely"], {PVM: [{"id": "a", "kulu": 0.2, "ok": True, "arvio": False}]})
+
     def test_epaonnistunut_kirjataan_ja_kulu_lasketaan(self):
         self.kirjoita_jono(jono([t("a", budjetti=1.5)]))
         teksti, _ = self.aja(lambda *a: ajuri.Tulos(False, 1.15, "", "budjetti loppui"))
@@ -283,6 +308,7 @@ class TestKatselmointiSkripti(Pohja):
         tulos = ajuri.suorita_katselmointi(t("a", repo="mcp-homelab", budjetti=2.0), PVM, self.perus, s)
         self.assertTrue(tulos.ok)
         self.assertAlmostEqual(tulos.kulu, 0.58)
+        self.assertFalse(tulos.arvio)  # mitattu kulu
         self.assertEqual((self.perus / "argumentit").read_text().strip(), "mcp-homelab 2.00")
         self.assertTrue(tulos.raportti.endswith(f"{PVM}-mcp-homelab.md"))
 
@@ -312,12 +338,14 @@ class TestKatselmointiSkripti(Pohja):
         tulos = ajuri.suorita_katselmointi(t("a", budjetti=1.7), PVM, self.perus, s)
         self.assertFalse(tulos.ok)
         self.assertAlmostEqual(tulos.kulu, 1.7)
+        self.assertTrue(tulos.arvio)
 
     def test_aikakatkaisu_laskutetaan_koko_budjetti(self):
         s = self.skripti("sleep 5\n")
         tulos = ajuri.suorita_katselmointi(t("a", budjetti=1.2), PVM, self.perus, s, aikaraja=0.2)
         self.assertFalse(tulos.ok)
         self.assertAlmostEqual(tulos.kulu, 1.2)
+        self.assertTrue(tulos.arvio)
         self.assertIn("aikakatkaisu", tulos.viesti)
 
     def test_vanha_raportti_ei_nay_onnistumisena(self):

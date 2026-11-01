@@ -3,6 +3,7 @@
 Muoto perustuu [Keep a Changelogiin](https://keepachangelog.com/fi/1.0.0/).
 
 ## Unreleased
+- yojono: ajokohtainen kuluerittely `tila.json`:iin (`kuluerittely[pvm]`: id, kulu, ok, arvio; säilytys 31 ajopäivää). Tilannekuvan täsmäytys näyttää nyt ajojen ja uusintojen määrän, tuloksettomien ajojen kulun ja budjetiksi arvioidun osuuden. Tausta: infra- ja laatutarkkailu 1.11. ja tulos 34: 27.10. kirjattu 11,05 USD vs raporttien summa 5,73 USD, ja ero selitettiin "uudelleenajoilla" todentamatta (saman päivän uusinta ylikirjoittaa raportti-JSONin). Kattoihin ja budjetteihin ei kosketa. +7 testiä.
 - claudejono: itsesuunnittelun tauko. Tyhjän kierroksen (0 tehtävää, virheellinen JSON tai aikakatkaisu) jälkeen uutta suunnittelua ei ajeta 3 tuntiin (`CLAUDEJONO_SUUNNITTELU_TAUKO_S`), ellei uusi tulos ole tullut. 1.11. tyhjä kierros toistui noin 10 minuutin välein ja lisäsi `tonylle.md`:hen lähes saman kohdan kymmeniä kertoja (ja kulutti tilauksen kiintiötä). Tila tiedostossa `<työhakemisto>/suunnittelu-tila.json`. +7 testiä.
 - claudejono: yli 60 000 tavun raportti merkitään katkaistuksi (alkuperäinen koko näkyy). 1.11. koulumatka-äänikirjan M02-lähde katkesi kesken sanan ilman merkintää. +2 testiä.
 - claudejono: itsesuunnittelu lukee myos `valitavoitteet.md`:n (unelmat -> kvartaalin valitavoitteet), Tonyn paatos 1.11.2026.
