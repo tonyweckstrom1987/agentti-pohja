@@ -8,7 +8,8 @@ Turva ("koodi on laki"):
 - tunnus luetaan tiedostosta (oletus /etc/yojono/github-bot.token), ei koskaan argumenttina, URL:ssa tai tulosteessa;
   git saa sen vain tilapaiselta askpass-skriptilta (0700), joten tunnus ei nay prosessilistassa
 - ei force-pushia (refspec ilman `+`), ei paikallisia koukkuja (core.hooksPath=/dev/null)
-- ei suojattuja polkuja (.github/, tools/, systemd/, isanta/, rajat.py, config.py, salaisuuden nakoiset tiedostot)
+- ei suojattuja polkuja (.github/, tools/, systemd/, isanta/, rajat.py, config.py, salaisuuden nakoiset tiedostot);
+  PR:n avauksessa muutokset lasketaan ylavirran pohjahaaran karjesta (ylavirran_pohja), ei agentin paikallisesta mainista
 - enintaan RAJA_PAIVASSA PR-yritysta paivassa; vain stdlib
 - forkin synkkaus (synkkaa_fork): vain kyseisen repon pohjahaara (main; ai-pr-reviewer-action: master), vain fast-forward, ei force-pushia
   (refspec ilman `+`), ei muita haaroja; jos fork-main eroaa ylavirrasta, ei tehda mitaan (fork_ei_ff); sama tunnus kuin PR:ssa, ei uusia oikeuksia
@@ -138,7 +139,8 @@ def botti_kayttaja(env=None):
 
 
 def _git(hakemisto, *args, suorita=subprocess.run):
-    r = suorita(["git", "-C", hakemisto, *args], capture_output=True, text=True, timeout=60, check=False)
+    # --no-replace-objects: agentin kloonin refs/replace ei saa muuttaa sita, mita tarkistus nakee.
+    r = suorita(["git", "--no-replace-objects", "-C", hakemisto, *args], capture_output=True, text=True, timeout=60, check=False)
     return r.returncode, (r.stdout or "").strip(), (r.stderr or "").strip()
 
 
@@ -413,11 +415,36 @@ def avaa_pr(repo, haara, botti, otsikko, kuvaus, tunnus, avaa=urllib.request.url
     return osoite
 
 
-def luo_pr(repo, hakemisto, haara, otsikko, kuvaus, env=None, suorita=subprocess.run, avaa=urllib.request.urlopen):
+def ylavirran_pohja(repo, hakemisto, suorita=subprocess.run, url=_github_url):
+    """Palauttaa ylavirran pohjahaaran karjen SHA:n vertailupohjaksi. Virheessa PrVirhe (fail closed: PR:aa ei avata).
+
+    Miksi ei paikallista mainia: agentti omistaa kloonin. Vanhentunut paikallinen main antoi vaaria halytyksia (2.11.2026, kahdesti), ja
+    kun main siirretaan suojatun commitin ylapuolelle, tarkistus ei nae sita. SHA tulee verkosta, joten agentti ei voi vaikuttaa siihen."""
+    haara = pohja_haara(repo)
+    try:
+        sha = _paa_sha(suorita, url(OMISTAJA, repo), haara, _luku_ymparisto())
+    except ForkVirhe as e:
+        raise PrVirhe("ylavirran %s ei ole luettavissa, PR:aa ei avata: %s" % (haara, e)) from None
+    if sha is None:
+        raise PrVirhe("ylavirran %s ei ole luettavissa, PR:aa ei avata" % haara)
+    if _git(hakemisto, "cat-file", "-e", sha + "^{commit}", suorita=suorita)[0] != 0:
+        # claudejono-pr hakee tilapaiseen repoon vain refs/heads/*, joten vanhentuneen mainin kanssa karki puuttuu: haetaan se ylavirrasta.
+        try:
+            r = _git_ajo(suorita, ["git", "-C", hakemisto, "-c", "credential.helper=", "-c", "core.hooksPath=/dev/null", "fetch", "-q", "--no-tags",
+                                   url(OMISTAJA, repo), "refs/heads/" + haara], "pohjan_haku_epaonnistui", 180, _luku_ymparisto())
+        except ForkVirhe as e:
+            raise PrVirhe("ylavirran %s haku epaonnistui, PR:aa ei avata: %s" % (haara, e)) from None
+        if r.returncode != 0 or _git(hakemisto, "cat-file", "-e", sha + "^{commit}", suorita=suorita)[0] != 0:
+            raise PrVirhe("ylavirran %s (%s) haku epaonnistui, PR:aa ei avata" % (haara, sha[:12]))
+    return sha
+
+
+def luo_pr(repo, hakemisto, haara, otsikko, kuvaus, env=None, suorita=subprocess.run, avaa=urllib.request.urlopen, url=_github_url):
     """Koko ketju: tarkistukset, paivaraja, push, PR. Palauttaa PR:n osoitteen."""
     env = os.environ if env is None else env
     botti = botti_kayttaja(env)
-    tarkista(repo, hakemisto, haara, suorita=suorita)
+    tarkista(repo, hakemisto, haara, suorita=suorita)                  # halvat tarkistukset ja repolista ennen verkkoa
+    tarkista(repo, hakemisto, haara, pohja=ylavirran_pohja(repo, hakemisto, suorita=suorita, url=url), suorita=suorita)
     with tempfile.TemporaryDirectory() as tmp:
         forkpolku = tunnus_tiedosto(env, repo, "fork", tmp)
         forktunnus = lue_tunnus(forkpolku)                 # puuttuva/virheellinen tunnus ei kuluta paivarajaa

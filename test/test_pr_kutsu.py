@@ -286,6 +286,9 @@ class KokoketjuTest(unittest.TestCase):
         with open(self.tunnus, "w") as f:
             f.write(TUNNUS)
         self.env = {"YOJONO_BOT_TUNNUS": self.tunnus, "YOJONO_PR_TILA": os.path.join(self.d.name, "tila.json")}
+        lukko = mock.patch.object(pk, "ylavirran_pohja", return_value="main")   # ei verkkoa; oma testi: YlavirranPohjaTest
+        lukko.start()
+        self.addCleanup(lukko.stop)
 
     def test_ketju_onnistuu(self):
         komennot = []
@@ -752,7 +755,7 @@ class GitApuTest(unittest.TestCase):
             nahty["cmd"], nahty["kw"] = cmd, kw
             return _ok(stdout=None, stderr=" virhe \n", koodi=3)
         self.assertEqual(pk._git("/h", "status", suorita=suorita), (3, "", "virhe"))
-        self.assertEqual(nahty["cmd"], ["git", "-C", "/h", "status"])
+        self.assertEqual(nahty["cmd"], ["git", "--no-replace-objects", "-C", "/h", "status"])
         self.assertEqual(nahty["kw"], {"capture_output": True, "text": True, "timeout": 60, "check": False})
         self.assertEqual(pk._git("/h", "x", suorita=lambda *a, **k: _ok(stdout=" ulos ", stderr=None)), (0, "ulos", ""))
 
@@ -952,6 +955,80 @@ class MainTarkkaTest(unittest.TestCase):
         self.assertIn("pr_kutsu: repo ei ole sallittujen listalla", virhe)
         self.assertEqual(self.ajaa(["pr", "a"])[0], 2)
         self.assertIn("kaytto: pr_kutsu", self.ajaa([])[2])
+
+
+class YlavirranPohjaTest(unittest.TestCase):
+    """Suojattujen polkujen tarkistus ei saa luottaa agentin paikalliseen mainiin (havainto 2.11.2026)."""
+
+    def setUp(self):
+        d = tempfile.TemporaryDirectory()
+        self.addCleanup(d.cleanup)
+        self.d = d.name
+        self.ylavirta = os.path.join(self.d, "ylavirta")
+        os.makedirs(self.ylavirta)
+        git(self.ylavirta, "init", "-q", "-b", "main")
+        self.kirjoita(self.ylavirta, "README.md", "a")
+        self.klooni = os.path.join(self.d, "klooni")
+        subprocess.run(["git", "clone", "-q", self.ylavirta, self.klooni], check=True, capture_output=True)
+        git(self.klooni, "checkout", "-q", "-b", "yo/koe")
+        self.url = lambda omistaja, repo: self.ylavirta
+
+    @staticmethod
+    def kirjoita(hak, polku, sisalto):
+        tiedosto = os.path.join(hak, polku)
+        os.makedirs(os.path.dirname(tiedosto), exist_ok=True)
+        with open(tiedosto, "w") as f:
+            f.write(sisalto)
+        git(hak, "add", "-A")
+        git(hak, "commit", "-q", "-m", "muutos " + polku)
+
+    def pohja(self):
+        return pk.ylavirran_pohja("agentti-pohja", self.klooni, url=self.url)
+
+    def test_siirretty_paikallinen_main_ei_piilota_suojattua_polkua(self):
+        self.kirjoita(self.klooni, "tools/automerge.py", "x")
+        git(self.klooni, "branch", "-f", "main", "yo/koe")     # main suojatun commitin ylapuolelle
+        self.kirjoita(self.klooni, "docs/a.md", "x")
+        self.assertEqual(pk.tarkista("agentti-pohja", self.klooni, "yo/koe"), ["docs/a.md"])   # paikallinen vertailu ei nae
+        with self.assertRaisesRegex(pk.PrVirhe, "tools/automerge.py"):
+            pk.tarkista("agentti-pohja", self.klooni, "yo/koe", pohja=self.pohja())
+
+    def test_vanhentunut_main_ei_anna_vaaraa_halytysta(self):
+        self.kirjoita(self.ylavirta, "tools/ylavirran-oma.py", "x")     # ylavirta muuttaa suojattua polkua
+        git(self.klooni, "fetch", "-q", "origin")
+        git(self.klooni, "rebase", "-q", "origin/main")                 # haara uuden pohjan paalle, paikallinen main jaa jalkeen
+        self.kirjoita(self.klooni, "docs/a.md", "x")
+        with self.assertRaisesRegex(pk.PrVirhe, "tools/ylavirran-oma.py"):
+            pk.tarkista("agentti-pohja", self.klooni, "yo/koe")
+        self.assertEqual(pk.tarkista("agentti-pohja", self.klooni, "yo/koe", pohja=self.pohja()), ["docs/a.md"])
+
+    def test_puuttuva_karki_haetaan_ylavirrasta(self):
+        self.kirjoita(self.ylavirta, "docs/uusi.md", "x")               # klooni ei ole hakenut tata
+        self.kirjoita(self.klooni, "docs/a.md", "x")
+        self.assertEqual(pk.tarkista("agentti-pohja", self.klooni, "yo/koe", pohja=self.pohja()), ["docs/a.md"])
+
+    def test_lukematon_ylavirta_estaa_prn(self):
+        with self.assertRaisesRegex(pk.PrVirhe, "ei ole luettavissa"):
+            pk.ylavirran_pohja("agentti-pohja", self.klooni, url=lambda o, r: os.path.join(self.d, "ei-ole"))
+
+    def test_ketju_hylkaa_ennen_pushia(self):
+        self.kirjoita(self.klooni, "tools/automerge.py", "x")
+        git(self.klooni, "branch", "-f", "main", "yo/koe")
+        self.kirjoita(self.klooni, "docs/a.md", "x")
+        komennot = []
+
+        def suorita(cmd, **kw):
+            komennot.append(cmd)
+            return subprocess.run(cmd, **kw)
+        tunnus = os.path.join(self.d, "tunnus")
+        with open(tunnus, "w") as f:
+            f.write(TUNNUS)
+        tila = os.path.join(self.d, "tila.json")
+        with self.assertRaisesRegex(pk.PrVirhe, "tools/automerge.py"):
+            pk.luo_pr("agentti-pohja", self.klooni, "yo/koe", "o", "k", suorita=suorita, url=self.url,
+                      env={"YOJONO_BOT_TUNNUS": tunnus, "YOJONO_PR_TILA": tila})
+        self.assertFalse(any("push" in c for c in komennot))
+        self.assertFalse(os.path.exists(tila))
 
 
 if __name__ == "__main__":

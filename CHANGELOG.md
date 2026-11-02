@@ -3,6 +3,7 @@
 Muoto perustuu [Keep a Changelogiin](https://keepachangelog.com/fi/1.0.0/).
 
 ## Unreleased
+- agentti: PR-kutsun suojattujen polkujen tarkistus vertaa ylävirran pohjahaaran kärkeen (SHA verkosta), ei agentin paikalliseen mainiin. Siirretty paikallinen main saattoi piilottaa suojatun commitin tarkistukselta, ja vanhentunut main antoi 2.11.2026 kahdesti väärän hälytyksen. Lukematon ylävirta estää PR:n (fail closed). +5 testiä.
 - claudejono: itsesuunnittelun tauko. Tyhjän kierroksen (0 tehtävää, virheellinen JSON tai aikakatkaisu) jälkeen uutta suunnittelua ei ajeta 3 tuntiin (`CLAUDEJONO_SUUNNITTELU_TAUKO_S`), ellei uusi tulos ole tullut. 1.11. tyhjä kierros toistui noin 10 minuutin välein ja lisäsi `tonylle.md`:hen lähes saman kohdan kymmeniä kertoja (ja kulutti tilauksen kiintiötä). Tila tiedostossa `<työhakemisto>/suunnittelu-tila.json`. +7 testiä.
 - claudejono: yli 60 000 tavun raportti merkitään katkaistuksi (alkuperäinen koko näkyy). 1.11. koulumatka-äänikirjan M02-lähde katkesi kesken sanan ilman merkintää. +2 testiä.
 - claudejono: itsesuunnittelu lukee myos `valitavoitteet.md`:n (unelmat -> kvartaalin valitavoitteet), Tonyn paatos 1.11.2026.
