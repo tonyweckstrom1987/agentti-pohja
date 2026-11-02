@@ -542,8 +542,9 @@ class SkriptiLintTesti(unittest.TestCase):
             if p.is_file() and "__pycache__" not in p.parts:
                 b = p.read_bytes()
                 with self.subTest(p=str(p.relative_to(HL_HAKEMISTO))):
-                    b.decode("ascii")
-                    self.assertIsNone(salaisuus.search(b.decode("ascii")))
+                    # Ohjeet (.md) saavat sisaltaa skandit (kieliohje #148); skriptit ja koodi pysyvat ASCIIna.
+                    teksti = b.decode("utf-8" if p.suffix == ".md" else "ascii")
+                    self.assertIsNone(salaisuus.search(teksti))
 
     def test_pct_kutsut_kulkevat_ct_funktion_kautta(self):
         """Muuttavat pct-alikomennot kloonille saa kutsua vain ct()-funktiolla (joka validoi ID:n)."""
