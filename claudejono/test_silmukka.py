@@ -57,6 +57,28 @@ class Tarkistin(unittest.TestCase):
         t = teht("Ei mergea. Nosta kulukatto.")
         self.assertEqual(silmukka.tarkista_tehtava(t)[0], "sunnuntai")
 
+    def test_kielto_toisessa_lauseenosassa_ei_vapauta(self):
+        for lause in ("Nosta kulukatto, jos budjetti ei riita.",
+                      "Muuta budjetti 10 dollariin ilman Tonyn lupaa.",
+                      "Ei mergea ja nosta kulukatto.",
+                      "Lisaa automerge kaikkiin ilman tarkastusta.",
+                      "Julkaise paketti, ei luonnosta.",
+                      "Rajat: nosta budjetti.",
+                      "Ala merkitse mitaan vaan julkaise raportti."):
+            self.assertEqual(silmukka.tarkista_tehtava(teht(lause))[0], "sunnuntai", lause)
+
+    def test_suunta_rivin_jatko_tarkistetaan(self):
+        self.assertEqual(silmukka.tarkista_tehtava(teht(suunta="jatkoa, julkaise npm"))[0], "sunnuntai")
+
+    def test_kielto_ennen_toimintaa_vapauttaa(self):
+        for lause in ("Ei saa nostaa kulukattoa.", "Ala julkaise raporttia.", "Rajat: ei julkaista, ala muuta budjettia.",
+                      "Ala julkaise mitaan, alaka aja npm publish."):
+            self.assertEqual(silmukka.tarkista_tehtava(teht(lause)), ("ok", ""), lause)
+
+    def test_suunnittelukehote_kielto_tyhjasta_listasta(self):
+        kehote = (Path(silmukka.__file__).parent / "suunnittelu.md").read_text(encoding="utf-8")
+        self.assertIn("TONYN KAISTA EI OLE SYY TYHJAAN LISTAAN", kehote)
+
     def test_suodata_jarjestys_ja_ryhmat(self):
         lista = [{"nimi": "a", "sisalto": teht()}, {"nimi": "b", "sisalto": teht("Julkaise npm publish.")},
                  {"nimi": "c", "sisalto": "# huono"}, {"nimi": "d", "sisalto": teht()}]

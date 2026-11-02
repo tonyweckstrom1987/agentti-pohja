@@ -45,8 +45,21 @@ LUOKAT = {
     "uusi-suunta": re.compile(r"uusi suunta|uusi tuote|uusi projekti|uusi agentti|uusi palvelu|uusi repo|aloita uusi|pivot",
                               re.IGNORECASE),
 }
-# Lause, jossa kielletaan asia ("ei kulukattojen muutoksia", "ilman julkaisua"), ei ole ehdotus asiasta.
-KIELTO_RE = re.compile(r"\b(ei|eik[a\u00e4]|[a\u00e4]l[a\u00e4]|ilman|kielletty|vain luku)\b", re.IGNORECASE)
+# Kielto koskee vain sen jalkeista toimintaa samassa lauseenosassa ("ala nosta kattoa"). Sana lauseessa ei riita vapauttamaan:
+# "Nosta katto, jos budjetti ei riita" ja "Muuta budjettia ilman Tonyn lupaa" ovat ehdotuksia.
+KIELTO_RE = re.compile(r"\b(ei|eik[a\u00e4]|eiv[a\u00e4]t|ettei|[a\u00e4]l[a\u00e4]|[a\u00e4]l[a\u00e4]k[a\u00e4]|ilman|kielletty|vain luku)\b", re.IGNORECASE)
+LAUSEENOSA_RE = re.compile(r"[,:]|\s(?:ja|mutta|vaan|sek[a\u00e4])\s", re.IGNORECASE)
+
+
+def ehdottaa(lause, re_):
+    """True, jos lauseessa on osuma, jota ei edella kielto samassa lauseenosassa."""
+    for m in re_.finditer(lause):   # koko lauseesta, jotta "osta ja pida" -poikkeus toimii
+        alku = 0
+        for erotin in LAUSEENOSA_RE.finditer(lause, 0, m.start()):
+            alku = erotin.end()
+        if not KIELTO_RE.search(lause[alku:m.start()]):
+            return True
+    return False
 
 
 def lauseet(teksti):
@@ -63,7 +76,7 @@ def tarkista_tehtava(sisalto):
     """(luokka, syy). luokka: 'ok', 'sunnuntai' (Tonyn paatettava) tai 'hylatty' (muotovirhe).
 
     Hylatty: pisteytys tai suunta puuttuu. Sunnuntai: Suunta on uusi tai lause ehdottaa julkaisua, rahaa, oikeuksia,
-    kulukattoja, ajastuksia tai uutta suuntaa. Kieltolauseet ("ei saa muuttaa kattoja") eivat laukaise tarkistinta."""
+    kulukattoja, ajastuksia tai uutta suuntaa. Kielto ennen toimintaa samassa lauseenosassa ("ei saa muuttaa kattoja") ei laukaise tarkistinta."""
     if not PISTEET_RE.search(sisalto or ""):
         return "hylatty", "Pisteet-rivi puuttuu tai on virheellinen (hyoty, varmuus, vaiva h)"
     m = SUUNTA_RE.search(sisalto)
@@ -72,10 +85,8 @@ def tarkista_tehtava(sisalto):
     if m.group(1).lower() == "uusi":
         return "sunnuntai", "uusi-suunta"
     for l in lauseet(sisalto):
-        if l.lower().startswith(("rajat", "suunta:")) or KIELTO_RE.search(l):
-            continue
         for nimi, re_ in LUOKAT.items():
-            if re_.search(l):
+            if ehdottaa(l, re_):
                 return "sunnuntai", nimi
     return "ok", ""
 

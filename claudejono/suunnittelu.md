@@ -26,3 +26,5 @@ TAYDENNYS (Tonyn linjaus 2.11.2026 klo 16.10, jono ei tyhjene): ajuri kutsuu sin
 Pisteet: hyoty <1-5>, varmuus <1-5>, vaiva <tunnit> h
 Suunta: jatkoa (kompassin tai valitavoitteen kohta)
 Ajuri hylkaa tehtavan, jos jompikumpi puuttuu. Ajuri ohjaa tehtavan Tonyn sunnuntaiehdotuksiin (tonylle.md), jos Suunta on "uusi" tai jos tehtava ehdottaa julkaisua, rahankayttoa, oikeuksien, kulukattojen tai ajastusten muutosta. Nama Tony paattaa; ala yrita kiertaa tarkistinta muotoilulla. Tehtavan tuotos on PR tai raportti.
+
+TONYN KAISTA EI OLE SYY TYHJAAN LISTAAN (2.11.2026: kierros palautti 0 tehtavaa perusteena Tonyn tayden kaistan, vaikka jono oli tyhja). Taysi kaista rajaa vain tehtavia, jotka vaativat Tonyn aikaa. Silloin ehdota tehtavia, joiden tuotos ei kuormita Tonya: testit, viat, avoimien PR:ien ristiriitojen purku ja tarkastus, tuotosten faktantarkistus, jo paatettyjen asioiden pilkkominen pieniksi. Vanha data estaa vain datasta riippuvat tehtavat. Tyhja lista vain, jos kirjoitat tonylle-kenttaan, miksi mikaan naista ei sovi.
