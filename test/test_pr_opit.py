@@ -4,7 +4,7 @@ import os
 import tempfile
 import unittest
 import unittest.mock
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from agentti import pr_opit as po
 
@@ -122,6 +122,12 @@ class KirjoitusTesti(unittest.TestCase):
             self.assertEqual(os.listdir(d), [])
 
 
+def tuore(nro, otsikko):
+    """PR, joka on avattu eilen: main() kayttaa oikeaa kelloa, joten kiintea paiva vanhenisi ikkunasta (CI punainen 3.11.2026 alkaen)."""
+    eilen = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return pr(nro, otsikko, luotu=eilen, suljettu=eilen)
+
+
 class MainTesti(unittest.TestCase):
     def aja(self, argv, hae=None):
         ulos, virhe = io.StringIO(), io.StringIO()
@@ -130,7 +136,7 @@ class MainTesti(unittest.TestCase):
         return koodi, ulos.getvalue(), virhe.getvalue()
 
     def test_tulostaa_tai_kirjoittaa(self):
-        hae = feikki({"evalkit": [pr(1, "yojono: testit evalkit")]})
+        hae = feikki({"evalkit": [tuore(1, "yojono: testit evalkit")]})
         koodi, ulos, _ = self.aja([], hae)
         self.assertEqual(koodi, 0)
         self.assertIn("yojono: testit evalkit", ulos)
@@ -161,7 +167,7 @@ class MainTesti(unittest.TestCase):
         def osittain(url):
             if "/evalkit/" in url:
                 raise OSError("verkko")
-            return feikki({"ideapankki": [pr(1, "yojono: readme ideapankki")]})(url)
+            return feikki({"ideapankki": [tuore(1, "yojono: readme ideapankki")]})(url)
         with tempfile.TemporaryDirectory() as d:
             polku = os.path.join(d, "opit.md")
             koodi, _, _ = self.aja(["--kirjoita", polku], osittain)
@@ -172,7 +178,7 @@ class MainTesti(unittest.TestCase):
         def kommentit_rikki(url):
             if "/issues/" in url:
                 raise OSError("kommentit")
-            return feikki({"evalkit": [pr(1, "yojono: testit evalkit")]})(url)
+            return feikki({"evalkit": [tuore(1, "yojono: testit evalkit")]})(url)
         with tempfile.TemporaryDirectory() as d:
             polku = os.path.join(d, "opit.md")
             self.assertEqual(self.aja(["--kirjoita", polku], kommentit_rikki)[0], 1)

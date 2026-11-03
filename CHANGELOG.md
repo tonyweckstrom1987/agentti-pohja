@@ -3,6 +3,7 @@
 Muoto perustuu [Keep a Changelogiin](https://keepachangelog.com/fi/1.0.0/).
 
 ## Unreleased
+- test: `test_pr_opit` ei enää vanhene. Kiinteä PR-päivä (27.10.) putosi 7 päivän ikkunasta 3.11. klo 12, ja CI muuttui punaiseksi jokaisessa PR:ssä; `main()`-testit käyttävät nyt suhteellista päivää.
 - hiekkalaatikko: `terveystarkastus.py` muuttaa mcp-doctorin `health-check`-issuet mcp_era-listaksi ja englanninkielisiksi vastausluonnoksiksi (vain GET julkiseen API:in, mitään ei lähetetä; vieraan koodin ajo vain kun `MCP_HIEKKALAATIKKO=1`). +19 testiä.
 - claudejono: itsesuunnittelun tauko. Tyhjän kierroksen (0 tehtävää, virheellinen JSON tai aikakatkaisu) jälkeen uutta suunnittelua ei ajeta 3 tuntiin (`CLAUDEJONO_SUUNNITTELU_TAUKO_S`), ellei uusi tulos ole tullut. 1.11. tyhjä kierros toistui noin 10 minuutin välein ja lisäsi `tonylle.md`:hen lähes saman kohdan kymmeniä kertoja (ja kulutti tilauksen kiintiötä). Tila tiedostossa `<työhakemisto>/suunnittelu-tila.json`. +7 testiä.
 - claudejono: yli 60 000 tavun raportti merkitään katkaistuksi (alkuperäinen koko näkyy). 1.11. koulumatka-äänikirjan M02-lähde katkesi kesken sanan ilman merkintää. +2 testiä.
