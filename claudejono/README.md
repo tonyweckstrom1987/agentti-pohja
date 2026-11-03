@@ -68,6 +68,27 @@ Muistin lisäys (CT115, `pct set`) tehdään erikseen Tonyn toimesta hostilta; a
 - Aamukoosteen ensimmäiselle riville tulee kaistaosa (`kaistat k1 5, k2 4, rinnakkain 80 min, rajaosumia 0, …`), kun `kaistaloki.jsonl` on olemassa. Rivejä on edelleen viisi.
 - Tilauksen käyttörajasta ei ole suoraa lukua. Mitataan osumat ja kulutuksen arvio; nolla osumaa ei todista, ettei rajaa lähestytty.
 
+## Mallien työnjako, kulutusmittari ja Tonyn varaus (Tonyn suunta 3.11.2026)
+
+Jokainen tehtävä ajetaan halvimmalla mallilla, joka riittää laatuun.
+
+**Mallin valinta** (`malli.py`, taulukko `TYYPPI_MALLI` on ainoa paikka):
+1. Tehtävätiedoston rivi `Malli: opus|sonnet|openrouter:<alias>` (rivin alusta; tekstin seassa oleva maininta ei laukaise).
+2. Puuttuessa tehtävän nimen tyyppi: suunnittelu, arkkitehtuuri, tarkastus ja vaikeat viat → Opus; tarkkailu, päiväkatsaus, tiivistelmä, luokittelu ja kauppa-analyysi → OpenRouter (vain jos tehtävä ei tarvitse työkaluja, kuten PR:ää tai gitiä).
+3. Muuten Sonnet.
+Sallitut mallit ovat koodissa. Tuntematon arvo hylätään ja malli päätellään tyypistä. OpenRouter-aliakset: `deepseek-flash`, `deepseek-pro`, `qwen-coder`. Jonon itsesuunnittelu ajetaan Opuksella.
+
+**Reitit.** Claude-reitti ajaa `claude -p --model opus|sonnet`. OpenRouter-reitti kutsuu LiteLLM:ää ajurin omassa prosessissa (`litellm_ajo.py`), ilman työkaluja: se tuottaa vain tekstiraportin. Avain `CLAUDEJONO_LITELLM_KEY` luetaan ajurin ympäristöstä (Tony kirjoittaa tiedoston `/etc/claude-jono/litellm.env`, ks. palvelumallit), eikä se kulkeudu agentin ympäristöön. Samaan tiedostoon tulee myös osoite `CLAUDEJONO_LITELLM_URL=http://<LiteLLM-kontin osoite>:4000/v1` (pakollinen, ei oletusta, jottei sisäverkon osoite päädy repoon). Jos avainta tai osoitetta ei ole, OpenRouter-tehtävät jäävät jonoon eivätkä estä muita.
+
+**Kulutusmittari.** Jokaisesta ajosta tulee rivi tiedostoon `/var/lib/claude-jono/kulutus.jsonl`: malli, tokenit (syöte, tuloste, välimuisti), kesto ja kustannusarvio. Claude-ajoissa kustannus on `total_cost_usd` (API-hintainen arvo; tilauksessa se ei ole lasku). OpenRouter-ajoissa kustannus tulee LiteLLM:n vastausotsakkeesta. Aamukooste näyttää eilisen kulutuksen malleittain ja viikon kertymän.
+
+**Tonyn varaus.** Agenttien osuus Claude-tilauksen viikkorajasta on enintään 60 % (`CLAUDEJONO_AGENTTIEN_OSUUS_PROS`, yksi asetus). Prosenttia ei voi lukea koneellisesti, joten se kalibroidaan: Tony ilmoittaa asetussivun luvun "Tällä viikolla x % käytetty" 2–3 kertaa viikossa komennolla `python3 -m claudejono.varaus kalibroi <luku>`; aamukooste kysyy lukua, kun viimeisin on yli 48 h vanha. Mittari laskee prosenttimuutoksen ja agenttien API-arvon suhteen. Arvio on varovainen: koko muutos katsotaan agenttien käytöksi, joten osuus yliarvioidaan. Viikko alkaa maanantaina klo 0.00 (Helsinki); viikon yli ei verrata.
+- alle 80 % osuudesta: normaali; 80 % tai yli: yksi Claude-kaista; osuuden täyttyessä: Claude-kaistat pysähtyvät; Tonyn ilmoittama kokonaiskäyttö 90 % tai yli: pysähtyminen.
+- Ilman kalibrointia ei hidasteta, mutta aamukooste kysyy lukua. Tilan vaihtuessa Tony saa Telegram-ilmoituksen. OpenRouter-reittiä portti ei koske.
+- **Käyttörajavirhe** pysäyttää kaikki Claude-kaistat tauoksi (`CLAUDEJONO_RAJA_TAUKO_S`, oletus 3600 s). Tehtävä jää jonoon (ei tulosta) enintään kolmeksi yritykseksi, minkä jälkeen se kirjataan epäonnistuneeksi. Uutta ajoa ei yritetä silmukassa.
+
+**Laatu malleittain.** `kulutus.kirjaa_laatu(tila, malli, otos, virheita)` on laatuotoksen (tehtävä 44) kirjauspiste; ilman sitä virheprosentti lasketaan ajojen epäonnistumisista. `kulutus.siirtoehdotus` antaa viikkokatsaukseen ehdotuksen, jos OpenRouter-mallin virheprosentti on vähintään 15 prosenttiyksikköä Sonnetin yli (vähintään 10 ajoa). Se ei muuta mitään itse.
+
 ## Korjaaja: kaatuminen käynnistää diagnoosin (Tonyn toive 31.10.2026)
 
 Valvottu autonomia: agentti **diagnosoi ja ehdottaa, Tony hyväksyy**. Ei uudelleenkäynnistyksiä, ei asetusmuutoksia, ei mergeä.

@@ -18,7 +18,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from . import ajuri, kaistamittaus, vaiteportti
+from . import ajuri, kaistamittaus, kulutus, vaiteportti, varaus
 
 TZ = ZoneInfo("Europe/Helsinki")
 OLETUS_REPO = "/var/lib/claude-jono/docs"
@@ -28,6 +28,7 @@ DIGITONY_TILA = "/var/lib/yojono/digitony"        # ymparisto DIGITONY_TILA ylik
 DOCS_URL = "https://github.com/tonyweckstrom1987/agenttifirma-docs/blob/main/claude-jono"
 IKKUNA_H = 24
 RIVI_MAX = 300
+KULU_RIVI_MAX = 700   # kulutusrivi (mallit + viikko + Tonyn varaus) on pidempi kuin muut rivit
 MAX_MERGELINKKEJA = 4
 BUDJETTI_HALYTYS = 0.8   # nayttorajaus: kuukausikulu >= 80 % katosta nostetaan halytyksiin (ei muuta kattoa)
 
@@ -169,7 +170,14 @@ def keraa(repo, perus, nyt, hae=None, yksikot=None):
             huolto[avain] = importlib.import_module("agentti." + moduuli).aamurivi(os.environ.get(ymp, oletus), nyt)
         except Exception:
             huolto[avain] = None
-    return {"huolto": huolto, "nyt": nyt, "kaistat": kaistat, "tulokset": tulokset, "uudet_prt": prt, "opit": opit, "tonylle": tonylle_uudet(repo, alku),
+    kulutus_teksti = varaus_rivi = varaus_kysymys = None
+    try:   # mallikohtainen kulutus ja Tonyn varaus; puuttuva loki ei kaada koostetta
+        tila = Path(repo).parent
+        kulutus_teksti = kulutus.kulutusrivi(tila, nyt)
+        varaus_rivi, varaus_kysymys = varaus.aamukooste_osa(tila, os.environ, nyt)
+    except Exception:
+        pass
+    return {"huolto": huolto, "nyt": nyt, "kaistat": kaistat, "kulutus": kulutus_teksti, "varaus": varaus_rivi, "varaus_kysymys": varaus_kysymys, "tulokset": tulokset, "uudet_prt": prt, "opit": opit, "tonylle": tonylle_uudet(repo, alku),
             "pr": pr_ryhmat, "pr_virheita": virheet, "yojono": yojono_tila(perus, nyt),
             "yksikot": (yksikot or rikkinaiset_yksikot)(), "vaiteportti": vaiteportti.puutteet(repo)}
 
@@ -209,6 +217,8 @@ def rivit(t):
             tarvitaan_osat.append(f"{len(t['pr']['automerge'])} hoituu automergell\u00e4")
     if t["tonylle"]:
         tarvitaan_osat.append(f"{len(t['tonylle'])} uutta kohtaa tonylle.md:ss\u00e4")
+    if t.get("varaus_kysymys"):
+        tarvitaan_osat.append(t["varaus_kysymys"])
     tarvitaan = "Tarvitaan sinulta: " + ", ".join(tarvitaan_osat) + "."
 
     opittu = "Opittu: " + ("; ".join(o.rstrip(".") for o in t["opit"][:2]) if t["opit"] else "ei uusia oppeja viime vuorokaudessa") + "."
@@ -235,7 +245,8 @@ def rivit(t):
         kulut = f"Kulut: y\u00f6jono t\u00e4n\u00e4\u00e4n {paiva} USD, kuukausi {kk} USD."
     else:
         kulut = "Kulut: y\u00f6jonon tilaa ei saatu luettua."
-    return [_lyhenna(r) for r in (tehty, tarvitaan, opittu, hal, kulut)]
+    kulut = " ".join(x.rstrip(".") + "." for x in (kulut, t.get("kulutus"), t.get("varaus")) if x)
+    return [_lyhenna(r, KULU_RIVI_MAX if r is kulut else RIVI_MAX) for r in (tehty, tarvitaan, opittu, hal, kulut)]
 
 
 def linkit(t):

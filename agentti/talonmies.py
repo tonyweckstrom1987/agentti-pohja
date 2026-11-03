@@ -8,6 +8,8 @@ Kaytto:
   python3 -m agentti.talonmies ajo <tila>                      ehdotusajo; kirjoittaa raportin ja kirjanpidon
   python3 -m agentti.talonmies paata <tila> <tunniste> kylla|ei [huomio]   Tonyn paatos ehdotukseen
   python3 -m agentti.talonmies mittari <tila> [--raja 0.8] [--min 10]      osumatarkkuus toimenpiteittain
+  python3 -m agentti.talonmies snapshot-siivous <tiedosto>                 siivousehdotus pct listsnapshot -tulosteesta
+Valitsin ajo-komennolle: --halyta lahettaa sisallottoman Telegram-halytyksen, kun thin pool ylittaa halytysrajan.
 Pysaytystiedosto <tila>/PYSAYTA: kun se on olemassa, ajo ei tee mitaan.
 
 Koodi on ASCII-muotoista; ihmiselle menevat suomenkieliset tekstit kirjoitetaan \\u-koodein.
@@ -42,6 +44,21 @@ PALAUTUSTESTI_PAIVIA = 31
 KOHINA = ("dev-mqueue.mount", "run-lock.mount", "tmp.mount")   # LXC:ssa aina failed
 TUNNISTE_RE = re.compile(r"^\d{8}-[a-z0-9-]{3,40}-[0-9a-f]{6}$")
 HUOMIO_MAX = 300
+# Telegram-halytyksen otsikko on kiintea: ei lukuja, ei tunnisteita, ei dataa.
+HALYTYSOTSIKKO = {"thinpool-halytys": "Talonmies: konttilevyn thin pool ylitti h\u00e4lytysrajan",
+                  "thinpool-kiireellinen": "Talonmies: KIIREELLINEN konttilevyn thin pool l\u00e4hes t\u00e4ynn\u00e4"}
+# Konttilevyn thin pool (Tonyn raja-arvot 3.11.2026): kooste > 60 %, halytys > 75 %, kiireellinen > 85 %.
+# Raja koskee seka dataa etta metadataa (korkeampi ratkaisee). Rajat ovat ehdotusten luokitus, eivat oikeuksia.
+THIN_KOOSTE = 60
+THIN_HALYTYS = 75
+THIN_KIIREELLINEN = 85
+THIN_LVS_OSIO = "## Thin pool (lvs)"
+THIN_PVESM_OSIO = "## Tallennustila (pvesm status)"
+SNAPSHOT_RAJA = 5            # siivousehdotus kontille, jolla on enemman snapshotteja
+SNAPSHOT_PERUS = "perus-toimii"
+SNAPSHOT_UUSIMPIA = 2
+SNAPSHOT_NIMI_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,39}$")
+SNAPSHOT_RIVI_RE = re.compile(r"^[\s`|]*->\s+(\S+)(?:\s+(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}))?")
 KUUKAUDET = {m: i + 1 for i, m in enumerate(
     ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"))}
 
@@ -173,6 +190,146 @@ def ehdota_paivitykset(teksti, pvm):
     return tulos
 
 
+# ---- Thin pool ----
+
+def _osio(teksti, otsikko):
+    osat = (teksti or "").split(otsikko, 1)
+    return osat[1].split("\n## ", 1)[0] if len(osat) == 2 else None
+
+
+def _pros(arvo):
+    try:
+        v = float(arvo.replace(",", "."))
+    except ValueError:
+        return None
+    return v if 0 <= v <= 100 else None
+
+
+def jasenna_thinpool(isanta_teksti):
+    """Isannan tilatulosteesta thin poolit: [(nimi, data%, metadata% tai None)].
+
+    Ensisijainen lahde on osio '## Thin pool (lvs)' (rivit lv,vg,attr,pool,data,metadata). Jos sita ei ole, varalla
+    on 'pvesm status' (lvmthin-rivin %-sarake = data; metadata ei ole saatavilla)."""
+    tulos = []
+    lvs = _osio(isanta_teksti, THIN_LVS_OSIO)
+    if lvs is not None:
+        for rivi in lvs.splitlines():
+            k = [x.strip() for x in rivi.split(",")]
+            if len(k) == 6 and k[2][:1] == "t":
+                data, meta = _pros(k[4]), _pros(k[5])
+                if data is not None and meta is not None:
+                    tulos.append(("%s/%s" % (k[1], k[0]), data, meta))
+        return tulos
+    pvesm = _osio(isanta_teksti, THIN_PVESM_OSIO)
+    for rivi in (pvesm or "").splitlines():
+        k = rivi.split()
+        if len(k) >= 7 and k[1] == "lvmthin" and k[6].endswith("%"):
+            data = _pros(k[6][:-1])
+            if data is not None:
+                tulos.append((k[0], data, None))
+    return tulos
+
+
+def thinpool_taso(data, meta):
+    """'ok' | 'kooste' | 'halytys' | 'kiireellinen' (korkeampi arvo ratkaisee, raja on tiukasti ylittava)."""
+    suurin = max(data, meta if meta is not None else 0)
+    if suurin > THIN_KIIREELLINEN:
+        return "kiireellinen"
+    if suurin > THIN_HALYTYS:
+        return "halytys"
+    if suurin > THIN_KOOSTE:
+        return "kooste"
+    return "ok"
+
+
+def _suomi_pros(v):
+    return ("%.2f" % v).replace(".", ",") + " %"
+
+
+def thinpool_rivi(nimi, data, meta):
+    teksti = "Thin pool %s: data %s, metadata %s" % (
+        nimi, _suomi_pros(data), _suomi_pros(meta) if meta is not None else "ei luettavissa")
+    return teksti + " (taso: %s)." % thinpool_taso(data, meta)
+
+
+def ehdota_thinpool(poolit, pvm):
+    """Ylitys -> ehdotus (taso C, vain Tonylle). Toimenpiteen nimi kertoo kanavan: kooste/halytys/kiireellinen."""
+    tulos = []
+    for nimi, data, meta in poolit:
+        taso = thinpool_taso(data, meta)
+        if taso == "ok":
+            continue
+        kuvaus = {"kooste": "Rivi aamukoosteeseen.",
+                  "halytys": "H\u00e4lytys Telegramiin (sis\u00e4llt\u00f6n).",
+                  "kiireellinen": "KIIREELLINEN: h\u00e4lytys Telegramiin (sis\u00e4llt\u00f6n), kontit pys\u00e4htyv\u00e4t jos pool t\u00e4yttyy."}[taso]
+        tulos.append(ehdotus(
+            pvm, "thinpool-" + taso, nimi,
+            thinpool_rivi(nimi, data, meta) + " Rajat: kooste %d %%, h\u00e4lytys %d %%, kiireellinen %d %%." % (
+                THIN_KOOSTE, THIN_HALYTYS, THIN_KIIREELLINEN),
+            kuvaus + " Tarkista snapshotit (python3 -m agentti.talonmies snapshot-siivous). "
+            "Poisto ja LVM-asetukset ovat Tonyn p\u00e4\u00e4t\u00f6s.", taso="C"))
+    return tulos
+
+
+# ---- Snapshot-siivousehdotus (vain teksti, ei poistoja) ----
+
+def jasenna_snapshotit(teksti):
+    """Teksti, jossa osiot '## CT<id>' + `pct listsnapshot <id>` -tuloste -> {id: [(nimi, aika, jarjestys)]}.
+
+    Vain nimet, jotka tayttavat Proxmoxin nimisaannon, hyvaksytaan (data ei paase komentoihin sellaisenaan)."""
+    tulos, ct = {}, None
+    for rivi in (teksti or "").splitlines():
+        m = re.match(r"^##\s*CT(\d{3,6})\b", rivi)
+        if m:
+            ct = m.group(1)
+            tulos.setdefault(ct, [])
+            continue
+        m = SNAPSHOT_RIVI_RE.match(rivi)
+        if ct is None or not m or m.group(1) == "current" or not SNAPSHOT_NIMI_RE.match(m.group(1)):
+            continue
+        tulos[ct].append((m.group(1), m.group(2) or "", len(tulos[ct])))
+    return tulos
+
+
+def ehdota_snapshot_siivous(snapshotit):
+    """Kontit, joilla on yli SNAPSHOT_RAJA snapshotia: sailyta perus-toimii + kaksi uusinta, loput ehdotetaan poistettaviksi.
+
+    Palauttaa [{ct, yhteensa, sailyta, poista, varoitus}]. perus-toimii puuttuu -> ei poistoehdotusta (varoitus)."""
+    tulos = []
+    for ct in sorted(snapshotit, key=int):
+        lista = snapshotit[ct]
+        if len(lista) <= SNAPSHOT_RAJA:
+            continue
+        vanhimmasta = [x[0] for x in sorted(lista, key=lambda x: (x[1], x[2]))]
+        if SNAPSHOT_PERUS not in vanhimmasta:
+            tulos.append({"ct": ct, "yhteensa": len(lista), "sailyta": [], "poista": [],
+                          "varoitus": "snapshotia %s ei ole: ei poistoehdotusta, p\u00e4\u00e4t\u00e4 k\u00e4sin" % SNAPSHOT_PERUS})
+            continue
+        muut = [n for n in vanhimmasta if n != SNAPSHOT_PERUS]
+        sailyta = [SNAPSHOT_PERUS] + muut[-SNAPSHOT_UUSIMPIA:]
+        tulos.append({"ct": ct, "yhteensa": len(lista), "sailyta": sailyta,
+                      "poista": [n for n in vanhimmasta if n not in sailyta], "varoitus": ""})
+    return tulos
+
+
+def snapshot_siivousteksti(ehdotukset, snapshotit):
+    rivit = ["# Snapshot-siivousehdotus", "",
+             "Mit\u00e4\u00e4n ei ole poistettu. Poisto on Tonyn p\u00e4\u00e4t\u00f6s: ajettavat komennot ovat alla, "
+             "yksi kerrallaan Proxmox-is\u00e4nn\u00e4ll\u00e4.", ""]
+    if not ehdotukset:
+        rivit.append("Yht\u00e4\u00e4n kontteja, joilla olisi yli %d snapshotia, ei l\u00f6ytynyt (kontteja luettu: %d)." % (
+            SNAPSHOT_RAJA, len(snapshotit)))
+    for e in ehdotukset:
+        rivit += ["## CT%s: %d snapshotia" % (e["ct"], e["yhteensa"]), ""]
+        if e["varoitus"]:
+            rivit += ["- Varoitus: " + e["varoitus"], ""]
+            continue
+        rivit.append("S\u00e4ilytet\u00e4\u00e4n: " + ", ".join(e["sailyta"]) + ". Poistettavaksi ehdotetaan %d (vanhimmasta):" % len(e["poista"]))
+        rivit += ["", "```"] + ["pct delsnapshot %s %s" % (e["ct"], n) for n in e["poista"]] + ["```", ""]
+    rivit += ["Tarkistus poistojen j\u00e4lkeen: `lvs --noheadings -o lv_name,data_percent,metadata_percent konttilevy/konttilevy`.", ""]
+    return "\n".join(rivit)
+
+
 # ---- Keruu (vain luku) ----
 
 def aja_komento(nimi, suorita=subprocess.run):
@@ -195,10 +352,10 @@ def lue_palautustesti(tila):
 
 
 def keraa(tila, nyt=None, suorita=subprocess.run, hae_isanta=None):
-    """Palauttaa ehdotukset ja huomautukset (mita ei saatu luettua). Ei muuta jarjestelmaa."""
+    """Palauttaa ehdotukset, huomautukset (mita ei saatu luettua) ja tilannerivit (myos kun kaikki on kunnossa). Ei muuta jarjestelmaa."""
     nyt = nyt or datetime.now(timezone.utc)
     pvm = nyt.strftime("%Y-%m-%d")
-    ehd, huom = [], []
+    ehd, huom, tilanne = [], [], []
     for nimi, analyysi in (("epaonnistuneet", ehdota_kaatuneet), ("levy", ehdota_levy), ("paivitykset", ehdota_paivitykset)):
         try:
             ehd += analyysi(aja_komento(nimi, suorita), pvm)
@@ -214,20 +371,31 @@ def keraa(tila, nyt=None, suorita=subprocess.run, hae_isanta=None):
         huom.append("is\u00e4nn\u00e4n tila: ei luettavissa (%s)" % type(e).__name__)
     ehd += ehdota_varmuuskopiot(isanta, pvm, nyt, lue_palautustesti(tila))
     if isanta is not None:
+        poolit = jasenna_thinpool(isanta)
+        if not poolit:
+            huom.append("thin pool: ei luettavissa isannan tilasta (lis\u00e4\u00e4 lvs-osio, ks. docs/talonmies-asennus.md)")
+        tilanne += [thinpool_rivi(*p) for p in poolit]
+        if any(p[2] is None for p in poolit):
+            huom.append("thin pool: metadataa ei saatu luettua (vain pvesm status), lis\u00e4\u00e4 lvs-osio")
+        ehd += ehdota_thinpool(poolit, pvm)
         for ct, teksti in re.findall(r"## CT(\d+) epaonnistuneet palvelut\n(.*?)(?=\n## |\Z)", isanta, re.S):
             for e in ehdota_kaatuneet(teksti, pvm):
                 e["kohde"] = "ct%s:%s" % (ct, e["kohde"])
                 e["tunniste"] = tunniste(pvm, e["toimenpide"], e["kohde"])
                 ehd.append(e)
-    return ehd, huom
+    else:
+        tilanne.append("Thin pool: is\u00e4nn\u00e4n tilaa ei saatu luettua.")
+    return ehd, huom, tilanne
 
 
 # ---- Raportti ja kirjanpito ----
 
-def raportti(ehd, huom, pvm):
+def raportti(ehd, huom, pvm, tilanne=()):
     rivit = ["# Talonmies, ehdotusraportti %s" % pvm, "",
              "Ehdotustila: mit\u00e4\u00e4n ei ole tehty. Vastaa komennolla "
              "`python3 -m agentti.talonmies paata <tila> <tunniste> kylla|ei`.", ""]
+    if tilanne:
+        rivit += ["## Tilanne", ""] + ["- " + r for r in tilanne] + [""]
     if not ehd:
         rivit.append("Ei ehdotuksia: kaikki tarkistetut asiat ovat kunnossa.")
     for taso, otsikko in (("A", "Taso A (saisi tehd\u00e4 itse)"), ("B", "Taso B (snapshot ja peruutus)"),
@@ -263,20 +431,24 @@ def _liita(polku, rivi):
             f.write(json.dumps(rivi, ensure_ascii=True, sort_keys=True) + "\n")
 
 
-def ajo(tila, nyt=None, suorita=subprocess.run, hae_isanta=None):
-    """Ehdotusajo. Palauttaa (raporttiteksti, ehdotukset). Pysaytystiedosto estaa kaiken."""
+def ajo(tila, nyt=None, suorita=subprocess.run, hae_isanta=None, halyta=None):
+    """Ehdotusajo. Palauttaa (raporttiteksti, ehdotukset). Pysaytystiedosto estaa kaiken.
+
+    halyta(otsikko): valinnainen; kutsutaan kerran per uusi thinpool-halytys/kiireellinen -ehdotus (sisallotun viestin otsikolla)."""
     nyt = nyt or datetime.now(timezone.utc)
     if os.path.exists(os.path.join(tila, PYSAYTUS)):
         return "Talonmies pys\u00e4ytetty (%s on olemassa). Ei tehty mit\u00e4\u00e4n.\n" % PYSAYTUS, []
     os.makedirs(os.path.join(tila, RAPORTIT), exist_ok=True)
-    ehd, huom = keraa(tila, nyt, suorita, hae_isanta)
+    ehd, huom, tilanne = keraa(tila, nyt, suorita, hae_isanta)
     pvm = nyt.strftime("%Y-%m-%d")
-    teksti = raportti(ehd, huom, pvm)
+    teksti = raportti(ehd, huom, pvm, tilanne)
     kirjoita_atomisesti(os.path.join(tila, RAPORTIT, pvm + ".md"), teksti)
     vanhat = {r.get("tunniste") for r in _lue_jsonl(os.path.join(tila, EHDOTUKSET))}
     for e in ehd:
         if e["tunniste"] not in vanhat:      # saman paivan uusinta ei tuplaa kirjanpitoa
             _liita(os.path.join(tila, EHDOTUKSET), e)
+            if halyta and e["toimenpide"] in ("thinpool-halytys", "thinpool-kiireellinen"):
+                halyta(HALYTYSOTSIKKO[e["toimenpide"]])
     return teksti, ehd
 
 
@@ -320,12 +492,26 @@ def mittari(tila, raja=None, vahintaan=10):
     return rivit
 
 
+def _telegram_halytys(otsikko):
+    """Lahettaa kiinteaotsikkoisen halytyksen ilmoita-moduulin kautta (tunnukset sen omasta tiedostosta, nopeusraja mukana)."""
+    from . import ilmoita
+    ilmoita.ilmoita("virhe", otsikko, "Katso talonmiehen aamuraportti.")
+
+
 def main(argv=None):
     a = sys.argv[1:] if argv is None else list(argv)
     try:
-        if len(a) == 2 and a[0] == "ajo":
-            teksti, _ = ajo(a[1])
+        if len(a) in (2, 3) and a[0] == "ajo" and (len(a) == 2 or a[2] == "--halyta"):
+            teksti, _ = ajo(a[1], halyta=_telegram_halytys if len(a) == 3 else None)
             print(teksti)
+            return 0
+        if len(a) == 2 and a[0] == "snapshot-siivous":
+            try:
+                with open(a[1], encoding="utf-8") as f:
+                    snapshotit = jasenna_snapshotit(f.read())
+            except OSError as e:
+                raise TalonmiesVirhe("tiedostoa ei voi lukea (%s)" % type(e).__name__)
+            print(snapshot_siivousteksti(ehdota_snapshot_siivous(snapshotit), snapshotit))
             return 0
         if len(a) >= 4 and a[0] == "paata":
             nimi = paata(a[1], a[2], a[3], " ".join(a[4:]))
@@ -347,7 +533,7 @@ def main(argv=None):
     except (TalonmiesVirhe, ValueError) as e:
         print("VIRHE: %s" % (e if isinstance(e, TalonmiesVirhe) else type(e).__name__))
         return 1
-    print("k\u00e4ytt\u00f6: python3 -m agentti.talonmies ajo <tila> | paata <tila> <tunniste> kylla|ei [huomio] | mittari <tila>")
+    print("k\u00e4ytt\u00f6: python3 -m agentti.talonmies ajo <tila> [--halyta] | snapshot-siivous <tiedosto> | paata <tila> <tunniste> kylla|ei [huomio] | mittari <tila>")
     return 2
 
 

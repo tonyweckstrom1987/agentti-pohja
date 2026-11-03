@@ -18,6 +18,10 @@ Environment=CLAUDEJONO_CLAUDE=/var/lib/claudejono/.local/bin/claude
 Environment=CLAUDEJONO_LUPATILA=auto
 Environment="GIT_SSH_COMMAND=ssh -i /etc/claude-jono/deploy_key -o IdentitiesOnly=yes"
 EnvironmentFile=-/etc/yojono/telegram.env
+# Tonyn kirjoittama, ei repossa: CLAUDEJONO_LITELLM_KEY=... (OpenRouter-reitti, vain ajurille; agentti ei nae sita). Katso README, Mallien tyonjako.
+EnvironmentFile=-/etc/claude-jono/litellm.env
+# Yksi asetustiedosto (valinnainen): CLAUDEJONO_AGENTTIEN_OSUUS_PROS=60, CLAUDEJONO_RAJA_TAUKO_S=3600
+EnvironmentFile=-/etc/claude-jono/asetukset.env
 ExecStart=/usr/bin/python3 -B -m claudejono ajo --kaista %i
 TimeoutStartSec=3600
 # Ei NoNewPrivileges: agentin ainoa sudo-oikeus (claudejono-pr prbottina) tarvitsee sen.

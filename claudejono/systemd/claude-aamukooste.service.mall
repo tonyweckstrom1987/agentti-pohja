@@ -10,6 +10,8 @@ WorkingDirectory=/opt/agentti-pohja
 Environment=CLAUDEJONO_REPO=/var/lib/claude-jono/docs
 Environment=YOJONO_PERUS=/var/lib/yojono
 EnvironmentFile=-/etc/yojono/telegram.env
+# Sama asetustiedosto kuin ajurilla (agenttien osuus % nakyy koosteessa samana lukuna)
+EnvironmentFile=-/etc/claude-jono/asetukset.env
 # Vain luku -kasittely: ei kirjoita mihinkaan. Testaa ensin ilman --laheta.
 ExecStart=/usr/bin/python3 -B -m claudejono.aamukooste --laheta
 TimeoutStartSec=300
