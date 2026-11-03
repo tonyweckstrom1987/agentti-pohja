@@ -1,0 +1,1 @@
+- claudejono: kierrosrajaan (`error_max_turns`) kaatuneen tehtävän tulokseen kirjataan kierrokset, kulu ja istunnon tunniste. Valinnainen `CLAUDEJONO_RAPORTTIKIERROKSET` (oletus 0 eli pois) pyytää samalta istunnolta raportin tehdystä työstä; tila pysyy `EPAONNISTUI`. Peruste: 1.11. ja 3.11. kaatuneiden tehtävien tuloksessa oli vain yksi rivi.

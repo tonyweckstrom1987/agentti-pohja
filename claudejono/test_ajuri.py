@@ -82,6 +82,53 @@ class Tulkinta(unittest.TestCase):
         self.assertFalse(ajuri.tulkitse(json.dumps({"subtype": "success", "result": "x"}), 2)[0])
 
 
+class KeskeytynytAjo(Pohja):
+    IST = "abc-123"
+    KESKEN = json.dumps({"subtype": "error_max_turns", "is_error": True, "num_turns": 61, "total_cost_usd": 1.5, "session_id": IST})
+
+    def ajo(self, vastaukset, env=None, nimi="2026-10-30-01-a.md"):
+        kutsut = []
+
+        def f(kom, **kw):
+            kutsut.append(kom)
+            v = vastaukset[len(kutsut) - 1]
+            if isinstance(v, Exception):
+                raise v
+            return subprocess.CompletedProcess(kom, 1 if "error_max" in v else 0, v, "")
+        self.lisaa_tehtava(nimi, "tee")
+        ajuri.aja(self.repo, self.tmp / "tyo", env={**(env or {}), "CLAUDEJONO_CLAUDE": "claude"}, suorita=f)
+        return kutsut, (self.repo / ajuri.JONO / "tulokset" / nimi).read_text(encoding="utf-8")
+
+    def test_tiedot_tulokseen_ilman_lisaajoa_oletuksena(self):
+        kutsut, tulos = self.ajo([self.KESKEN])
+        self.assertEqual(len(kutsut), 1)
+        self.assertIn("EPAONNISTUI", tulos)
+        for osa in ("error_max_turns", "kierroksia 61", "kulu 1.50 USD", "istunto abc-123"):
+            self.assertIn(osa, tulos)
+
+    def test_raportti_kun_asetus_paalla_ja_tila_pysyy(self):
+        ok = json.dumps({"subtype": "success", "result": "Haara x tehty, y jai kesken."})
+        kutsut, tulos = self.ajo([self.KESKEN, ok], {"CLAUDEJONO_RAPORTTIKIERROKSET": "3"})
+        self.assertEqual(kutsut[1][kutsut[1].index("--resume") + 1], self.IST)
+        self.assertEqual(kutsut[1][kutsut[1].index("--max-turns") + 1], "3")
+        self.assertIn("EPAONNISTUI", tulos)
+        self.assertIn("Haara x tehty", tulos)
+
+    def test_raporttiajon_epaonnistuminen_ei_kaada(self):
+        toiset = (subprocess.TimeoutExpired("c", 1), json.dumps({"subtype": "error_max_turns", "is_error": True}), "ei json")
+        for n, toinen in enumerate(toiset, 1):
+            with self.subTest(toinen=str(toinen)[:20]):
+                _, tulos = self.ajo([self.KESKEN, toinen], {"CLAUDEJONO_RAPORTTIKIERROKSET": "3"}, f"2026-10-30-0{n}-a.md")
+                self.assertIn("istunto abc-123", tulos)
+                self.assertNotIn("Raportti keskeytyneesta", tulos)
+
+    def test_vain_kierrosraja_kaynnistaa_ja_tunniste_tarkistetaan(self):
+        self.assertIsNone(ajuri.keskeytyi_kierroksiin(json.dumps({"subtype": "error_during_execution", "session_id": "a"})))
+        self.assertIsNone(ajuri.keskeytyi_kierroksiin(json.dumps({"subtype": "error_max_turns", "session_id": "--dangerous x"})))
+        self.assertIsNone(ajuri.keskeytyi_kierroksiin("ei json"))
+        self.assertIsNone(ajuri.keskeytyi_kierroksiin("[1]"))
+
+
 class Komento(unittest.TestCase):
     def test_lupatila_vain_jos_asetettu(self):
         self.assertNotIn("--permission-mode", ajuri.claude_komento("k", {}))

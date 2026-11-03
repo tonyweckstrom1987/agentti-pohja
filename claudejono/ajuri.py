@@ -27,6 +27,9 @@ SUUNNITTELU_TAUKO_S = 3 * 3600
 SUUNNITTELU_TILA = "suunnittelu-tila.json"
 OLETUS_AIKARAJA_S = 45 * 60
 OLETUS_MAX_KIERROKSET = 60
+RAPORTTI_AIKARAJA_S = 300
+RAPORTTIKEHOTE = ("Kierrosraja tuli vastaan, ja tehtava jai kesken. Ala tee enaa muutoksia. Kirjoita raportti suomeksi: mita ehdit tehda "
+                  "(haarat, commitit, PR:t), mika jai tekematta ja mista seuraava ajo jatkaa.")
 JONO = "claude-jono"
 KEHOTE = Path(__file__).resolve().parent / "kehote.md"
 
@@ -148,9 +151,12 @@ def julkaise_opit(repo, teksti):
     return False
 
 
-def claude_komento(kehote, env):
-    kom = [env.get("CLAUDEJONO_CLAUDE", "claude"), "-p", kehote, "--output-format", "json",
-           "--max-turns", str(int(env.get("CLAUDEJONO_MAX_KIERROKSET", OLETUS_MAX_KIERROKSET)))]
+def claude_komento(kehote, env, jatka=None, kierrokset=None):
+    if kierrokset is None:
+        kierrokset = int(env.get("CLAUDEJONO_MAX_KIERROKSET", OLETUS_MAX_KIERROKSET))
+    kom = [env.get("CLAUDEJONO_CLAUDE", "claude"), "-p", kehote, "--output-format", "json", "--max-turns", str(int(kierrokset))]
+    if jatka:
+        kom += ["--resume", jatka]
     if env.get("CLAUDEJONO_LUPATILA"):
         kom += ["--permission-mode", env["CLAUDEJONO_LUPATILA"]]
     return kom
@@ -159,13 +165,13 @@ def claude_komento(kehote, env):
 RUNUSER = "/usr/sbin/runuser"
 
 
-def lapsen_ajo(kehote, env, tyohak):
+def lapsen_ajo(kehote, env, tyohak, jatka=None, kierrokset=None):
     """(komento, ymparisto, cwd) Claude-lapsiprosessille.
 
     Jos CLAUDEJONO_KAYTTAJA on asetettu (Tonyn paatos 30.10.2026), ajuri jaa rootiksi (git, deploy key, Telegram), mutta agentti
     ajetaan tavallisena kayttajana runuserilla: se ei nae deploy keyta, botin tunnusta, yojonon kattoja eika salaisuuksia, eika
     saa rootin ymparistoa. Ilman muuttujaa toiminta on ennallaan."""
-    kom = claude_komento(kehote, env)
+    kom = claude_komento(kehote, env, jatka, kierrokset)
     kayttaja = env.get("CLAUDEJONO_KAYTTAJA", "")
     if not kayttaja:
         alaenv = {k: v for k, v in env.items() if not k.startswith(("YOJONO_TELEGRAM_", "CLAUDEJONO_GIT", "GIT_SSH"))}
@@ -188,8 +194,54 @@ def tulkitse(stdout, koodi):
     teksti = d.get("result") if isinstance(d.get("result"), str) else ""
     ok = koodi == 0 and d.get("is_error") is not True and d.get("subtype", "success") == "success"
     if not ok and not teksti:
-        teksti = f"claude epaonnistui (subtype: {d.get('subtype', '?')})"
+        teksti = f"claude epaonnistui (subtype: {d.get('subtype', '?')})" + ajon_tiedot(d)
     return ok, teksti
+
+
+def ajon_tiedot(d):
+    """Keskeytyneen ajon jaljet (1.11. ja 3.11.: tuloksessa oli vain subtype, eika tehtya tyota nahnyt mistaan)."""
+    osat = []
+    if isinstance(d.get("num_turns"), int):
+        osat.append(f"kierroksia {d['num_turns']}")
+    if isinstance(d.get("total_cost_usd"), (int, float)):
+        osat.append(f"kulu {d['total_cost_usd']:.2f} USD")
+    istunto = keskeytynyt_istunto(d)
+    if istunto:
+        osat.append(f"istunto {istunto}")
+    return ", " + ", ".join(osat) if osat else ""
+
+
+def keskeytynyt_istunto(d):
+    i = d.get("session_id")
+    return i if isinstance(i, str) and re.fullmatch(r"[A-Za-z0-9-]{1,64}", i) else None
+
+
+def keskeytyi_kierroksiin(stdout):
+    """Istunnon tunniste, jos ajo loppui kierrosrajaan. Muuten None."""
+    try:
+        d = json.loads(stdout)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(d, dict) or d.get("subtype") != "error_max_turns":
+        return None
+    return keskeytynyt_istunto(d)
+
+
+def keskeytyneen_raportti(istunto, env, tyohak, suorita):
+    """Pyytaa kierrosrajaan loppuneelta istunnolta raportin tehdysta tyosta. None, jos ei kaytossa tai ei onnistu.
+
+    CLAUDEJONO_RAPORTTIKIERROKSET on oletuksena 0 eli pois: arvo lisaa kierroksia kierrosrajan paalle, joten kayttoonotto on
+    Tonyn paatos. Tulos pysyy EPAONNISTUI-tilassa, eika raportin opit paivity."""
+    kierrokset = int(env.get("CLAUDEJONO_RAPORTTIKIERROKSET", 0))
+    if kierrokset <= 0:
+        return None
+    kom, alaenv, cwd = lapsen_ajo(RAPORTTIKEHOTE, env, tyohak, jatka=istunto, kierrokset=kierrokset)
+    try:
+        r = suorita(kom, cwd=cwd, capture_output=True, text=True, timeout=RAPORTTI_AIKARAJA_S, env=alaenv, check=False)
+    except subprocess.TimeoutExpired:
+        return None
+    ok, teksti = tulkitse(r.stdout, r.returncode)
+    return teksti if ok and teksti.strip() else None
 
 
 def kirjoita_tulos(repo, nimi, ok, teksti, nyt=None):
@@ -367,6 +419,10 @@ def aja(repo, tyohak, env=None, suorita=subprocess.run, laheta=None):
         r = suorita(kom, cwd=cwd, capture_output=True, text=True,
                     timeout=int(env.get("CLAUDEJONO_AIKARAJA_S", OLETUS_AIKARAJA_S)), env=alaenv, check=False)
         ok, teksti = tulkitse(r.stdout, r.returncode)
+        istunto = keskeytyi_kierroksiin(r.stdout)
+        raportti = keskeytyneen_raportti(istunto, env, tyohak, suorita) if istunto else None
+        if raportti:
+            teksti = f"{teksti}\n\n## Raportti keskeytyneesta ajosta\n\n{raportti}"
     except subprocess.TimeoutExpired:
         ok, teksti = False, "aikakatkaisu"
     polku = kirjoita_tulos(repo, t.name, ok, teksti)
