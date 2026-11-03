@@ -3,6 +3,7 @@
 Muoto perustuu [Keep a Changelogiin](https://keepachangelog.com/fi/1.0.0/).
 
 ## Unreleased
+- claudejono: tehtävän `Kaista: N` -rivi kiinnittää tehtävän kaistalle N. Muut kaistat ohittavat sen, ja kaista N ottaa ensin omat kiinnitetyt, sitten vapaat (Tonyn päätös 3.11.2026: yksi kaista agenttialustalle). Rivi, jota ei voi toteuttaa (puuttuva kaista), tulkitaan vapaaksi. Kattoihin ja ajastimiin ei kosketa. +10 testiä (jäsennys, valinta, kilpa-ajo kolmella kaistalla oikeilla prosesseilla). Toiselle kaistalle kiinnitetyt eivät täytä suunnittelukiintiötä, joten pitkä kiinnitetty sarja ei jätä muita kaistoja joutilaiksi.
 - hiekkalaatikko: MCP-tarkastuksen skripteistä ja ohjeesta poistettu sisäverkon osoitteet (LAN, Tailscale, proxy ja kontin osoite). Proxy (`MCP_ERA_PROXY`) ja estettävät osoitteet (`MCP_ERA_ESTETYT`) annetaan ajettaessa ympäristömuuttujilla; `mcp_era.py` ei aja ilman proxya (kuiva-ajo toimii).
 - hiekkalaatikko: MCP-tarkastuksen pystytysohje (`hiekkalaatikko/mcp-tarkastus.md`, 8 komentoa), erän ajoskripti `mcp_era.py` (kloonaa listan repot, ajaa `mcp-doctor --json`, kerää yhteen JSON-tiedostoon, kuiva-ajo ja tarkistus), kontin asennusskripti `mcp-asenna.sh` ja 22 testiä. Mitään ei ole ajettu isännällä. Vaatii PR #136:n (hiekkalaatikko).
 - hiekkalaatikko: `terveystarkastus.py` muuttaa mcp-doctorin `health-check`-issuet mcp_era-listaksi ja englanninkielisiksi vastausluonnoksiksi (vain GET julkiseen API:in, mitään ei lähetetä; vieraan koodin ajo vain kun `MCP_HIEKKALAATIKKO=1`). +19 testiä.
