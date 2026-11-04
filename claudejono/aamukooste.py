@@ -14,7 +14,7 @@ import os
 import re
 import subprocess
 import sys
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -28,6 +28,7 @@ IKKUNA_H = 24
 RIVI_MAX = 300
 KULU_RIVI_MAX = 700   # kulutusrivi (mallit + viikko + Tonyn varaus) on pidempi kuin muut rivit
 MAX_MERGELINKKEJA = 4
+KOE_IKKUNA_PV = 16   # koetila: koepaivaa edeltavat 1..16 paivaa (koepaiva itse asetuksesta CLAUDEJONO_KOEPAIVA, ei koodissa)
 BUDJETTI_HALYTYS = 0.8   # nayttorajaus: kuukausikulu >= 80 % katosta nostetaan halytyksiin (ei muuta kattoa)
 
 TYHJA_OPPI_RE = re.compile(r"(?i)^(t[a\u00e4]m[a\u00e4] ajo ei|ei uutta|ei uusia|ei opittu|ei mit[a\u00e4][a\u00e4]n)")
@@ -176,6 +177,27 @@ def _lyhenna(teksti, raja=RIVI_MAX):
     return teksti if len(teksti) <= raja else teksti[:raja - 3].rstrip() + "..."
 
 
+def halytysrivi(t):
+    """H\u00e4lytysrivi (sama tavallisessa koosteessa ja koetilassa); tunnistetaan funktiosta, ei rivin j\u00e4rjestysnumerosta."""
+    yj = t["yojono"]
+    epaonnistui = sum(1 for r in t["tulokset"] if r["tila"] == "EPAONNISTUI")
+    halytykset = []
+    if t["yksikot"] is None:
+        halytykset.append("systemd-tilaa ei saatu")
+    elif t["yksikot"]:
+        halytykset.append("failed: " + ", ".join(t["yksikot"][:3]) + (f" (+{len(t['yksikot']) - 3})" if len(t["yksikot"]) > 3 else ""))
+    if t.get("vaiteportti"):
+        halytykset.append("v\u00e4iteportti: " + ", ".join(t["vaiteportti"][:3]) + " valmis ilman .tarkastus.md-tiedostoa")
+    if epaonnistui:
+        halytykset.append(f"{epaonnistui} jonoteht\u00e4v\u00e4\u00e4 ep\u00e4onnistui")
+    if yj and yj["epaonnistui"]:
+        halytykset.append("y\u00f6jono ep\u00e4onnistui: " + ", ".join(yj["epaonnistui"][:3]))
+    if yj and isinstance(yj["kuukausikatto"], (int, float)) and yj["kuukausikatto"] > 0 \
+            and yj["kuukausikulu"] >= BUDJETTI_HALYTYS * yj["kuukausikatto"]:
+        halytykset.append(f"kuukausibudjetista k\u00e4ytetty {round(100 * yj['kuukausikulu'] / yj['kuukausikatto'])} %")
+    return "H\u00e4lytykset: " + ("; ".join(halytykset) if halytykset else "ei") + "."
+
+
 def rivit(t):
     """Viisi rivi\u00e4 (tehty, tarvitaan, opittu, h\u00e4lytykset, kulut) tiedoista."""
     nimet = {"VALMIS": 0, "KESKEN": 0, "EPAONNISTUI": 0, "HYLATTY": 0}
@@ -211,21 +233,7 @@ def rivit(t):
 
     opittu = "Opittu: " + ("; ".join(o.rstrip(".") for o in t["opit"][:2]) if t["opit"] else "ei uusia oppeja viime vuorokaudessa") + "."
 
-    halytykset = []
-    if t["yksikot"] is None:
-        halytykset.append("systemd-tilaa ei saatu")
-    elif t["yksikot"]:
-        halytykset.append("failed: " + ", ".join(t["yksikot"][:3]) + (f" (+{len(t['yksikot']) - 3})" if len(t["yksikot"]) > 3 else ""))
-    if t.get("vaiteportti"):
-        halytykset.append("v\u00e4iteportti: " + ", ".join(t["vaiteportti"][:3]) + " valmis ilman .tarkastus.md-tiedostoa")
-    if nimet["EPAONNISTUI"]:
-        halytykset.append(f"{nimet['EPAONNISTUI']} jonoteht\u00e4v\u00e4\u00e4 ep\u00e4onnistui")
-    if yj and yj["epaonnistui"]:
-        halytykset.append("y\u00f6jono ep\u00e4onnistui: " + ", ".join(yj["epaonnistui"][:3]))
-    if yj and isinstance(yj["kuukausikatto"], (int, float)) and yj["kuukausikatto"] > 0 \
-            and yj["kuukausikulu"] >= BUDJETTI_HALYTYS * yj["kuukausikatto"]:
-        halytykset.append(f"kuukausibudjetista k\u00e4ytetty {round(100 * yj['kuukausikulu'] / yj['kuukausikatto'])} %")
-    hal = "H\u00e4lytykset: " + ("; ".join(halytykset) if halytykset else "ei") + "."
+    hal = halytysrivi(t)
 
     if yj:
         paiva = f"{yj['kulu_tanaan']:.2f}" + (f" / {yj['paivakatto']:.2f}" if isinstance(yj["paivakatto"], (int, float)) else "")
@@ -249,7 +257,45 @@ def linkit(t):
     return ulos
 
 
-def muotoile(t):
+def koe_jaljella(env, nyt):
+    """Koetila: (koepaiva, paivia jaljella), jos CLAUDEJONO_KOEPAIVA (ISO-pvm) on 1..KOE_IKKUNA_PV paivan paassa, muuten None.
+    `nyt` annetaan parametrina (ei omaa kelloa); puuttuva tai virheellinen asetus = koetila pois."""
+    try:
+        koe = date.fromisoformat((env.get("CLAUDEJONO_KOEPAIVA") or "").strip())
+    except ValueError:
+        return None
+    n = (koe - nyt.astimezone(TZ).date()).days
+    return (koe, n) if 1 <= n <= KOE_IKKUNA_PV else None
+
+
+def _koe_otsikko(koe, n):
+    paivia = "1 p\u00e4iv\u00e4" if n == 1 else f"{n} p\u00e4iv\u00e4\u00e4"
+    return f"Matematiikan koe {_suomi_pvm(koe)}: {paivia}. Aamu kokeelle."
+
+
+def kiireelliset(t):
+    """tonylle.md:n kohdat, joiden otsikossa on KIIREELLINEN (yhden napin paatos, joka ei odota)."""
+    return [o for _, o in t["tonylle"] if "KIIREELL" in o.upper()]
+
+
+def koe_muotoile(t, koe, n):
+    """Koeaamun viesti: vain koe-otsikko, halytykset ja kiireelliset paatokset. Halytysrivi on sama kuin tavallisessa koosteessa."""
+    rv = [_koe_otsikko(koe, n), _lyhenna(halytysrivi(t))]
+    kiire = kiireelliset(t)
+    if kiire:
+        rv.append(_lyhenna("Kiireelliset p\u00e4\u00e4t\u00f6kset: " + "; ".join(kiire[:3]) + "."))
+    rv.append("Muu infra (luonnokset, julkaisut, PR:t): viikonlopun listassa, merkint\u00e4 \"kokeen j\u00e4lkeen\".")
+    ulos = "\n".join(rv)
+    if kiire:
+        ulos += f"\n\nLinkit:\ntonylle.md: {DOCS_URL}/tonylle.md"
+    return ulos
+
+
+def muotoile(t, env=None):
+    """Normaali kooste; koetilassa (ks. koe_jaljella) vain koe-otsikko, halytykset ja kiireelliset."""
+    koe = koe_jaljella(os.environ if env is None else env, t["nyt"])
+    if koe is not None:
+        return koe_muotoile(t, *koe)
     return "\n".join(rivit(t)) + "\n\nLinkit:\n" + "\n".join(linkit(t))
 
 
