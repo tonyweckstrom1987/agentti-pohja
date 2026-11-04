@@ -14,6 +14,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import threading
@@ -441,6 +442,54 @@ def tulkitse(stdout, koodi):
     return ok, teksti
 
 
+# Viimeinen viesti ei aina ole raportti: taustatehtavan ilmoitus herattaa uuden vuoron, ja `result` on silloin vain jalkikommentti
+# (tulokset 2026-11-03-23 ja 2026-11-04-19: koko raportti katosi). Kehote vaatii osion "Tonylle opittavaa", joten sen puuttuminen paljastaa tilanteen.
+RAPORTTI_MERKKI = "## Tonylle opittavaa"
+ISTUNTOLOKI_MAX_TAVUA = 64 * 1024 * 1024
+ISTUNTO_RE = re.compile(r"^[0-9a-fA-F-]{8,64}$")
+
+
+def _lue_istuntoloki(polku):
+    """Tiedoston tavut tai None. Ajuri voi olla root ja tiedosto agentin: ei symlinkkeja, kovia linkkeja eika ylisuuria tiedostoja."""
+    try:
+        fd = os.open(polku, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError:
+        return None
+    with os.fdopen(fd, "rb") as f:
+        st = os.fstat(f.fileno())
+        if not stat.S_ISREG(st.st_mode) or st.st_nlink != 1 or st.st_size > ISTUNTOLOKI_MAX_TAVUA:
+            return None
+        return f.read(ISTUNTOLOKI_MAX_TAVUA + 1)
+
+
+def palauta_raportti(teksti, stdout, koti):
+    """Jos viimeisesta viestista puuttuu raportin loppuosio, hae se saman istunnon lokista. Muuten teksti ennallaan; virhe ei kaada ajoa."""
+    if RAPORTTI_MERKKI in (teksti or "") or not koti:
+        return teksti
+    try:
+        istunto = json.loads(stdout).get("session_id")
+        if not isinstance(istunto, str) or not ISTUNTO_RE.match(istunto):
+            return teksti
+        polut = sorted((Path(koti) / ".claude" / "projects").glob(f"*/{istunto}.jsonl"))
+    except (ValueError, TypeError, AttributeError, OSError):
+        return teksti
+    loydetty = ""
+    for polku in polut[:1]:
+        for rivi in (_lue_istuntoloki(polku) or b"").decode("utf-8", "ignore").splitlines():
+            try:
+                d = json.loads(rivi)
+                if d.get("type") != "assistant" or d.get("isSidechain") or d.get("sessionId") != istunto:
+                    continue
+                for osa in d["message"]["content"]:
+                    if osa.get("type") == "text" and RAPORTTI_MERKKI in osa.get("text", ""):
+                        loydetty = osa["text"]
+            except (ValueError, KeyError, TypeError, AttributeError):
+                continue
+    if not loydetty:
+        return teksti
+    return f"{loydetty}\n\n[AJURI: raportti palautettu istuntolokista. Agentin viimeinen viesti oli:]\n\n{teksti}"
+
+
 def kirjoita_tulos(repo, nimi, ok, teksti, nyt=None, tila=None, malli=None):
     nyt = nyt or datetime.now().astimezone()
     polku = Path(repo) / JONO / "tulokset" / nimi
@@ -781,6 +830,8 @@ def aja(repo, tyohak, env=None, suorita=subprocess.run, laheta=None, kaista=1, l
                 r = suorita(kom, cwd=cwd, capture_output=True, text=True,
                             timeout=int(env.get("CLAUDEJONO_AIKARAJA_S", OLETUS_AIKARAJA_S)), env=alaenv, check=False)
                 ok, teksti = tulkitse(r.stdout, r.returncode)
+                if ok:
+                    teksti = palauta_raportti(teksti, r.stdout, alaenv.get("HOME"))
                 luvut = kulutus.claude_luvut(getattr(r, "stdout", "") or "")
             except subprocess.TimeoutExpired:
                 ok, teksti = False, "aikakatkaisu"

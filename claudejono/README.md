@@ -9,6 +9,8 @@ Pilvi-Claude ei pääse Tailscale-verkkoon, mutta molemmat pääsevät GitHubiin
 
 Rajat (Tony hyväksyi 30.10.2026, doc 71): PR-taso, ei mergeä, ei katto-/oikeusmuutoksia, ei salaisuuksia, ei poistoja. Kehote: `kehote.md`. Ajuri committaa vain tulostiedostot, `-auto-`-tehtävät ja `tonylle.md`:n (testattu).
 
+**Kadonneen raportin palautus:** jos agentin viimeisestä viestistä puuttuu osio `## Tonylle opittavaa` (esim. taustatehtävän ilmoitus herätti vielä yhden vuoron), ajuri hakee viimeisen sen sisältävän viestin saman istunnon lokista `~/.claude/projects/*/<session_id>.jsonl` ja lisää jälkikommentin perään. Symlinkkejä, kovia linkkejä, alitehtäviä ja yli 64 Mt:n lokeja ei lueta.
+
 ## Käyttöönotto CT115:ssä (Tony, kerran)
 
 1. `claude` → `/status`: kirjautuminen tilauksella (ei API-avainta).
