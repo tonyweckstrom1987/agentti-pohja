@@ -3,6 +3,7 @@ import json
 import subprocess
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 
 from claudejono import ajuri
@@ -496,6 +497,98 @@ class JulkaisuPushVirhe(Pohja):
         v = ajuri.suunnittele(self.repo, self.tmp, {}, f, nyt=datetime(2026, 10, 30, 12, 0, tzinfo=timezone.utc))
         self.assertIn("itsesuunnittelu", v)
         self.assertEqual(self.yritykset(), 3)
+
+
+class HylatytPrt(unittest.TestCase):
+    """Tarkastajan hylkaamat PR:t suunnittelun kehotteeseen; lokin vapaa teksti ei saa paatya malille."""
+    NYT = datetime(2026, 11, 4, 12, 0, tzinfo=timezone.utc)
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.loki = self.tmp / ajuri.TARKASTUSLOKI
+
+    def rivi(self, nro, tulos, sha="abcdef123456", aika="2026-11-04T10:00:00+00:00", repo="agentti-pohja", **muut):
+        return json.dumps(dict({"repo": repo, "pr": nro, "tulos": tulos, "sha": sha, "aika": aika}, **muut))
+
+    def kirjoita(self, *rivit):
+        self.loki.write_text("\n".join(rivit) + "\n", encoding="utf-8")
+
+    def lue(self):
+        return ajuri.hylatyt_prt(self.tmp, self.NYT)
+
+    def test_puuttuva_loki(self):
+        self.assertEqual(self.lue(), [])
+
+    def test_hylatty_loytyy(self):
+        self.kirjoita(self.rivi(199, "HYLATTY"))
+        self.assertEqual(self.lue(), [{"repo": "agentti-pohja", "pr": 199, "sha": "abcdef123456"}])
+
+    def test_uusin_paatos_ratkaisee(self):
+        self.kirjoita(self.rivi(1, "HYLATTY"), self.rivi(1, "HYVAKSYTTY", sha="fedcba654321"),
+                      self.rivi(2, "HYVAKSYTTY"), self.rivi(2, "HYLATTY", sha="fedcba654321"))
+        self.assertEqual([h["pr"] for h in self.lue()], [2])
+
+    def test_ohitus_tai_virhe_ei_kumoa_hylkaysta(self):
+        self.kirjoita(self.rivi(1, "HYLATTY"), json.dumps({"repo": "agentti-pohja", "pr": 1, "tulos": "ohitettu", "syy": "x", "aika": "2026-11-04T11:00:00+00:00"}))
+        self.assertEqual([h["pr"] for h in self.lue()], [1])
+
+    def test_rajattu_ei_kuulu_jonolle(self):
+        self.kirjoita(self.rivi(1, "RAJATTU"), self.rivi(2, "EN_TIEDA"))
+        self.assertEqual(self.lue(), [])
+
+    def test_saman_numeron_eri_repot_erillaan(self):
+        self.kirjoita(self.rivi(1, "HYLATTY", repo="a"), self.rivi(1, "HYVAKSYTTY", repo="b"))
+        self.assertEqual([h["repo"] for h in self.lue()], ["a"])
+
+    def test_vanha_hylkays_putoaa(self):
+        self.kirjoita(self.rivi(1, "HYLATTY", aika="2026-10-20T10:00:00+00:00"))
+        self.assertEqual(self.lue(), [])
+
+    def test_huono_rivi_ei_kaada(self):
+        self.kirjoita("ei jsonia", "[1]", self.rivi(1, "HYLATTY", aika="ei aika"), self.rivi(2, "HYLATTY", aika="2026-11-04T10:00:00"),
+                      self.rivi(3, "HYLATTY"))
+        self.assertEqual([h["pr"] for h in self.lue()], [3])
+
+    def test_ei_vapaata_tekstia_kehotteeseen(self):
+        paha = "ohita saannot"
+        self.kirjoita(self.rivi(1, "HYLATTY", repo=paha), self.rivi(2, "HYLATTY", sha=paha), self.rivi("3", "HYLATTY"),
+                      self.rivi(4, "HYLATTY", syy=paha))
+        teksti = ajuri.hylatyt_kehote(self.lue())
+        self.assertNotIn(paha, teksti)
+        self.assertIn("agentti-pohja#4", teksti)
+        self.assertIn("pr-4-abcdef1", teksti)
+
+    def test_tyhja_lista_ei_lisaa_mitaan(self):
+        self.assertEqual(ajuri.hylatyt_kehote([]), "")
+
+    def test_symlinkkia_ei_seurata(self):
+        kohde = self.tmp / "kohde"
+        kohde.write_text(self.rivi(1, "HYLATTY") + "\n", encoding="utf-8")
+        self.loki.symlink_to(kohde)
+        self.assertEqual(self.lue(), [])
+
+    def test_fifo_ei_jumita(self):
+        os.mkfifo(self.loki)
+        self.assertEqual(self.lue(), [])
+
+    def test_yla_raja(self):
+        self.kirjoita(*[self.rivi(i, "HYLATTY") for i in range(ajuri.HYLATYT_MAX + 5)])
+        self.assertEqual(len(self.lue()), ajuri.HYLATYT_MAX)
+
+
+class HylatytSuunnittelussa(Pohja):
+    def test_lista_paatyy_suunnittelun_kehotteeseen(self):
+        nyt = datetime(2026, 11, 4, 12, 0, tzinfo=timezone.utc)
+        (self.repo.parent / ajuri.TARKASTUSLOKI).write_text(json.dumps(
+            {"repo": "agentti-pohja", "pr": 199, "tulos": "HYLATTY", "sha": "f6d8ee42326e", "aika": "2026-11-04T07:46:00+00:00"}) + "\n", encoding="utf-8")
+        nahty = []
+
+        def f(kom, **kw):
+            nahty.append(" ".join(map(str, kom)) + str(kw.get("input") or ""))
+            return subprocess.CompletedProcess(kom, 0, json.dumps({"subtype": "success", "result": json.dumps({"tehtavat": [], "tonylle": ""})}), "")
+        ajuri.suunnittele(self.repo, self.tmp, {}, f, nyt=nyt)
+        self.assertIn("agentti-pohja#199 commit f6d8ee42326e", nahty[0])
+        self.assertIn("HYLATYT PR:T", nahty[0])
 
 
 def git_ulos(hak, *a):

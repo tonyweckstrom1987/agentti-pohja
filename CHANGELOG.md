@@ -3,6 +3,7 @@
 Muoto perustuu [Keep a Changelogiin](https://keepachangelog.com/fi/1.0.0/).
 
 ## Unreleased
+- claudejono: itsesuunnittelu saa tarkastajan hylkäämät PR:t lokista ja ehdottaa niille korjaustehtävän ennen muita. Aiemmin hylkäys jäi makaamaan, koska mikään ei vienyt sitä jonoon.
 - claudejono: tehtävän `Kaista: N` -rivi kiinnittää tehtävän kaistalle N. Muut kaistat ohittavat sen, ja kaista N ottaa ensin omat kiinnitetyt, sitten vapaat (Tonyn päätös 3.11.2026: yksi kaista agenttialustalle). Rivi, jota ei voi toteuttaa (puuttuva kaista), tulkitaan vapaaksi. Kattoihin ja ajastimiin ei kosketa. +10 testiä (jäsennys, valinta, kilpa-ajo kolmella kaistalla oikeilla prosesseilla).
 - hiekkalaatikko: MCP-tarkastuksen skripteistä ja ohjeesta poistettu sisäverkon osoitteet (LAN, Tailscale, proxy ja kontin osoite). Proxy (`MCP_ERA_PROXY`) ja estettävät osoitteet (`MCP_ERA_ESTETYT`) annetaan ajettaessa ympäristömuuttujilla; `mcp_era.py` ei aja ilman proxya (kuiva-ajo toimii).
 - hiekkalaatikko: MCP-tarkastuksen pystytysohje (`hiekkalaatikko/mcp-tarkastus.md`, 8 komentoa), erän ajoskripti `mcp_era.py` (kloonaa listan repot, ajaa `mcp-doctor --json`, kerää yhteen JSON-tiedostoon, kuiva-ajo ja tarkistus), kontin asennusskripti `mcp-asenna.sh` ja 22 testiä. Mitään ei ole ajettu isännällä. Vaatii PR #136:n (hiekkalaatikko).

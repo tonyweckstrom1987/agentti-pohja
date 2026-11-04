@@ -164,6 +164,8 @@ Ketju:
 4. Ohjelma kirjoittaa PR:ään kommentin, jonka lopussa on merkki `riippumaton-tarkastus v1 sha=... paatos=...`.
 5. Kommentti käynnistää Automerge-työnkulun. Se kytkee auto-mergen vain paatos=HYVAKSYTTY-merkinnälle ja vain samaan commitiin (`--match-head-commit`).
 
+Hylätyt jonoon: itsesuunnittelu lukee tarkastajan lokista (`tarkastukset.jsonl`, sama kone) PR:t, joiden uusin päätös on HYLATTY (enintään 7 pv vanha, 10 kpl), ja ehdottaa niille korjaustehtävän (`suunnittelu.md`). Kehotteeseen viedään vain repo, numero ja commit, ei lokin tekstiä. Rajatut jäävät Tonylle.
+
 PR-avaaja: sama kierros avaa ensin botin tunnuksella PR:n jokaiselle Tonyn repon haaralle `korjaus/<nimi>`, jolla ei ole vielä PR:ää (ei myöskään suljettua). Näihin haaroihin pushaavat vain Tony ja pilvi-Claude. Enintään 10 avausta vuorokaudessa. Pois päältä: `CLAUDEJONO_PR_AVAAJA=0`.
 
 Rajat: 40 tarkastusta vuorokaudessa, 6 per PR ja diff enintään 150 kt. Isompi diff on Tonylle. Kaikki epäselvä on Tonylle.
