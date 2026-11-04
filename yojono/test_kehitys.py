@@ -191,6 +191,33 @@ class Ajo(Pohja):
         self.assertIn("testit punaisella", rap)
         self.assertEqual(self.kutsut(), "")
 
+    def test_punainen_raportti_nimeaa_kaatuneen_testin_vaikka_stdout_tulee_viimeisena(self):
+        # Raportti 4.11.: lokin hanta oli stdout-tuloste, joten syy ei nakynyt.
+        self.agentti_skripti('printf "import unittest\\nclass B(unittest.TestCase):\\n    def test_b(self):\\n        print(\\"muuta tulostetta\\")\\n        self.fail()\\n" > test/test_b.py')
+        self.pr_kutsu()
+        self.assertEqual(self.aja(REPO, "1.00", "testit").returncode, 1)
+        rap = self.raportti("testit")
+        self.assertIn("punainen (koodi 1: ", rap)
+        self.assertIn("FAIL: test_b", rap)
+        self.assertIn("FAILED (failures=1)", rap)
+
+    def test_aikakatkaistu_sarja_ei_ole_punainen_eika_avaa_prta(self):
+        # Havainto 4.11.: kill-timeout naytti raportissa punaisilta testeilta, vaikka sarja oli kesken.
+        self.agentti_skripti('printf "import time, unittest\\nclass B(unittest.TestCase):\\n    def test_b(self):\\n        time.sleep(30)\\n" > test/test_b.py')
+        self.pr_kutsu()
+        self.assertEqual(self.aja(REPO, "1.00", "testit", YOJONO_TESTI_AIKARAJA="1").returncode, 1)
+        rap = self.raportti("testit")
+        self.assertIn("ei valmistunut (1 s aikaraja", rap)
+        self.assertIn("testit aikakatkaistu 1 s jalkeen", rap)
+        self.assertNotIn("punainen", rap)
+        self.assertEqual(self.kutsut(), "")
+
+    def test_aikaraja_riittaa_sarjalle_oletuksella_ja_virheellisella_arvolla(self):
+        self.agentti_skripti('printf "import unittest\\nclass B(unittest.TestCase):\\n    def test_b(self):\\n        self.assertEqual(1, 1)\\n" > test/test_b.py')
+        self.pr_kutsu()
+        self.assertEqual(self.aja(REPO, "1.00", "testit", YOJONO_TESTI_AIKARAJA="ei-numero").returncode, 0)
+        self.assertIn("Testit: vihrea", self.raportti("testit"))
+
     def _lahde_muutos(self, *args, tiedostot=None):
         r = self.lahde / REPO
         for polku, teksti in (tiedostot or {}).items():

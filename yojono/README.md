@@ -46,6 +46,7 @@ Epäonnistunut tai ohitettu tehtävä saa vakaan koodin. Koodi näkyy `tila.json
 | `skripti_ei_kaynnisty` | tehtäväskriptiä ei voitu käynnistää |
 | `pr_kutsu_epaonnistui` | PR:n avaus epäonnistui muusta syystä kuin forkin synkkauksesta |
 | `testit_punaiset` | kehitys: testit punaisella agentin muutosten jälkeen |
+| `testit_aikakatkaisu` | kehitys: testisarja ei valmistunut aikarajassa (`YOJONO_TESTI_AIKARAJA`, oletus 900 s), tulos ei tiedossa |
 | `fork_jaljessa` | fork jäi jälkeen ylävirrasta synkkauksen jälkeen |
 | `fork_ei_ff` | fork-main eroaa ylävirrasta (ei fast-forward): mitään ei tehty |
 | `fork_push_epaonnistui` | forkin synkkauksen push epäonnistui |

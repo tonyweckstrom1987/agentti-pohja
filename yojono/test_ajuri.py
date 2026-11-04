@@ -1258,6 +1258,10 @@ class TestVirhekoodit(Pohja):
         s = self.kehitys_skripti("testit punaisella agentin muutosten jalkeen: PR:aa ei avattu")
         self.assertEqual(ajuri.suorita_katselmointi(self.KEHITYS, PVM, self.perus, s).koodi, "testit_punaiset")
 
+    def test_kehitys_testit_aikakatkaistu(self):
+        s = self.kehitys_skripti("testit aikakatkaistu 1200 s jalkeen: PR:aa ei avattu")
+        self.assertEqual(ajuri.suorita_katselmointi(self.KEHITYS, PVM, self.perus, s).koodi, "testit_aikakatkaisu")
+
     def test_luokittele_virhe_ensisijaisuus(self):
         meta_budj = {"subtype": "error_max_budget_usd"}
         self.assertEqual(ajuri.luokittele_virhe("fork_ei_ff unrecognized_model", True, True, meta_budj), "budjetti_loppui")

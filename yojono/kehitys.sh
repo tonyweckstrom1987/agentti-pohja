@@ -88,15 +88,19 @@ testaa() {
         timeout 600 npm rebuild "$pkg" --no-audit --no-fund || return 1
       fi
     done
-    timeout 600 npm test
+    timeout "$TESTI_AIKARAJA" npm test
   else
     # Havainto 1.11. (laatutarkkailu): `test`-paketti voi ratketa ajurin hakemistoon (PYTHONPATH tai tyohakemisto), jolloin
     # kloonin testit eivat aja ja raportti nayttaa vihreaa vaaran sarjan perusteella. Siksi: ajurin polku pois ymparistosta,
     # ajo kloonin juuressa ja tarkistus, etta jokainen ladattu testimoduuli sijaitsee kloonin sisalla.
     ( unset PYTHONPATH PYTHONHOME; cd "$KLOONI" || exit 1
-      timeout 600 python3 -B -c "$PY_TESTAA" )
+      timeout "$TESTI_AIKARAJA" python3 -B -c "$PY_TESTAA" )
   fi
 }
+# Koko sarjan aikaraja sekunteina (ennen kiintea 600 s). agentti-pohjan sarja kesti 4.11. kuormittamattomalla koneella 410 s, joten vara oli pieni.
+# Ajurin raja koko tehtavalle on 1800 s (TEHTAVA_AIKARAJA_S), joten tama ja agentin aika pitaa mahtua siihen.
+TESTI_AIKARAJA=${YOJONO_TESTI_AIKARAJA:-900}
+case "$TESTI_AIKARAJA" in ''|*[!0-9]*) TESTI_AIKARAJA=900 ;; esac
 # Python-testien ajaja: discover kuten ennen, mutta kieltaytyy sarjasta, jonka moduuli on kloonin ulkopuolelta.
 PY_TESTAA='import os, sys, unittest
 juuri = os.path.realpath(".")
@@ -198,8 +202,18 @@ else
         TESTIT="vihrea${LKM:+, $LKM testia} ($(tail -n 3 "$TMP/testit.log" | tr '\n' ' ' | cut -c1-120))"
       fi
     else
-      TESTIT="punainen ($(tail -n 3 "$TMP/testit.log" | tr '\n' ' ' | cut -c1-120))"
-      SYY="testit punaisella agentin muutosten jalkeen: PR:aa ei avattu"
+      TESTI_RC=$?
+      if [ "$TESTI_RC" -eq 124 ]; then
+        # timeout-komennon oma koodi: sarja ei valmistunut, joten testien tulosta ei tiedeta.
+        TESTIT="ei valmistunut ($TESTI_AIKARAJA s aikaraja, tulos ei tiedossa)"
+        SYY="testit aikakatkaistu $TESTI_AIKARAJA s jalkeen: PR:aa ei avattu"
+      else
+        # Pelkka lokin hanta ei kelpaa syyksi: Pythonin stdout puskuroituu ja tulostuu lopuksi, jolloin hannassa ei nay kaatuneita testeja (raportti 4.11.).
+        TESTI_YHT=$(grep -E '^(FAIL: |ERROR: |Ran [0-9]+ tests?|FAILED( |$))' "$TMP/testit.log" | tail -n 15 | tr '\n' ';' | cut -c1-500 || true)
+        [ -n "$TESTI_YHT" ] || TESTI_YHT=$(tail -n 3 "$TMP/testit.log" | tr '\n' ' ' | cut -c1-120)
+        TESTIT="punainen (koodi $TESTI_RC: $TESTI_YHT)"
+        SYY="testit punaisella agentin muutosten jalkeen: PR:aa ei avattu"
+      fi
     fi
   fi
 fi
@@ -261,6 +275,6 @@ if [ -n "$PR" ]; then echo "pr: $PR"; fi
 case "$SYY" in
   "pr_kutsu epaonnistui"*|"kuiva-ajo: pr_kutsu tarkista epaonnistui"*) exit 1 ;;
   # Havainto 25.10. (tarkkailija): punaiset testit eivat saa nayttaa onnistumisena ("valmis, ok"); ajuri kirjaa ne epaonnistuneeksi.
-  "testit punaisella"*|"ei testeja kloonista"*) exit 1 ;;
+  "testit punaisella"*|"testit aikakatkaistu"*|"ei testeja kloonista"*) exit 1 ;;
 esac
 exit 0

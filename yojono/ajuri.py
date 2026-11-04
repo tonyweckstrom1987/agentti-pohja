@@ -216,6 +216,7 @@ VIRHEKOODIT = {
     "skripti_ei_kaynnisty": "tehtavaskriptia ei voitu kaynnistaa",
     "pr_kutsu_epaonnistui": "PR:n avaus epaonnistui (muu kuin fork_*)",
     "testit_punaiset": "kehitys: testit punaisella agentin muutosten jalkeen",
+    "testit_aikakatkaisu": "kehitys: testisarja ei valmistunut aikarajassa, tulos ei tiedossa",
     "fork_jaljessa": "fork jai jaljelle ylavirrasta synkkauksen jalkeen",
     "fork_ei_ff": "fork-main eroaa ylavirrasta (ei fast-forward): ei tehty mitaan",
     "fork_push_epaonnistui": "forkin synkkauksen push epaonnistui",
@@ -243,6 +244,8 @@ def luokittele_virhe(loppu, paivittyi, md_on, meta):
         return "pr_kutsu_epaonnistui"
     if "testit punaisella" in loppu:
         return "testit_punaiset"
+    if "testit aikakatkaistu" in loppu:
+        return "testit_aikakatkaisu"
     if "unrecognized_model" in loppu:
         return "malli_virhe"
     if not paivittyi or not md_on:
