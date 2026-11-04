@@ -397,8 +397,12 @@ class Ajo(Pohja):
         ajuri.aja(self.repo, self.tmp, env={"CLAUDEJONO_KAISTOJA": "3"}, kaista=2,
                   suorita=self.f({"subtype": "success", "result": vastaus}))
         luodut = sorted(p.name for p in (self.repo / ajuri.JONO / "tehtavat").glob("*-auto-*.md"))
-        self.assertEqual([n for n in luodut if "oikeasti-uusi" in n or "kopio" in n or "sama-nimi" in n],
-                         ["2026-11-03-01-auto-sama-nimi.md", "2026-11-03-02-auto-oikeasti-uusi.md"])
+        # Uuden tehtavan paivamaara on ajopaiva (ei kiinteaa paivaa: 4.11. kiintea 2026-11-03 kaatoi testin, aikapommi).
+        self.assertEqual([n for n in luodut if "kopio" in n], [])
+        self.assertEqual([n for n in luodut if "sama-nimi" in n], ["2026-11-03-01-auto-sama-nimi.md"])
+        uudet = [n for n in luodut if "oikeasti-uusi" in n]
+        self.assertEqual(len(uudet), 1, uudet)
+        self.assertTrue(uudet[0].startswith(datetime.now().astimezone().date().isoformat() + "-"), uudet)
 
     def test_porttitarkistin_ajetaan_jokaiselle_uudelle_tehtavalle(self):
         nahdyt = []
