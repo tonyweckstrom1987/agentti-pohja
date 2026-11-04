@@ -131,6 +131,21 @@ class Kooste(Pohja):
         self.assertIs(m.call_args.kwargs.get("pakota"), True)
 
 
+class TarkastajaVirheet(Pohja):
+    def aineisto(self):
+        return aamukooste.keraa(self.repo, self.yj, NYT, hae=lambda url: [], yksikot=lambda: [])
+
+    def test_virhe_nousee_halytyksiin(self):
+        (self.tmp / "tarkastukset.jsonl").write_text(json.dumps(
+            {"repo": "agentti-pohja", "haara": "korjaus/x", "tulos": "virhe", "syy": "GitHub HTTP 403: /repos", "aika": "2026-11-03T05:00:00+02:00"}) + "\n")
+        rivi = next(r for r in aamukooste.rivit(self.aineisto()) if r.startswith("H\u00e4lytykset:"))
+        self.assertIn("PR-tarkastaja/-avaaja: 1 virhett\u00e4, viimeisin korjaus/x: GitHub HTTP 403", rivi)
+
+    def test_ilman_lokia_ei_halytysta(self):
+        rivi = next(r for r in aamukooste.rivit(self.aineisto()) if r.startswith("H\u00e4lytykset:"))
+        self.assertNotIn("PR-tarkastaja", rivi)
+
+
 class IlmoitusRajaus(unittest.TestCase):
     ENV = {"YOJONO_TELEGRAM_TOKEN": "t", "YOJONO_TELEGRAM_CHAT": "c"}
 

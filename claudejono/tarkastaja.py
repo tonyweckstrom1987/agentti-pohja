@@ -50,6 +50,7 @@ AIKARAJA_S = 900
 PERUSTELU_MAX = 1500
 LOYDOS_MAX = 300
 LOYDOKSIA_MAX = 10
+VIRHESYY_MAX = 200
 PAATOKSET = {"HYVAKSY": "HYVAKSYTTY", "HYLKAA": "HYLATTY", "RAJATTU": "RAJATTU", "EN_TIEDA": "EN_TIEDA"}
 KAYTTAJA_RE = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -71,9 +72,20 @@ def _pyynto(url, tunnus, accept="application/vnd.github+json", data=None, avaa=u
         with avaa(req, timeout=30) as v:
             return v.read()
     except urllib.error.HTTPError as e:
-        raise TarkastajaVirhe("GitHub HTTP %s: %s" % (e.code, url.replace(API, "")))
+        raise TarkastajaVirhe("GitHub HTTP %s: %s%s" % (e.code, url.replace(API, ""), _github_syy(e)))
     except (urllib.error.URLError, OSError) as e:
         raise TarkastajaVirhe("GitHub-pyynto epaonnistui: " + type(e).__name__)
+
+
+def _github_syy(e):
+    """GitHubin oma selitys virheelle (esim. 422:n errors-lista), jotta lokista nakee syyn eika pelkkaa koodia."""
+    try:
+        d = json.loads(e.read().decode("utf-8", "replace"))
+        osat = [d.get("message")] + [x.get("message") for x in d.get("errors") or [] if isinstance(x, dict)]
+    except (OSError, ValueError, AttributeError, TypeError):
+        return ""
+    teksti = _siivoa("; ".join(str(o) for o in osat if o), VIRHESYY_MAX)
+    return " (%s)" % teksti if teksti else ""
 
 
 def hae_json(url, tunnus, avaa=urllib.request.urlopen):
@@ -321,6 +333,23 @@ def kierros(env, tunnus, nyt=None, suorita=subprocess.run, avaa=urllib.request.u
         except OSError:
             pass
     return tehty
+
+
+def virheet_lokista(tila_hak, alku):
+    """Lokin virherivit ajan alku jalkeen: PR-avaajan ja tarkastuksen viat eivat saa jaada vain lokiin. Puuttuva loki -> []."""
+    try:
+        rivit = (Path(tila_hak) / LOKI).read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    ulos = []
+    for rivi in rivit:
+        try:
+            d = json.loads(rivi)
+            if d.get("tulos") == "virhe" and datetime.fromisoformat(d["aika"]) >= alku:
+                ulos.append(d)
+        except (ValueError, KeyError, TypeError, AttributeError):
+            continue
+    return ulos
 
 
 def main(argv=None):

@@ -270,6 +270,38 @@ class PrAvaajaTesti(unittest.TestCase):
         self.assertEqual(tk.kierros(dict(self.env, CLAUDEJONO_PR_AVAAJA="0"), "t", avaa=api), [])
 
 
+class VirheNakyvyys(unittest.TestCase):
+    def test_github_syy_mukana_virheessa(self):
+        runko = json.dumps({"message": "Validation Failed", "errors": [{"message": "No commits between main and x <!-- y -->"}]}).encode()
+
+        def avaa(req, timeout=None):
+            raise urllib.error.HTTPError(req.full_url, 422, "x", {}, io.BytesIO(runko))
+        with self.assertRaises(tk.TarkastajaVirhe) as c:
+            tk._pyynto(tk.API + "/repos/o/r/pulls", "salainen", avaa=avaa)
+        viesti = str(c.exception)
+        self.assertIn("HTTP 422: /repos/o/r/pulls", viesti)
+        self.assertIn("No commits between", viesti)
+        self.assertNotIn("<!--", viesti)
+        self.assertNotIn("salainen", viesti)
+
+    def test_lukematon_virherunko_ei_kaada(self):
+        def avaa(req, timeout=None):
+            raise urllib.error.HTTPError(req.full_url, 500, "x", {}, None)
+        with self.assertRaisesRegex(tk.TarkastajaVirhe, r"HTTP 500: /a$"):
+            tk._pyynto(tk.API + "/a", "t", avaa=avaa)
+
+    def test_virheet_lokista_rajaa_ajan_ja_sietaa_roskan(self):
+        with tempfile.TemporaryDirectory() as d:
+            alku = datetime.fromisoformat("2026-11-04T06:00:00+02:00")
+            rivit = [{"tulos": "virhe", "aika": "2026-11-04T05:00:00+02:00", "syy": "vanha"},
+                     {"tulos": "avattu", "aika": "2026-11-04T07:00:00+02:00"},
+                     {"tulos": "virhe", "aika": "2026-11-04T08:00:00+02:00", "syy": "uusi"},
+                     {"tulos": "virhe"}]
+            (Path(d) / tk.LOKI).write_text("\n".join(json.dumps(r) for r in rivit) + "\nroskaa\n[1]\n")
+            self.assertEqual([r["syy"] for r in tk.virheet_lokista(d, alku)], ["uusi"])
+            self.assertEqual(tk.virheet_lokista(d + "/ei", alku), [])
+
+
 class TilaTesti(unittest.TestCase):
     def test_paivan_vaihto_nollaa_maaran_mutta_ei_pr_rajoja(self):
         with tempfile.TemporaryDirectory() as d:

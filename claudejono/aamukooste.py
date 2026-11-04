@@ -167,7 +167,12 @@ def keraa(repo, perus, nyt, hae=None, yksikot=None):
         varaus_rivi, varaus_kysymys = varaus.aamukooste_osa(tila, os.environ, nyt)
     except Exception:
         pass
-    return {"nyt": nyt, "kaistat": kaistat, "kulutus": kulutus_teksti, "varaus": varaus_rivi, "varaus_kysymys": varaus_kysymys, "tulokset": tulokset, "uudet_prt": prt, "opit": opit, "tonylle": tonylle_uudet(repo, alku),
+    from . import tarkastaja
+    try:   # tarkastajan ja PR-avaajan viat nakyviin; puuttuva loki ei kaada koostetta
+        tarkastaja_virheet = tarkastaja.virheet_lokista(Path(repo).parent, alku)
+    except Exception:
+        tarkastaja_virheet = []
+    return {"nyt": nyt, "tarkastaja_virheet": tarkastaja_virheet, "kaistat": kaistat, "kulutus": kulutus_teksti, "varaus": varaus_rivi, "varaus_kysymys": varaus_kysymys, "tulokset": tulokset, "uudet_prt": prt, "opit": opit, "tonylle": tonylle_uudet(repo, alku),
             "pr": pr_ryhmat, "pr_virheita": virheet, "yojono": yojono_tila(perus, nyt),
             "yksikot": (yksikot or rikkinaiset_yksikot)(), "vaiteportti": vaiteportti.puutteet(repo)}
 
@@ -218,6 +223,10 @@ def rivit(t):
         halytykset.append("failed: " + ", ".join(t["yksikot"][:3]) + (f" (+{len(t['yksikot']) - 3})" if len(t["yksikot"]) > 3 else ""))
     if t.get("vaiteportti"):
         halytykset.append("v\u00e4iteportti: " + ", ".join(t["vaiteportti"][:3]) + " valmis ilman .tarkastus.md-tiedostoa")
+    if t.get("tarkastaja_virheet"):
+        tv = t["tarkastaja_virheet"]
+        kohde = tv[-1].get("haara") or tv[-1].get("pr") or tv[-1].get("repo") or "?"
+        halytykset.append(f"PR-tarkastaja/-avaaja: {len(tv)} virhett\u00e4, viimeisin {kohde}: " + _lyhenna(str(tv[-1].get("syy", "")), 80))
     if nimet["EPAONNISTUI"]:
         halytykset.append(f"{nimet['EPAONNISTUI']} jonoteht\u00e4v\u00e4\u00e4 ep\u00e4onnistui")
     if yj and yj["epaonnistui"]:
