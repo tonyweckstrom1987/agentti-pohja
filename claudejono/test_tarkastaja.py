@@ -253,7 +253,7 @@ class PrAvaajaTesti(unittest.TestCase):
         self.assertEqual(tulos, [{"repo": "agentti-pohja", "haara": "korjaus/uusi", "tulos": "avattu", "pr": 77}])
         url, data = api.postit[0]
         self.assertEqual(url, "/repos/tonyweckstrom1987/agentti-pohja/pulls")
-        self.assertEqual((data["head"], data["base"], data["title"]), ("korjaus/uusi", "main", "Otsikko  x"))
+        self.assertEqual((data["head"], data["base"], data["title"]), ("tonyweckstrom1987:korjaus/uusi", "main", "Otsikko  x"))
         self.assertIn("Runko", data["body"])
         self.assertNotIn("<!--", data["body"] + data["title"])
         self.assertEqual(json.loads((Path(self.d.name) / tk.TILA_TIEDOSTO).read_text())["avattu"], 1)

@@ -262,7 +262,7 @@ def avaa_puuttuvat(env, tunnus, tila, avaa=urllib.request.urlopen, kuiva=False):
                     tehty.append({"repo": repo, "haara": nimi, "tulos": "avattaisiin"})
                     continue
                 vastaus = json.loads(_pyynto("%s/repos/%s/%s/pulls" % (API, OMISTAJA, repo), tunnus, avaa=avaa, data={
-                    "title": _siivoa(otsikko, 120) or nimi, "head": nimi, "base": pohja,
+                    "title": _siivoa(otsikko, 120) or nimi, "head": "%s:%s" % (OMISTAJA, nimi), "base": pohja,
                     "body": _siivoa(runko, AVAA_RUNKO_MAX) + "\n\n---\nAvattu automaattisesti (pilvi-Clauden haara). Tarkastaja ja automerge hoitavat; rajatut yhdistaa Tony."}).decode("utf-8") or "{}")
                 tila["avattu"] = tila.get("avattu", 0) + 1
                 tehty.append({"repo": repo, "haara": nimi, "tulos": "avattu", "pr": vastaus.get("number")})
