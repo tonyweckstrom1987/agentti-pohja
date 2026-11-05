@@ -78,6 +78,7 @@ Pohjan päälle on rakennettu osat, joilla agentit tekevät tarkistettavaa työt
 | Viikkoraportti | `agentti/viikkoraportti.py` | Lukee lokin ja tulostaa kulut agenteittain, virheet virhekoodeittain, ohitetut tehtävät syineen ja sääntöpohjaiset vihjeet (ei mallikutsua). |
 | Automerge | `tools/automerge.py` | Yhdistää automaattisesti vain pienet dokumentti- ja testimuutokset sekä botin `yo/readme-*`-PR:t, joissa on pelkkiä `.md`-tiedostoja. Koodi, työnkulut ja suojatut polut jäävät aina ihmiselle. |
 | Mutanttitestaus | `tools/mutantit.py` | Muuttaa koodia pienin virhein (AST-mutantit) ja tarkistaa, että moduulin testit huomaavat sen. Selviytyjä = testeistä puuttuu tarkistus. Paikallisesti `python tools/mutantit.py agentti/kulu.py`; pitkä ajo GitHubissa: Actions → Mutantit → Run workflow. Vastaavat mutantit sallitaan `tools/mutantit.sallitut.txt`-tiedostossa perusteluineen. |
+| Käyttöönoton ero | `tools/kayttoonotto_ero.py` | Vain lukeva: kertoo, montako committia ja mitkä PR:t käyttöönotettu kopio on GitHubin oletushaaraa jäljessä. Poistumiskoodi 0 ajan tasalla, 1 jäljessä, 2 tila ei selvinnyt. |
 
 Periaate on sama kuin pohjassa: koodi on laki. Raja ei ole kehotteessa vaan tarkistuksessa, ja jokainen automaattinen muutos on katselmoitavissa PR:nä.
 
