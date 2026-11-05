@@ -18,7 +18,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from . import ajuri, kaistamittaus, kulutus, vaiteportti, varaus
+from . import ajuri, kaistamittaus, kulutus, todennettavat, vaiteportti, varaus
 
 TZ = ZoneInfo("Europe/Helsinki")
 OLETUS_REPO = "/var/lib/claude-jono/docs"
@@ -26,6 +26,7 @@ OLETUS_YOJONO = "/var/lib/yojono"
 DOCS_URL = "https://github.com/tonyweckstrom1987/agenttifirma-docs/blob/main/claude-jono"
 IKKUNA_H = 24
 RIVI_MAX = 300
+TARVITAAN_MAX = 500   # tarvitaan-rivi voi sisaltaa todennuskysymykset
 KULU_RIVI_MAX = 700   # kulutusrivi (mallit + viikko + Tonyn varaus) on pidempi kuin muut rivit
 MAX_MERGELINKKEJA = 4
 BUDJETTI_HALYTYS = 0.8   # nayttorajaus: kuukausikulu >= 80 % katosta nostetaan halytyksiin (ei muuta kattoa)
@@ -167,7 +168,11 @@ def keraa(repo, perus, nyt, hae=None, yksikot=None):
         varaus_rivi, varaus_kysymys = varaus.aamukooste_osa(tila, os.environ, nyt)
     except Exception:
         pass
-    return {"nyt": nyt, "kaistat": kaistat, "kulutus": kulutus_teksti, "varaus": varaus_rivi, "varaus_kysymys": varaus_kysymys, "tulokset": tulokset, "uudet_prt": prt, "opit": opit, "tonylle": tonylle_uudet(repo, alku),
+    try:   # todennettavat: eraantyneet avoimet rivit; puuttuva tiedosto ei kaada koostetta
+        todennus = todennettavat.kysymykset(todennettavat.eraantyneet(repo, nyt))
+    except Exception:
+        todennus = None
+    return {"nyt": nyt, "todennus": todennus, "kaistat": kaistat, "kulutus": kulutus_teksti, "varaus": varaus_rivi, "varaus_kysymys": varaus_kysymys, "tulokset": tulokset, "uudet_prt": prt, "opit": opit, "tonylle": tonylle_uudet(repo, alku),
             "pr": pr_ryhmat, "pr_virheita": virheet, "yojono": yojono_tila(perus, nyt),
             "yksikot": (yksikot or rikkinaiset_yksikot)(), "vaiteportti": vaiteportti.puutteet(repo)}
 
@@ -207,6 +212,8 @@ def rivit(t):
         tarvitaan_osat.append(f"{len(t['tonylle'])} uutta kohtaa tonylle.md:ss\u00e4")
     if t.get("varaus_kysymys"):
         tarvitaan_osat.append(t["varaus_kysymys"])
+    if t.get("todennus"):
+        tarvitaan_osat.append(t["todennus"])
     tarvitaan = "Tarvitaan sinulta: " + ", ".join(tarvitaan_osat) + "."
 
     opittu = "Opittu: " + ("; ".join(o.rstrip(".") for o in t["opit"][:2]) if t["opit"] else "ei uusia oppeja viime vuorokaudessa") + "."
@@ -234,7 +241,7 @@ def rivit(t):
     else:
         kulut = "Kulut: y\u00f6jonon tilaa ei saatu luettua."
     kulut = " ".join(x.rstrip(".") + "." for x in (kulut, t.get("kulutus"), t.get("varaus")) if x)
-    return [_lyhenna(r, KULU_RIVI_MAX if r is kulut else RIVI_MAX) for r in (tehty, tarvitaan, opittu, hal, kulut)]
+    return [_lyhenna(r, KULU_RIVI_MAX if r is kulut else TARVITAAN_MAX if r is tarvitaan else RIVI_MAX) for r in (tehty, tarvitaan, opittu, hal, kulut)]
 
 
 def linkit(t):

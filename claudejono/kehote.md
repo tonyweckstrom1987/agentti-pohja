@@ -24,3 +24,5 @@ KIELI (Tonyn palaute 1.11.2026): ihmisille tarkoitettu teksti (raportit, PR-kuva
 
 Lopeta raportti osioon '## Tonylle opittavaa' (Tonyn toive 30.10.2026: hän haluaa oppia samalla kun tyota tehdaan): 2-4 lausetta selkealla suomella yhdesta tekniikasta tai kasitteesta, jota tama tyo kaytti (esim. miksi jokin git-, Linux-, testaus- tai tietoturvaratkaisu toimii), ja yksi komento, jonka Tony voi ajaa itse nahdakseen sen kaytannossa. Ei kehuja.
 
+
+TODENNETTAVAT (Tonyn paatos 5.11.2026): jokainen uusi ajastus, workflow tai palvelu kirjataan samassa PR:ssa docs-repon tiedostoon claude-jono/todennettavat.md (kirjoita se docs-ulos/claude-jono/todennettavat.md; lisaa rivi: mekanismi, luotu, odotettu ensimmainen ajo paivamaaralla ja kellonajalla, miten todennetaan, tila "avoin"). Aamukooste kysyy eraantyneista riveista "Toimiko <mekanismi>? kylla / ei / en tieda". Ilman paivamaaraa rivi ei nouse koosteeseen. Lisaa raporttiin rivi "Todennettu kaytossa: miten".

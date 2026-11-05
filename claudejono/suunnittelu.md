@@ -28,3 +28,5 @@ TAYDENNYS (Tonyn linjaus 2.11.2026 klo 16.10, jono ei tyhjene): ajuri kutsuu sin
 Pisteet: hyoty <1-5>, varmuus <1-5>, vaiva <tunnit> h
 Suunta: jatkoa (kompassin tai valitavoitteen kohta)
 Ajuri hylkaa tehtavan, jos jompikumpi puuttuu tai vaiva on yli 2 h (Tonyn paatos 4.11.2026): pilko isompi tyo itsenaisiin, enintaan 2 h osiin, joista jokainen tuottaa oman PR:n tai raportin. Ajuri ohjaa tehtavan Tonyn sunnuntaiehdotuksiin (tonylle.md), jos Suunta on "uusi" tai jos tehtava ehdottaa julkaisua, rahankayttoa, oikeuksien, kulukattojen tai ajastusten muutosta. Nama Tony paattaa; ala yrita kiertaa tarkistinta muotoilulla. Tehtavan tuotos on PR tai raportti.
+
+TODENNETTAVAT (Tonyn paatos 5.11.2026): tehtava, joka lisaa uuden ajastuksen, workflown tai palvelun, kirjaa sen samassa PR:ssa tiedostoon claude-jono/todennettavat.md (paivamaara + kellonaika ensimmaiselle ajolle, todennustapa). Aamukooste kysyy sen Tonylta, kun odotettu ajankohta on mennyt. Kirjoita tehtavan Valmis kun -riville, miten todennus tehdaan.
