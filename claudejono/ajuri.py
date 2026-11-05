@@ -26,7 +26,7 @@ from datetime import datetime
 from pathlib import Path
 
 from claudejono import silmukka
-from . import kulutus, litellm_ajo, varaus
+from . import kulutus, litellm_ajo, pr_raja, varaus
 from . import malli as mallit
 
 TEHTAVA_RE = re.compile(r"^\d{4}-\d{2}-\d{2}-\d{2}-[a-z0-9-]{1,60}\.md$")
@@ -737,7 +737,7 @@ def suodata_uudet(repo, ehdotukset, portti=None):
     return ok, hylatyt
 
 
-def suunnittele(repo, tyohak, env, suorita, laheta=None, nyt=None, kaista=1):
+def suunnittele(repo, tyohak, env, suorita, laheta=None, nyt=None, kaista=1, pr_tilat=None):
     """Jono tyhja: Claude ehdottaa jatkotehtavat. Ajuri nimeaa, rajaa (AUTO_MAX_PAIVA, AUTO_PER_AJO) ja committaa ne."""
     nyt = nyt or datetime.now().astimezone()
     pvm = nyt.date().isoformat()
@@ -749,8 +749,10 @@ def suunnittele(repo, tyohak, env, suorita, laheta=None, nyt=None, kaista=1):
         return "jono tyhja (itsesuunnittelun paivaraja taynna)"
     if suunnittelu_tauolla(tyohak, repo, nyt, int(env.get("CLAUDEJONO_SUUNNITTELU_TAUKO_S", SUUNNITTELU_TAUKO_S))):
         return "jono tyhja (suunnittelu tauolla: edellinen kierros ei tuottanut tehtavia eika uusia tuloksia ole)"
+    # PR-raja: yli pr_raja.RAJA avointa PR:aa repossa -> ei uusia kehitystehtavia siihen, vaan purkutehtavia (lukuvirhe = ei rajaa)
+    pr_tilat = pr_raja.keraa_valimuistilla(pr_raja.PR_REPOT, tyohak, nyt) if pr_tilat is None else pr_tilat
     kehote = (KEHOTE.read_text(encoding="utf-8") + "\n\n" + SUUNNITTELU.read_text(encoding="utf-8")
-              + f"\n\nEhdota enintaan {tilaa} tehtavaa.\n")
+              + f"\n\nEhdota enintaan {tilaa} tehtavaa.\n" + pr_raja.kehotelisa(pr_tilat))
     luo_kaistan_tyohak(tyohak, kaista, env)
     sm = mallit.suunnittelun_malli()   # suunnittelu = Opus (mallien tyonjako 3.11.2026)
     kom, alaenv, cwd = lapsen_ajo(kehote, env, tyohak, kaista, sm.nimi)
@@ -776,7 +778,13 @@ def suunnittele(repo, tyohak, env, suorita, laheta=None, nyt=None, kaista=1):
         git(repo, "pull", "-q", "--rebase", "origin", "main", check=False)   # nae muiden samaan aikaan lisaamat tehtavat ennen vertailua
         nro = seuraava_numero(repo, pvm)
         # Porttitarkistin (Tonyn linjaus 2.11.): julkaisu, raha, oikeudet, katot, ajastukset ja uusi suunta Tonylle, ei jonoon.
-        hyvaksytyt, sunnuntai, _hylatyt_portti = silmukka.suodata(suunn["tehtavat"])
+        kehitys, _pr_hylatyt = pr_raja.suodata_kehitys(suunn["tehtavat"], pr_tilat)
+        purku = pr_raja.purkutehtavat(pr_tilat)   # ajurin omat, edella: AUTO_PER_AJO-raja ei syrjayta niita
+        hyvaksytyt, sunnuntai, _hylatyt_portti = silmukka.suodata(purku + kehitys)
+        pr_rivit = pr_raja.tonylle_rivit(pr_tilat) if pr_tilat else ""
+        tp0 = Path(repo) / JONO / TONYLLE
+        if pr_rivit and pr_rivit not in (tp0.read_text(encoding="utf-8") if tp0.exists() else ""):   # ei toistoa (tonylle.md-kasvun esto)
+            suunn["tonylle"] = (suunn["tonylle"].strip() + "\n" + pr_rivit).strip()
         if sunnuntai:
             suunn["tonylle"] = (suunn["tonylle"].strip() + "\n" + silmukka.sunnuntairivit(sunnuntai)).strip()
         uudet, _hylatyt = suodata_uudet(repo, hyvaksytyt, PORTTI)

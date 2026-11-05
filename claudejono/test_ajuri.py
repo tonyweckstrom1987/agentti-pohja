@@ -3,6 +3,7 @@ import json
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -17,6 +18,10 @@ class Pohja(unittest.TestCase):
     """Oikea git-repo: paikallinen bare-origin + klooni, jotta pull/push testataan aidosti."""
 
     def setUp(self):
+        # suunnittele() lukisi muuten oikeat avoimet PR:t GitHubista (claudejono/pr_raja.py): testit eivat kayta verkkoa
+        p = mock.patch.object(ajuri.pr_raja, "keraa_valimuistilla", return_value={})
+        p.start()
+        self.addCleanup(p.stop)
         self.tmp = Path(tempfile.mkdtemp())
         self.origin = self.tmp / "origin.git"
         subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(self.origin)], check=True)
