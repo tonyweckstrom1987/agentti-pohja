@@ -44,26 +44,27 @@ class LahetysTest(unittest.TestCase):
         return True
 
     def aja(self, **kw):
-        return ilmoita.ilmoita("valmis", "T", "x", env_polku=self.env, tila_polku=self.tila, hae=self.hae, **kw)
+        return ilmoita.ilmoita("virhe", "T", "x", env_polku=self.env, tila_polku=self.tila, hae=self.hae, **kw)
 
     def test_lahettaa_tunnuksilla_tiedostosta(self):
         self.assertEqual(self.aja(), "lahetetty")
-        self.assertEqual(self.lahetetyt, [("tok", "123", "[VALMIS] T\nx")])
+        self.assertEqual(self.lahetetyt, [("tok", "123", "HALYTYS [VIRHE] T\nx")])
 
     def test_ei_tunnuksia(self):
-        tulos = ilmoita.ilmoita("valmis", "T", env_polku="/ei/ole", tila_polku=self.tila, hae=self.hae)
+        tulos = ilmoita.ilmoita("virhe", "T", env_polku="/ei/ole", tila_polku=self.tila, hae=self.hae)
         self.assertEqual(tulos, "ei_tunnuksia")
         self.assertEqual(self.lahetetyt, [])
 
     def test_epaonnistunut_lahetys(self):
-        tulos = ilmoita.ilmoita("valmis", "T", env_polku=self.env, tila_polku=self.tila, hae=lambda *a: False)
+        tulos = ilmoita.ilmoita("virhe", "T", env_polku=self.env, tila_polku=self.tila, hae=lambda *a: False)
         self.assertEqual(tulos, "epaonnistui")
 
     def test_tuntiraja(self):
-        for _ in range(ilmoita.RAJA_TUNNISSA):
-            self.assertEqual(self.aja(nyt=1000), "lahetetty")
-        self.assertEqual(self.aja(nyt=1100), "raja")
-        self.assertEqual(self.aja(nyt=1000 + 3601), "lahetetty")  # vanhat kirjaukset vanhenevat
+        with mock.patch.object(ilmoita, "RAJA_TUNNISSA", 3):   # paivakatto 5 tayttyisi muuten ennen tuntirajaa (30)
+            for _ in range(3):
+                self.assertEqual(self.aja(nyt=1000), "lahetetty")
+            self.assertEqual(self.aja(nyt=1100), "raja")
+            self.assertEqual(self.aja(nyt=1000 + 3601), "lahetetty")  # vanhat kirjaukset vanhenevat
 
     def test_rikkinainen_tilatiedosto_ei_estaa(self):
         with open(self.tila, "w") as f:
@@ -73,12 +74,26 @@ class LahetysTest(unittest.TestCase):
             self.assertEqual(len(json.load(f)), 1)
 
     def test_vastaanottaja_ei_tule_viestista(self):
-        ilmoita.ilmoita("valmis", "chat_id=999", env_polku=self.env, tila_polku=self.tila, hae=self.hae)
+        ilmoita.ilmoita("virhe", "chat_id=999", env_polku=self.env, tila_polku=self.tila, hae=self.hae)
         self.assertEqual(self.lahetetyt[0][1], "123")
 
     def test_main_kaytto(self):
         self.assertEqual(ilmoita.main([]), 2)
         self.assertEqual(ilmoita.main(["muu", "x"]), 2)
+
+
+class PorttiTest(LahetysTest):
+    def test_valmis_ja_paatos_ohjataan_docs_repoon(self):
+        for tila in ("valmis", "paatos"):
+            tulos = ilmoita.ilmoita(tila, "T", "x", env_polku=self.env, tila_polku=self.tila, hae=self.hae)
+            self.assertEqual(tulos, "ohjattu")
+        self.assertEqual(self.lahetetyt, [])
+
+    def test_paivakatto_5_ja_ylitys_jonoon(self):
+        nyt = 1_800_000_000
+        tulokset = [ilmoita.ilmoita("virhe", f"V{i}", env_polku=self.env, tila_polku=self.tila, hae=self.hae, nyt=nyt) for i in range(7)]
+        self.assertEqual(tulokset, ["lahetetty"] * 5 + ["jonoon"] * 2)
+        self.assertEqual(len(self.lahetetyt), 5)
 
 
 class TunnuksetTarkkaTest(unittest.TestCase):
@@ -134,7 +149,7 @@ class TunnusPuutteetTarkkaTest(unittest.TestCase):
             env = os.path.join(d, "t.env")
             with open(env, "w") as f:
                 f.write(sisalto)
-            return ilmoita.ilmoita("valmis", "T", env_polku=env, tila_polku=os.path.join(d, "t.json"), hae=lambda *a: True)
+            return ilmoita.ilmoita("virhe", "T", env_polku=env, tila_polku=os.path.join(d, "t.json"), hae=lambda *a: True)
 
     def test_kumpikin_tunnus_vaaditaan(self):
         self.assertEqual(self.aja("YOJONO_TELEGRAM_TOKEN=a\n"), "ei_tunnuksia")

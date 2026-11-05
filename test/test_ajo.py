@@ -1,6 +1,7 @@
 import os
 import tempfile
 import unittest
+from unittest import mock
 
 from agentti import ajo, rajat
 from agentti.agentit import esimerkki
@@ -14,6 +15,9 @@ class AjoTesti(unittest.TestCase):
         self.tila = os.path.join(self.tmp.name, "tila")
         self.llm_kutsut = []
         self.tg = []
+        env = mock.patch.dict(os.environ, {"HALYTYSPORTTI_TILA": os.path.join(self.tmp.name, "portti.json")})
+        env.start()
+        self.addCleanup(env.stop)
         self.sydan = []
 
     def hae_llm(self, vastaus):
@@ -39,8 +43,14 @@ class AjoTesti(unittest.TestCase):
 
     def test_llm_ok_ja_lahetys(self):
         t = self.aja(llm=True, laheta=True)
-        self.assertEqual((t["koodi"], t["lahetys"]), (0, "lahetetty"))
+        self.assertEqual((t["koodi"], t["lahetys"]), (0, "ohjattu"))   # A427: ei halytys -> ei Telegramiin
         self.assertIn("Kaikki hyvin.", t["teksti"])
+        self.assertEqual(self.tg, [])
+
+    def test_halytysluokan_viesti_lahtee(self):
+        with mock.patch.object(ajo.halytysportti, "luokittele", return_value="halytys"):
+            t = self.aja(llm=True, laheta=True)
+        self.assertEqual((t["koodi"], t["lahetys"]), (0, "lahetetty"))
         self.assertEqual(len(self.tg), 1)
 
     def test_ei_tietoa_on_normaali_lopputulos(self):
@@ -51,15 +61,17 @@ class AjoTesti(unittest.TestCase):
         self.assertIn("Data ei riita.", t["teksti"])
 
     def test_lahetys_vain_kerran_paivassa(self):
-        self.aja(llm=True, laheta=True)
-        t = self.aja(llm=True, laheta=True)
+        with mock.patch.object(ajo.halytysportti, "luokittele", return_value="halytys"):
+            self.aja(llm=True, laheta=True)
+            t = self.aja(llm=True, laheta=True)
         self.assertEqual(t["lahetys"], "jo_lahetetty")
         self.assertEqual(len(self.tg), 1)
 
     def test_epaonnistunut_lahetys_ei_kuluta_paivan_lahetysta(self):
-        t = self.aja(llm=True, laheta=True, tg_ok=False)
-        self.assertEqual((t["koodi"], t["lahetys"]), (1, "epaonnistui"))
-        t = self.aja(llm=True, laheta=True, tg_ok=True)
+        with mock.patch.object(ajo.halytysportti, "luokittele", return_value="halytys"):
+            t = self.aja(llm=True, laheta=True, tg_ok=False)
+            self.assertEqual((t["koodi"], t["lahetys"]), (1, "epaonnistui"))
+            t = self.aja(llm=True, laheta=True, tg_ok=True)
         self.assertEqual((t["koodi"], t["lahetys"]), (0, "lahetetty"))
 
     def test_llm_virhe_lahettaa_varaviestin_ja_palauttaa_1(self):
@@ -67,7 +79,7 @@ class AjoTesti(unittest.TestCase):
         self.assertEqual((t["koodi"], t["virhe"]), (1, "llm_vastaus_ei_json"))
         self.assertIn("tiivistys ei onnistunut (llm_vastaus_ei_json)", t["teksti"])
         self.assertIn("levy_kaytetty_prosenttia", t["teksti"])  # raakadata mukana
-        self.assertEqual(len(self.tg), 1)
+        self.assertEqual(self.tg, [])   # tiivistysvirhe ei ole halytys (A427); koodi 1 nakyy systemdissa
 
     def test_kulukatto_ylittyy(self):
         for _ in range(rajat.KUTSUT_PAIVA):

@@ -170,7 +170,7 @@ def rakenna(repo, nyt):
 
 def main(argv=None):
     p = argparse.ArgumentParser(description="Viikkosuunnittelun ehdotuspohja")
-    p.add_argument("--laheta", action="store_true", help="lahetta lyhyt ilmoitus Telegramiin")
+    p.add_argument("--laheta", action="store_true", help="vanha valitsin; ei laheta enaa Telegramiin (A427)")
     p.add_argument("--nyt")
     p.add_argument("--repo", default=os.environ.get("CLAUDEJONO_REPO", OLETUS_REPO))
     p.add_argument("--hakemisto", default=os.environ.get("CLAUDEJONO_VIIKKO_HAK", OLETUS_HAKEMISTO))
@@ -184,13 +184,7 @@ def main(argv=None):
     polku = hak / f"{nimi}-ehdotus.md"
     polku.write_text(teksti, encoding="utf-8")
     print(f"kirjoitettu {polku} ({len(lista)} ehdotusta)")
-    if a.laheta:
-        from yojono.ajuri import laheta_telegram
-        karki = "; ".join(f"{e['nimi'][:50]} ({e['pisteet']:.1f})" for e in lista[:3]) if lista else "ei pisteytettyj\u00e4 ehdokkaita"
-        viesti = f"Viikkoehdotus {nimi} on valmis suunnittelua varten: {len(lista)} ehdotusta. K\u00e4rjess\u00e4: {karki}.\nTiedosto: {polku}"
-        if not laheta_telegram(viesti, pakota=True):
-            print("Telegram-lahetys epaonnistui tai ei asetettu", file=sys.stderr)
-            return 1
+    # A427: viikkoehdotus ei ole halytys; tiedosto kirjoitetaan hakemistoon ja aamukooste/docs-repo nayttaa sen. --laheta jaa vanhojen kutsujen vuoksi sallituksi mutta ei laheta.
     return 0
 
 

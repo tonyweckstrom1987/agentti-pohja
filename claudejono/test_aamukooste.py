@@ -124,12 +124,6 @@ class Kooste(Pohja):
                 self.assertEqual(aamukooste.main(["--repo", str(self.repo), "--yojono", str(self.yj)]), 0)
         m.assert_not_called()
 
-    def test_main_laheta_pakottaa(self):
-        with mock.patch.object(yojono_ajuri, "laheta_telegram", return_value=True) as m, mock.patch.object(aamukooste, "keraa", return_value=self.keraa()):
-            with mock.patch("sys.stdout"):
-                self.assertEqual(aamukooste.main(["--laheta"]), 0)
-        self.assertIs(m.call_args.kwargs.get("pakota"), True)
-
 
 class TarkastajaVirheet(Pohja):
     def aineisto(self):
@@ -147,38 +141,73 @@ class TarkastajaVirheet(Pohja):
 
 
 class IlmoitusRajaus(unittest.TestCase):
+    """Halytysportti (A62, A427): vain HALYTYS-alkuiset viestit lahtevat, enintaan 5 / vrk."""
     ENV = {"YOJONO_TELEGRAM_TOKEN": "t", "YOJONO_TELEGRAM_CHAT": "c"}
 
-    def laheta(self, teksti, **env):
-        e = dict(self.ENV, **env)
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.env = dict(self.ENV, HALYTYSPORTTI_TILA=os.path.join(self.tmp.name, "p.json"))
+
+    def laheta(self, teksti, **extra):
         with mock.patch("urllib.request.urlopen") as u:
             u.return_value.__enter__.return_value.status = 200
-            tulos = yojono_ajuri.laheta_telegram(teksti, e)
+            tulos = yojono_ajuri.laheta_telegram(teksti, dict(self.env, **extra))
         return tulos, u.called
 
-    def test_oletus_heti_kaikki_lahtee(self):
-        self.assertEqual(self.laheta("claude-jono: x VALMIS"), (True, True))
-        self.assertEqual(self.laheta("claude-jono: x VALMIS", CLAUDEJONO_ILMOITUKSET="ihme"), (True, True))
+    def test_tavalliset_eivat_lahde_edes_ilman_asetuksia(self):
+        self.assertEqual(self.laheta("claude-jono: x VALMIS"), (False, False))
+        self.assertEqual(self.laheta("Yojono 2026-11-03: kulu 1 / 5 USD", CLAUDEJONO_ILMOITUKSET="heti"), (False, False))
+        self.assertEqual(self.laheta("PAATOS: hyvaksy?"), (False, False))
 
-    def test_kooste_rajaa_tavalliset(self):
-        self.assertEqual(self.laheta("claude-jono: x VALMIS", CLAUDEJONO_ILMOITUKSET="kooste"), (False, False))
-        self.assertEqual(self.laheta("Yojono 2026-11-03: kulu 1 / 5 USD", CLAUDEJONO_ILMOITUKSET="kooste"), (False, False))
+    def test_halytys_lahtee(self):
+        self.assertEqual(self.laheta("HALYTYS claude-jono kaatui: X"), (True, True))
+        self.assertEqual(self.laheta("HALYTYS: 3 epaonnistui\nYojono ..."), (True, True))
 
-    def test_kooste_sallii_halytys_ja_paatos(self):
-        self.assertEqual(self.laheta("HALYTYS claude-jono kaatui: X", CLAUDEJONO_ILMOITUKSET="kooste"), (True, True))
-        self.assertEqual(self.laheta("HALYTYS: 3 epaonnistui\nYojono ...", CLAUDEJONO_ILMOITUKSET="kooste"), (True, True))
-        self.assertEqual(self.laheta("PAATOS: hyvaksy?", CLAUDEJONO_ILMOITUKSET="kooste"), (True, True))
-
-    def test_pakota_ohittaa_rajauksen(self):
+    def test_pakota_ei_ohita_porttia(self):
         with mock.patch("urllib.request.urlopen") as u:
-            u.return_value.__enter__.return_value.status = 200
-            self.assertTrue(yojono_ajuri.laheta_telegram("Tehty: x", dict(self.ENV, CLAUDEJONO_ILMOITUKSET="kooste"), pakota=True))
+            self.assertFalse(yojono_ajuri.laheta_telegram("Tehty: x", self.env, pakota=True))
+        u.assert_not_called()
 
-    def test_ilmoita_valmis_kooste_virhe_heti(self):
-        with mock.patch.dict(os.environ, {"CLAUDEJONO_ILMOITUKSET": "kooste"}):
-            self.assertEqual(ilmoita.ilmoita("valmis", "T", "x", env_polku="/ei/ole"), "kooste")
-            self.assertEqual(ilmoita.ilmoita("virhe", "T", "x", env_polku="/ei/ole"), "ei_tunnuksia")   # ei rajata: yritetaan lahettaa
-            self.assertEqual(ilmoita.ilmoita("paatos", "T", "x", env_polku="/ei/ole"), "ei_tunnuksia")
+    def test_paivakatto_ylitys_ei_lahde(self):
+        tulokset = [self.laheta(f"HALYTYS {i}")[0] for i in range(7)]
+        self.assertEqual(tulokset, [True] * 5 + [False] * 2)
+
+    def test_ilmoita_valmis_ja_paatos_ohjataan_virhe_lahtee(self):
+        self.assertEqual(ilmoita.ilmoita("valmis", "T", "x", env_polku="/ei/ole"), "ohjattu")
+        self.assertEqual(ilmoita.ilmoita("paatos", "T", "x", env_polku="/ei/ole"), "ohjattu")
+        self.assertEqual(ilmoita.ilmoita("virhe", "T", "x", env_polku="/ei/ole"), "ei_tunnuksia")
+
+
+class AamukoosteHalytysrivi(Pohja):
+    def aineisto(self, yksikot):
+        return aamukooste.keraa(self.repo, self.yj, NYT, hae=lambda url: [], yksikot=lambda: yksikot)
+
+    def test_ei_vakavia_ei_halytysrivia(self):
+        self.assertEqual(aamukooste.halytysrivi(self.aineisto([])), "")
+
+    def test_failed_yksikko_on_halytys(self):
+        self.assertIn("failed: x.service", aamukooste.halytysrivi(self.aineisto(["x.service"])))
+
+    def test_tiedon_puute_ei_ole_halytys(self):
+        self.assertEqual(aamukooste.halytysrivi(self.aineisto(None)), "")
+
+    def test_main_laheta_lahettaa_vain_halytyksen(self):
+        t = self.aineisto(["x.service"])
+        with mock.patch.object(yojono_ajuri, "laheta_telegram", return_value=True) as m, mock.patch.object(aamukooste, "keraa", return_value=t), \
+                mock.patch("sys.stdout"):
+            self.assertEqual(aamukooste.main(["--laheta"]), 0)
+        viesti = m.call_args.args[0]
+        self.assertTrue(viesti.startswith("HALYTYS aamukooste: "))
+        self.assertNotIn("Tehty:", viesti)
+
+    def test_main_laheta_ilman_halytysta_ei_laheta_koostetta(self):
+        t = self.aineisto([])
+        with mock.patch.object(yojono_ajuri, "laheta_telegram", return_value=True) as m, mock.patch.object(yojono_ajuri, "huuhtele_telegram") as h, \
+                mock.patch.object(aamukooste, "keraa", return_value=t), mock.patch("sys.stdout"):
+            self.assertEqual(aamukooste.main(["--laheta"]), 0)
+        m.assert_not_called()
+        h.assert_called_once()
 
 
 class Viikkoehdotus(Pohja):

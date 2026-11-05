@@ -10,7 +10,7 @@ import subprocess
 import sys
 import urllib.request
 
-from . import pr_laatu, telegram
+from . import halytysportti, pr_laatu, telegram
 from .pr_kutsu import REPOT, suojattu as _kriittinen_polku
 from .yksikot import suodata_kohina
 
@@ -219,8 +219,10 @@ def main(argv=None, hae=None, env=None, suorita=None):
         pass
     print(teksti)
     if "--laheta" in a:
-        ok = telegram.laheta(teksti, {"TELEGRAM_BOT_TOKEN": env.get("YOJONO_TELEGRAM_TOKEN"), "TELEGRAM_CHAT_ID": env.get("YOJONO_TELEGRAM_CHAT")})
-        if not ok:
+        tg_env = {"TELEGRAM_BOT_TOKEN": env.get("YOJONO_TELEGRAM_TOKEN"), "TELEGRAM_CHAT_ID": env.get("YOJONO_TELEGRAM_CHAT")}
+        # A427: aamupaketti ei ole halytys -> portti ohjaa sen pois Telegramista (teksti on jo tulosteessa)
+        tulos = halytysportti.laheta(teksti, lambda t: telegram.laheta(t, tg_env), tila_polku=env.get(halytysportti.TILA_ENV))
+        if tulos == halytysportti.EPAONNISTUI:
             print("Telegram-lahetys epaonnistui tai ei asetettu", file=sys.stderr)
             return 1
     return 0
