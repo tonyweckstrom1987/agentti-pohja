@@ -1,0 +1,29 @@
+[Unit]
+Description=Telegram-luku: Tonyn vastaukset (2B, peru 123) docs-hakemistoon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=agentti
+Group=agentti
+# Bottitunnus: TELEGRAM_BOT_TOKEN=... (vain tama, tiedosto 0600, Tony kirjoittaa itse)
+EnvironmentFile=/etc/agentti/telegram-luku.env
+# Sallittu chat-id on tiedostossa /etc/agentti/telegram-chat-id (yksi kokonaisluku, ei repossa)
+ExecStart=/usr/bin/python3 -B -m agentti.telegram_luku --docs @DOCS@ --tila /var/lib/agentti/telegram-luku --chat-tiedosto /etc/agentti/telegram-chat-id
+WorkingDirectory=/opt/agentit/agentti-pohja
+TimeoutStartSec=60
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/agentti/telegram-luku @DOCS@
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+CapabilityBoundingSet=

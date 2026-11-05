@@ -1,0 +1,10 @@
+[Unit]
+Description=Telegram-luku: kysely 2 min valein
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=2min
+AccuracySec=15s
+
+[Install]
+WantedBy=timers.target
