@@ -1,0 +1,12 @@
+# Mallitiedosto: ei asenna mitaan.
+[Unit]
+Description=Isannan tilaraportti tunneittain
+
+[Timer]
+OnCalendar=hourly
+RandomizedDelaySec=120
+Persistent=false
+Unit=claude-tilaraportti.service
+
+[Install]
+WantedBy=timers.target

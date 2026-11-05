@@ -20,6 +20,12 @@ Kolme osaa, joiden koodi on `silmukka.py` ja `laatu.py`. Ne eivät muuta kulukat
 
 **Käyttöönotto (Tony, ajastinmuutos):** kopioi `systemd/claude-laatu.service.mall` ja `claude-laatu.timer.mall` hakemistoon `/etc/systemd/system/` ilman `.mall`-päätettä, aja `systemctl daemon-reload` ja `systemctl enable --now claude-laatu.timer`. Kokeile ensin: `systemctl start claude-laatu.service` ja `journalctl -u claude-laatu -n 20 --no-pager`. Aamukoosteen (PR #160) valmistuttua mittaririvin voi liittää koosteeseen kutsulla `claudejono.laatu.mittaririvi(tyohak, repo, nyt)`.
 
+## Isännän tilaraportti (tunneittain)
+
+`python3 -m claudejono.tilaraportti` kokoaa tiedoston `claude-jono/raportit-palvelin/tila.md`: epäonnistuneet yksiköt kaikista konteista, jonon tila, levyn ja thin poolin prosentit, 20 viimeisintä virherivia (`claude-jono@*`, `claude-tarkastaja`, `docs-pull`) ja varmuuskopion ikä. Kaikki teksti suodatetaan ennen kirjoitusta (`OSOITE_RE`, kaikki IPv4-osoitteet, tailnetin nimet ja IPv6, sähköpostit, salaisuuden näköiset merkkijonot). Isännän tiedot tulevat isännän vain luku -komennosta `tila` (`SNAPSHOT_HOST`). Tiedosto kirjoitetaan vain, jos sisältö muuttui aikaleimaa lukuun ottamatta.
+
+Kuiva-ajo: `python3 -m claudejono.tilaraportti`. Ajastin (Tony yhdistää): kopioi `systemd/claude-tilaraportti.{service,timer}.mall` ilman `.mall`-päätettä ja `systemctl enable --now claude-tilaraportti.timer`. Ajuri ei ole mukana: palvelu julkaisee tiedoston ajurin `julkaise`-funktiolla (git-lukko, vain tämä polku).
+
 ## Käyttöönotto CT115:ssä (Tony, kerran)
 
 1. `claude` → `/status`: kirjautuminen tilauksella (ei API-avainta).
