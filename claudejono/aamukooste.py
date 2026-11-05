@@ -126,8 +126,9 @@ def rikkinaiset_yksikot(suorita=subprocess.run):
     return [rivi.split()[0] for rivi in r.stdout.splitlines() if rivi.strip()]
 
 
-def keraa(repo, perus, nyt, hae=None, yksikot=None):
-    """Kokoaa kooste-aineiston. `hae` = GitHub-haku (testeissa tekaistu), `yksikot` = failed-yksikoiden lahde."""
+def keraa(repo, perus, nyt, hae=None, yksikot=None, garmin_tila=None):
+    """Kokoaa kooste-aineiston. `hae` = GitHub-haku (testeissa tekaistu), `yksikot` = failed-yksikoiden lahde,
+    `garmin_tila` = isannalta tuotu Aivon Garmin-tilatiedosto (vain tila ja rivimaarat, ei terveysarvoja)."""
     from agentti import aamupaketti
     alku = nyt - timedelta(hours=IKKUNA_H)
     tulokset = lue_tulokset(repo, alku, nyt)
@@ -167,7 +168,14 @@ def keraa(repo, perus, nyt, hae=None, yksikot=None):
         varaus_rivi, varaus_kysymys = varaus.aamukooste_osa(tila, os.environ, nyt)
     except Exception:
         pass
-    return {"nyt": nyt, "kaistat": kaistat, "kulutus": kulutus_teksti, "varaus": varaus_rivi, "varaus_kysymys": varaus_kysymys, "tulokset": tulokset, "uudet_prt": prt, "opit": opit, "tonylle": tonylle_uudet(repo, alku),
+    garmin_tarvitaan = garmin_halytys = None
+    try:   # Aivon Garmin-haku isannalla: puuttuva tilatiedosto = ei kaytossa, ei rivia
+        from aivo import garmin
+        garmin_tarvitaan, garmin_halytys = garmin.aamukooste_osa(
+            garmin_tila or os.environ.get("AIVO_GARMIN_TILA", garmin.OLETUS_TILA_CT115), nyt)
+    except Exception:
+        pass
+    return {"nyt": nyt, "garmin_tarvitaan": garmin_tarvitaan, "garmin_halytys": garmin_halytys, "kaistat": kaistat, "kulutus": kulutus_teksti, "varaus": varaus_rivi, "varaus_kysymys": varaus_kysymys, "tulokset": tulokset, "uudet_prt": prt, "opit": opit, "tonylle": tonylle_uudet(repo, alku),
             "pr": pr_ryhmat, "pr_virheita": virheet, "yojono": yojono_tila(perus, nyt),
             "yksikot": (yksikot or rikkinaiset_yksikot)(), "vaiteportti": vaiteportti.puutteet(repo)}
 
@@ -207,6 +215,8 @@ def rivit(t):
         tarvitaan_osat.append(f"{len(t['tonylle'])} uutta kohtaa tonylle.md:ss\u00e4")
     if t.get("varaus_kysymys"):
         tarvitaan_osat.append(t["varaus_kysymys"])
+    if t.get("garmin_tarvitaan"):
+        tarvitaan_osat.append(t["garmin_tarvitaan"])
     tarvitaan = "Tarvitaan sinulta: " + ", ".join(tarvitaan_osat) + "."
 
     opittu = "Opittu: " + ("; ".join(o.rstrip(".") for o in t["opit"][:2]) if t["opit"] else "ei uusia oppeja viime vuorokaudessa") + "."
@@ -218,6 +228,8 @@ def rivit(t):
         halytykset.append("failed: " + ", ".join(t["yksikot"][:3]) + (f" (+{len(t['yksikot']) - 3})" if len(t["yksikot"]) > 3 else ""))
     if t.get("vaiteportti"):
         halytykset.append("v\u00e4iteportti: " + ", ".join(t["vaiteportti"][:3]) + " valmis ilman .tarkastus.md-tiedostoa")
+    if t.get("garmin_halytys"):
+        halytykset.append(t["garmin_halytys"])
     if nimet["EPAONNISTUI"]:
         halytykset.append(f"{nimet['EPAONNISTUI']} jonoteht\u00e4v\u00e4\u00e4 ep\u00e4onnistui")
     if yj and yj["epaonnistui"]:

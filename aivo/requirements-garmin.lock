@@ -1,0 +1,35 @@
+# Aivon Garmin-haun riippuvuudet isannalle (Python 3.13, Linux x86_64). Vain wheel-paketit ja sha256-tiivisteet:
+#   pip install --only-binary :all: --no-deps --require-hashes -r aivo/requirements-garmin.lock
+# Koottu PyPI:n JSON-rajapinnasta 4.11.2026. garth on vanhentunut (tekija lopetti 3/2026), joten sita ei kayteta.
+#   certifi 2026.10.23 lisenssi=Mozilla Public License 2.0 (MPL 2.0) julkaistu=2026-10-23 wheel-tiedostoja=1
+#   cffi 2.1.1 lisenssi=MIT-0 julkaistu=2026-08-03 wheel-tiedostoja=1
+#   charset-normalizer 3.5.2 lisenssi=MIT (PyPI-kentta tyhja) julkaistu=2026-09-30 wheel-tiedostoja=3
+#   curl-cffi 0.17.0 lisenssi=MIT julkaistu=2026-10-26 wheel-tiedostoja=1
+#   garminconnect 0.3.20 lisenssi=MIT License julkaistu=2026-10-23 wheel-tiedostoja=1
+#   idna 3.20 lisenssi=BSD-3-Clause julkaistu=2026-09-17 wheel-tiedostoja=1
+#   pycparser 3.12 lisenssi=BSD-3-Clause julkaistu=2026-10-22 wheel-tiedostoja=1
+#   requests 2.34.2 lisenssi=Apache Software License julkaistu=2026-05-14 wheel-tiedostoja=1
+#   ua-generator 2.1.8 lisenssi=Apache Software License julkaistu=2026-11-02 wheel-tiedostoja=1
+#   urllib3 2.8.0 lisenssi=MIT julkaistu=2026-09-15 wheel-tiedostoja=1
+certifi==2026.10.23 \
+    --hash=sha256:e9b54de76e530bb6cf0ccd036787103acb58fd42ba930ea8bf948ddbaa2f61d1
+cffi==2.1.1 \
+    --hash=sha256:a931079504ecc49efed7744c476a5c343a92fabf66dec2db95edb1b2fdc770e2
+charset-normalizer==3.5.2 \
+    --hash=sha256:7218e8f32b0956cfcd048fd42d9d5779809745ca1d86113ca56f66e7ae1549c4 \
+    --hash=sha256:1c50fe28bbc2ced33386f298650d91218076c05420e6cbd790b913adc41659e7 \
+    --hash=sha256:b6b751274acb69d77b3323d6b7dbaa3c7fdfc1eb829b7eb61d262f32e1af9685
+curl-cffi==0.17.0 \
+    --hash=sha256:af0782d5e340b65fd76701630f0284a8f8243d77df5f2637efd09a4b009f4e24
+garminconnect==0.3.20 \
+    --hash=sha256:d56a1720dff5f4d64be5f105d082bb6b546480a1920f901f1523c19aa76791fc
+idna==3.20 \
+    --hash=sha256:ab7ae7122974553370f0bdb919e1a960b2cd1bc1ef0276416d896db81c14582c
+pycparser==3.12 \
+    --hash=sha256:a076f3f489b39b43ed13563a1dafe42447445bec2e294154ec5c57fcdda4c85e
+requests==2.34.2 \
+    --hash=sha256:2a0d60c172f83ac6ab31e4554906c0f3b3588d37b5cb939b1c061f4907e278e0
+ua-generator==2.1.8 \
+    --hash=sha256:89e612f34ab93bc6e8810198dbde555162df2d13f6fa019aea17c65eb576c0c6
+urllib3==2.8.0 \
+    --hash=sha256:0cf3cae568d36aa9576b28dfb35f11328f1cb974ca7647d9475ebb86c75ac6e3

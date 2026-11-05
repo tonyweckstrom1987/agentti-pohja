@@ -63,7 +63,8 @@ class Kooste(Pohja):
         raise AssertionError(url)
 
     def keraa(self, hae=None, yksikot=None):
-        return aamukooste.keraa(self.repo, self.yj, NYT, hae or self.hae, yksikot or (lambda: ["paivakatsaus.service"]))
+        return aamukooste.keraa(self.repo, self.yj, NYT, hae or self.hae, yksikot or (lambda: ["paivakatsaus.service"]),
+                                garmin_tila=self.tmp / "ei-garmin-tilaa.json")
 
     def test_viisi_rivia_ja_linkit(self):
         teksti = aamukooste.muotoile(self.keraa())

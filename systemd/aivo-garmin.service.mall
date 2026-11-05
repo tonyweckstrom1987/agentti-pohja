@@ -1,0 +1,29 @@
+# Aivon Garmin-haku (Proxmox-isanta). Kopioi: /etc/systemd/system/aivo-garmin.service. Ohje: docs/aivo-garmin.md
+[Unit]
+Description=Aivo: Garmin-datan paivittainen haku (yksityinen)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=aivo
+Group=aivo
+UMask=0077
+WorkingDirectory=/opt/aivo/agentti-pohja
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/aivo/venv/bin/python3 -m aivo.garmin ajo
+# Tilatiedosto (vain tila, paivat ja rivimaarat, ei terveysarvoja) CT115:n aamukoosteelle.
+# "+" = root (pct vaatii), "-" = epaonnistuminen ei kaada yksikkoa. Ajetaan myos, kun haku epaonnistuu.
+ExecStopPost=-+/usr/sbin/pct push 115 /var/lib/aivo/garmin/tila.json /var/lib/aivo-tila/garmin-tila.json --perms 0644
+TimeoutStartSec=15min
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ReadWritePaths=/var/lib/aivo
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
