@@ -1,0 +1,28 @@
+# Aivon viikoittainen kysymyslista (Proxmox-isanta). Kopioi: /etc/systemd/system/aivo-kysymykset.service. Ohje: docs/aivo-kysymykset.md
+[Unit]
+Description=Aivo: viikoittainen kysymyslista (yksityinen kirjasto, yleinen lista)
+
+[Service]
+Type=oneshot
+User=aivo
+Group=aivo
+UMask=0077
+WorkingDirectory=/opt/aivo/agentti-pohja
+Environment=PYTHONDONTWRITEBYTECODE=1
+# Ensin edellisen kierroksen vastaukset muistiin, sitten uusi lista, lopuksi takautuva testi (A577).
+ExecStart=/opt/aivo/venv/bin/python3 -m aivo.kysymykset lue
+ExecStart=/opt/aivo/venv/bin/python3 -m aivo.kysymykset laadi
+ExecStart=-/opt/aivo/venv/bin/python3 -m aivo.kysymykset tarkista
+TimeoutStartSec=5min
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+PrivateNetwork=yes
+ReadWritePaths=/var/lib/aivo
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
