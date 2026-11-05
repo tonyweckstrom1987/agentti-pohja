@@ -18,7 +18,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from . import ajuri, kaistamittaus, kulutus, vaiteportti, varaus
+from . import ajuri, kaistamittaus, kulutus, vaiteportti, valmis, varaus
 
 TZ = ZoneInfo("Europe/Helsinki")
 OLETUS_REPO = "/var/lib/claude-jono/docs"
@@ -63,7 +63,9 @@ def lue_tulokset(repo, alku, loppu):
         if aika.tzinfo is None:
             aika = aika.replace(tzinfo=TZ)
         if alku <= aika <= loppu:
-            ulos.append({"nimi": p.name, "tila": t.group(1), "aika": aika, "teksti": teksti})
+            # A515-A516: VALMIS vaatii riippumattoman tarkastajan merkinnan (valmis.py); muuten KESKEN.
+            tila = valmis.tehokas_tila(t.group(1), teksti, valmis.lue_tarkastus(hak, p.name))
+            ulos.append({"nimi": p.name, "tila": tila, "ajurin_tila": t.group(1), "aika": aika, "teksti": teksti})
     return ulos
 
 
@@ -133,7 +135,7 @@ def keraa(repo, perus, nyt, hae=None, yksikot=None):
     tulokset = lue_tulokset(repo, alku, nyt)
     opit = []
     for t in tulokset:
-        if t["tila"] == "VALMIS":
+        if t["ajurin_tila"] == "VALMIS":   # opit tulevat ajurin VALMIS-tuloksista, vaikka tarkastus puuttuu
             opit += [o for o in ajuri.suodata_opit(ajuri.poimi_uusi_oppi(t["teksti"]))[0] if not TYHJA_OPPI_RE.match(o)]
     prt = []
     for t in tulokset:
@@ -188,7 +190,8 @@ def rivit(t):
         if r["tila"] in nimet:
             nimet[r["tila"]] += 1
     yj = t["yojono"]
-    osat = [f"{len(t['tulokset'])} jonotulosta ({nimet['VALMIS']} valmis, {str(nimet['KESKEN']) + ' kesken, ' if nimet['KESKEN'] else ''}{nimet['EPAONNISTUI']} ep\u00e4onnistui, {nimet['HYLATTY']} hyl\u00e4tty)"]
+    ilman = sum(1 for r in t["tulokset"] if r["tila"] == "KESKEN" and r.get("ajurin_tila") == "VALMIS")
+    osat = [f"{len(t['tulokset'])} jonotulosta ({nimet['VALMIS']} valmis, {str(nimet['KESKEN']) + ' kesken' + (f' (heist\u00e4 {ilman} ilman tarkastajan merkint\u00e4\u00e4)' if ilman else '') + ', ' if nimet['KESKEN'] else ''}{nimet['EPAONNISTUI']} ep\u00e4onnistui, {nimet['HYLATTY']} hyl\u00e4tty)"]
     if t["uudet_prt"]:
         nayta = ", ".join(t["uudet_prt"][:4]) + (f" (+{len(t['uudet_prt']) - 4})" if len(t["uudet_prt"]) > 4 else "")
         osat.append("PR:t " + nayta)

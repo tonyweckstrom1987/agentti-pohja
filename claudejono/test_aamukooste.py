@@ -18,6 +18,9 @@ def tulos(nimi, tila, aika, runko=""):
     return f"# Tulos: {nimi}\n\n- Tila: {tila}\n- Aika: {aika}\n\n{runko}\n"
 
 
+TARKASTUS_OK = "# Tarkastus\n\n- Tarkastaja: opus-istunto-7\n- Toimii k\u00e4yt\u00f6ss\u00e4: kyll\u00e4\n- Todiste: journalctl-rivi 2026-11-02T20:05 ok\n"
+
+
 class Pohja(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
@@ -39,6 +42,7 @@ class Kooste(Pohja):
         super().setUp()
         self.kirjoita("tulokset/2026-11-02-01-a.md", tulos("a", "VALMIS", "2026-11-02T20:00+02:00",
                       "PR https://github.com/tonyweckstrom1987/agentti-pohja/pull/7\n\n## Uusi oppi\nX ei onnistu, kayta Y.\n"))
+        self.kirjoita("tulokset/2026-11-02-01-a.tarkastus.md", TARKASTUS_OK)
         self.kirjoita("tulokset/2026-11-02-02-b.md", tulos("b", "EPAONNISTUI", "2026-11-03T02:00+02:00", "aikakatkaisu"))
         self.kirjoita("tulokset/2026-10-30-01-vanha.md", tulos("vanha", "VALMIS", "2026-10-30T10:00+02:00",
                       "https://github.com/tonyweckstrom1987/mcp-doctor/pull/1"))
@@ -93,6 +97,26 @@ class Kooste(Pohja):
         self.assertIn("95 %", rivit[3])   # kuukausikulu 4,25 + 0,5 = 4,75 / 5,0
         self.assertIn("y", rivit[3])
         self.assertIn("4.25 / 5.00 USD", rivit[4])   # ajopaiva vaihtuu klo 9: klo 6.30 on viela 2.11.
+
+    def test_valmis_ilman_tarkastajan_merkintaa_nakyy_keskena(self):
+        self.kirjoita("tulokset/2026-11-02-03-c.md", tulos("c", "VALMIS", "2026-11-02T21:00+02:00", "Tehty."))
+        t = self.keraa()
+        tilat = {r["nimi"][:13]: r["tila"] for r in t["tulokset"]}
+        self.assertEqual(tilat["2026-11-02-01"], "VALMIS")   # tarkastettu
+        self.assertEqual(tilat["2026-11-02-03"], "KESKEN")   # ei merkintaa
+        self.assertEqual(tilat["2026-11-02-02"], "EPAONNISTUI")
+        rivi = aamukooste.rivit(t)[0]
+        self.assertIn("1 valmis, 1 kesken (heist\u00e4 1 ilman tarkastajan merkint\u00e4\u00e4)", rivi)
+
+    def test_tarkastus_ilman_todistetta_tai_samalta_mallilta_ei_kelpaa(self):
+        malli = "# Tulos: d\n\n- Tila: VALMIS\n- Aika: 2026-11-02T21:30+02:00\n- Malli: opus\n\nx\n"
+        self.kirjoita("tulokset/2026-11-02-04-d.md", malli)
+        self.kirjoita("tulokset/2026-11-02-04-d.tarkastus.md", "- Tarkastaja: opus\n- Toimii k\u00e4yt\u00f6ss\u00e4: kyll\u00e4\n- Todiste: loki\n")
+        self.kirjoita("tulokset/2026-11-02-05-e.md", tulos("e", "VALMIS", "2026-11-02T21:40+02:00"))
+        self.kirjoita("tulokset/2026-11-02-05-e.tarkastus.md", "- Tarkastaja: sonnet\n- Toimii k\u00e4yt\u00f6ss\u00e4: kyll\u00e4\n- Todiste: -\n")
+        tilat = {r["nimi"][:13]: r["tila"] for r in self.keraa()["tulokset"]}
+        self.assertEqual(tilat["2026-11-02-04"], "KESKEN")
+        self.assertEqual(tilat["2026-11-02-05"], "KESKEN")
 
     def test_github_virhe_ei_nay_tyhjana_onnistumisena(self):
         def rikki(url):

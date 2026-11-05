@@ -82,6 +82,27 @@ class LaskeTesti(unittest.TestCase):
         self.assertEqual([v[1] for v, _ in rivit], [45, 46, 47])
 
 
+class ValmisRikkiTesti(unittest.TestCase):
+    TULOS = "# Tulos: %s\n\n- Tila: VALMIS\n- Aika: 2026-11-04T10:00+02:00\n\nTehty.\n"
+    RIKKI = "- Tarkastaja: opus\n- Toimii k\u00e4yt\u00f6ss\u00e4: ei\n- Todiste: journalctl: Traceback\n"
+
+    def test_valmis_joka_todettiin_toimimattomaksi_lasketaan(self):
+        nyt = datetime.date(2026, 11, 5)
+        tulokset = [self.TULOS % "a.md", self.TULOS % "b.md"]
+        rivit, t = vm.laske("", tulokset, nyt, {"a.md": self.RIKKI, "b.md": self.RIKKI.replace(": ei", ": kyll\u00e4")})
+        self.assertEqual(t["valmis_rikki"], 1)
+        self.assertEqual(sum(r["valmis_rikki"] for _, r in rivit), 1)
+        self.assertEqual(sum(r["luokat"]["1"] for _, r in rivit), 1)
+
+    def test_ilman_tarkastuksia_ei_muutosta(self):
+        _, t = vm.laske("", [self.TULOS % "a.md"], datetime.date(2026, 11, 5))
+        self.assertEqual((t["valmis_rikki"], t["ajot"]), (0, 0))
+
+    def test_osiossa_sarake(self):
+        rivit, t = vm.laske("", [self.TULOS % "a.md"], datetime.date(2026, 11, 5), {"a.md": self.RIKKI})
+        self.assertIn("VALMIS, my\u00f6hemmin toimimaton", "\n".join(vm.muodosta_osio(rivit, t, datetime.date(2026, 11, 5))))
+
+
 class OsioTesti(unittest.TestCase):
     def test_korvaa_vain_osion_rungon(self):
         taulu = "# T\n\n## Muu\na\n\n## Virhemittari (x)\nvanha\n| a |\n\n## Kirjaukset\nb\n"

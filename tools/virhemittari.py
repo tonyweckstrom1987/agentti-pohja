@@ -20,6 +20,9 @@ import re
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from claudejono import valmis  # noqa: E402
+
 OTSIKKO_ALKU = "## Virhemittari"
 LUOKAT = ("1", "2", "3", "4", "?")
 LUOKKA_OTSIKOT = {
@@ -128,12 +131,17 @@ def luokittele_ajo(tila, teksti):
     return None
 
 
-def laske(loki_teksti, tulokset, nyt):
-    """tulokset: [teksti]. Palauttaa (rivit, tilastot); rivit = viikkojarjestyksessa dictit."""
+TULOSNIMI_RE = re.compile(r"^# Tulos:\s*(\S+)", re.M)
+
+
+def laske(loki_teksti, tulokset, nyt, tarkastukset=None):
+    """tulokset: [teksti]. tarkastukset: {tulosnimi: tarkastusteksti} (valmis.py). Palauttaa (rivit, tilastot);
+    rivit = viikkojarjestyksessa dictit. VALMIS-tulos, jonka tarkastaja totesi toimimattomaksi, on virhe (luokka 1, A516)."""
+    tarkastukset = tarkastukset or {}
     viikot = {}
 
     def rivi(v):
-        return viikot.setdefault(v, {"loki": 0, "ajot": 0, "luokat": dict.fromkeys(LUOKAT, 0)})
+        return viikot.setdefault(v, {"loki": 0, "ajot": 0, "valmis_rikki": 0, "luokat": dict.fromkeys(LUOKAT, 0)})
 
     n_loki = 0
     for paiva, teksti in lue_loki(loki_teksti):
@@ -141,16 +149,25 @@ def laske(loki_teksti, tulokset, nyt):
         r["loki"] += 1
         r["luokat"][luokittele_loki(teksti)] += 1
         n_loki += 1
-    n_ajot = n_luettu = 0
+    n_ajot = n_luettu = n_rikki = 0
     for teksti in tulokset:
         t = lue_tulos(teksti)
         if not t:
             continue
         n_luettu += 1
         luokka = luokittele_ajo(t[0], t[2])
+        rikki = False
+        if luokka is None and t[0] == "VALMIS":
+            nimi = TULOSNIMI_RE.search(t[2])
+            rikki = bool(nimi) and valmis.toimimaton(tarkastukset.get(nimi.group(1)))
+            if rikki:
+                luokka = "1"   # tehty != toimii
         if luokka is None:
             continue
         r = rivi(viikko(t[1]))
+        if rikki:
+            r["valmis_rikki"] += 1
+            n_rikki += 1
         r["ajot"] += 1
         r["luokat"][luokka] += 1
         n_ajot += 1
@@ -167,7 +184,7 @@ def laske(loki_teksti, tulokset, nyt):
     for i, v in enumerate(jarj):
         viikot[v]["yht"] = viikot[v]["loki"] + viikot[v]["ajot"]
         viikot[v]["toisto"] = toisto(viikot, jarj, i)
-    return [(v, viikot[v]) for v in jarj], {"loki": n_loki, "ajot": n_ajot, "tulostiedostoa": n_luettu}
+    return [(v, viikot[v]) for v in jarj], {"loki": n_loki, "ajot": n_ajot, "tulostiedostoa": n_luettu, "valmis_rikki": n_rikki}
 
 
 def toisto(viikot, jarj, i):
@@ -196,26 +213,27 @@ def viikko_nimi(v, nyt):
 
 
 def muodosta_osio(rivit, tilastot, nyt):
-    ot = ["Viikko", "Virheit\u00e4", "Virhelokissa", "Ajoissa (EP\u00c4ONNISTUI/KESKEN)"]
+    ot = ["Viikko", "Virheit\u00e4", "Virhelokissa", "Ajoissa (EP\u00c4ONNISTUI/KESKEN/VALMIS ja toimimaton)", "VALMIS, my\u00f6hemmin toimimaton"]
     ot += [LUOKKA_OTSIKOT[k] for k in LUOKAT]
     ot.append("Toistuiko sama juurisyy")
     out = ["Luvut tuottaa `tools/virhemittari.py` (ajo sunnuntaisin ennen viikkokatsausta). Viikko = ISO-viikko; "
            "tulokset viikotetaan tulostiedoston ajan mukaan.", "",
            "| " + " | ".join(ot) + " |", "|" + "---|" * len(ot)]
     for v, r in rivit:
-        solut = [viikko_nimi(v, nyt), str(r["yht"]), str(r["loki"]), str(r["ajot"])]
+        solut = [viikko_nimi(v, nyt), str(r["yht"]), str(r["loki"]), str(r["ajot"]), str(r["valmis_rikki"])]
         solut += [str(r["luokat"][k]) for k in LUOKAT]
         solut.append(r["toisto"])
         out.append("| " + " | ".join(solut) + " |")
     out += ["",
             "Luokitus: virhelokin merkinn\u00e4t `virheiden-ehkaisy.md`:n kolmen juurisyyn mukaan; jos luokkaa ei n\u00e4e, "
             "merkint\u00e4 on luokittelematon (ei arvata). Ajoista KESKEN (ei kelvollista \"Todennettu k\u00e4yt\u00f6ss\u00e4\" -rivi\u00e4) on luokka 1 "
-            "(4.11. l\u00f6ydetty juurisyy), EP\u00c4ONNISTUI aikakatkaisun tai kierrosrajan takia on luokka 4. Sama juurisyy "
+            "(4.11. l\u00f6ydetty juurisyy), VALMIS-tulos, jonka riippumaton tarkastaja totesi toimimattomaksi "
+            "(`tulokset/<tulos>.tarkastus.md`: \"Toimii k\u00e4yt\u00f6ss\u00e4: ei\" + todiste), on luokka 1 ja n\u00e4kyy omassa sarakkeessaan, EP\u00c4ONNISTUI aikakatkaisun tai kierrosrajan takia on luokka 4. Sama juurisyy "
             "kahtena viikkona: korjausehdotus koodiin; kolmantena: Tonylle (A8).",
             "",
             "Todennettu k\u00e4yt\u00f6ss\u00e4: skripti ajettu %s oikeaa dataa vastaan, luettu %d virhelokimerkint\u00e4\u00e4 ja "
-            "%d tulostiedostoa (joista %d EP\u00c4ONNISTUI tai KESKEN)."
-            % (nyt.isoformat(), tilastot["loki"], tilastot["tulostiedostoa"], tilastot["ajot"])]
+            "%d tulostiedostoa (joista %d EP\u00c4ONNISTUI, KESKEN tai toimimattomaksi todettu VALMIS; n\u00e4ist\u00e4 VALMIS: %d)."
+            % (nyt.isoformat(), tilastot["loki"], tilastot["tulostiedostoa"], tilastot["ajot"], tilastot["valmis_rikki"])]
     return out
 
 
@@ -241,7 +259,9 @@ def main(argv=None):
         d = Path(a.docs)
         loki = (d / "virheloki.md").read_text(encoding="utf-8")
         tulokset = [p.read_text(encoding="utf-8", errors="replace") for p in sorted((d / "tulokset").glob("*.md"))]
-        rivit, tilastot = laske(loki, tulokset, nyt)
+        tarkastukset = {p.name[:-len(valmis.PAATE)] + ".md": p.read_text(encoding="utf-8", errors="replace")
+                        for p in (d / "tulokset").glob("*" + valmis.PAATE)}
+        rivit, tilastot = laske(loki, tulokset, nyt, tarkastukset)
         osio = muodosta_osio(rivit, tilastot, nyt)
         if a.kirjoita or a.ulos:
             uusi = korvaa_osio((d / "tulostaulu.md").read_text(encoding="utf-8"), osio)
