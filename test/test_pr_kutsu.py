@@ -717,7 +717,8 @@ class ForkSynkkausTesti(ForkPohja):
         self.hylkaa_pushit("hylatty")
         with mock.patch.dict(os.environ, {"GITHUB_TOKEN": "gh-salainen", "GH_TOKEN": "gh-toinen"}):
             ok, koodi, selitys = self.valmis()
-        tunnus = open(self.tunnus).read()
+        with open(self.tunnus) as f:
+            tunnus = f.read()
         self.assertNotIn(tunnus, selitys)
         for cmd, ymp in self.ymparistot:
             self.assertNotIn(tunnus, " ".join(cmd))

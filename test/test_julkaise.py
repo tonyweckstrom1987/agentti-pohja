@@ -98,7 +98,7 @@ def puu(polku):
         rivit.append("D:%s:%o" % (rel, os.stat(kansio).st_mode & 0o7777))
         for f in files:
             fp = os.path.join(kansio, f)
-            rivit.append("F:%s:%o:%s" % (os.path.join(rel, f), os.lstat(fp).st_mode & 0o7777, hashlib.sha256(open(fp, "rb").read()).hexdigest()))
+            rivit.append("F:%s:%o:%s" % (os.path.join(rel, f), os.lstat(fp).st_mode & 0o7777, hashlib.sha256(Path(fp).read_bytes()).hexdigest()))
     return hashlib.sha256("\n".join(sorted(rivit)).encode()).hexdigest()
 
 
@@ -275,7 +275,8 @@ class PaketoiTesti(Pohja):
         self.assertEqual(hashlib.sha256(p.read_bytes()).hexdigest(), s)
         luettu = subprocess.run("gzip -dc %s | git get-tar-commit-id" % p, shell=True, capture_output=True, text=True).stdout.strip()
         self.assertEqual(luettu, c)
-        nimet = tarfile.open(p).getnames()
+        with tarfile.open(p) as arkisto:
+            nimet = arkisto.getnames()
         self.assertTrue(all(n.startswith("app-%s/" % c[:8]) or n == "app-%s" % c[:8] for n in nimet))
         self.assertIn("app-%s/tests/test_app.py" % c[:8], nimet)
         self.assertIn("app-%s/.github/ci.yml" % c[:8], nimet)

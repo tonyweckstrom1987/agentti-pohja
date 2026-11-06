@@ -1,0 +1,1 @@
+- Testit: `test_ilmoita` kerää roskat ennen stderrin kaappausta, joten aiemman testin ResourceWarning ei enää kaada sitä satunnaisesti. Tiedostovuodot korjattu `test_julkaise.py`:stä (noin 2300 varoitusta ajossa) ja `test_pr_kutsu.py`:stä.

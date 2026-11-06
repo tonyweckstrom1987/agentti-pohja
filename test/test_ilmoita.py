@@ -1,10 +1,12 @@
 import contextlib
+import gc
 import io
 import json
 import os
 import sys
 import tempfile
 import unittest
+import warnings
 from unittest import mock
 
 from agentti import ilmoita
@@ -146,6 +148,8 @@ class TunnusPuutteetTarkkaTest(unittest.TestCase):
 class MainTarkkaTest(unittest.TestCase):
     def aja(self, argv, tulos="lahetetty", poikkeus=None):
         ulos, virhe = io.StringIO(), io.StringIO()
+        # Aiempien testien roskien ResourceWarning ei saa osua kaapattuun stderriin.
+        gc.collect()
         with mock.patch.object(ilmoita, "ilmoita", side_effect=poikkeus, return_value=tulos) as m, \
                 contextlib.redirect_stdout(ulos), contextlib.redirect_stderr(virhe):
             rc = ilmoita.main(argv)
@@ -174,6 +178,27 @@ class MainTarkkaTest(unittest.TestCase):
     def test_arvovirhe_on_kayttovirhe(self):
         rc, ulos, virhe, _ = self.aja(["valmis", "x"], poikkeus=ValueError("otsikko puuttuu"))
         self.assertEqual((rc, ulos), (2, ""))
+        self.assertEqual(virhe, "ilmoita: otsikko puuttuu\n")
+
+    def test_aiempien_testien_roskat_eivat_tule_kaapattuun_stderriin(self):
+        def jata_roska():
+            with tempfile.NamedTemporaryFile() as apu:
+                kiinni = open(apu.name)
+                kierto = {"tiedosto": kiinni}
+                kierto["itse"] = kierto
+
+        def keraa_ja_kaadu(*_):
+            gc.collect()
+            raise ValueError("otsikko puuttuu")
+
+        gc.collect()
+        gc.disable()
+        self.addCleanup(gc.enable)
+        with warnings.catch_warnings():
+            warnings.simplefilter("always", ResourceWarning)
+            jata_roska()
+            with contextlib.redirect_stderr(io.StringIO()):
+                _, _, virhe, _ = self.aja(["valmis", "x"], poikkeus=keraa_ja_kaadu)
         self.assertEqual(virhe, "ilmoita: otsikko puuttuu\n")
 
     def test_ilman_argumenttia_luetaan_sys_argv(self):
