@@ -6,6 +6,7 @@ Kirjausvirhe ei saa kaataa ajoa. Ei salaisuuksia: rivilla on vain nimi, luvut ja
 """
 import json
 import os
+import re
 from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -98,10 +99,36 @@ def malleittain(rivit):
     return ulos
 
 
-def viikon_alku(nyt):
-    """Maanantai 00:00 (Helsinki)."""
+VIIKKO_VAIHTUU_OLETUS = "la 21:59"
+VIIKON_PAIVAT = {"ma": 0, "ti": 1, "ke": 2, "to": 3, "pe": 4, "la": 5, "su": 6}
+_VAIHTO_RE = re.compile(r"^\s*(ma|ti|ke|to|pe|la|su)\s+(\d{1,2})[:.](\d{2})\s*$", re.IGNORECASE)
+
+
+def viikon_vaihto(env=None):
+    """(viikonpaiva 0=ma, tunti, minuutti) asetuksesta CLAUDEJONO_VIIKKO_VAIHTUU (esim. "la 21:59"). Virheellinen -> oletus.
+    Tonyn tilauksen viikkoraja nollautuu lauantaina klo 21.59 Helsingin aikaa, ei maanantaina."""
+    arvo = (env or {}).get("CLAUDEJONO_VIIKKO_VAIHTUU") or VIIKKO_VAIHTUU_OLETUS
+    m = _VAIHTO_RE.match(str(arvo)) or _VAIHTO_RE.match(VIIKKO_VAIHTUU_OLETUS)
+    pv, h, min_ = VIIKON_PAIVAT[m.group(1).lower()], int(m.group(2)), int(m.group(3))
+    if h > 23 or min_ > 59:
+        m = _VAIHTO_RE.match(VIIKKO_VAIHTUU_OLETUS)
+        pv, h, min_ = VIIKON_PAIVAT[m.group(1)], int(m.group(2)), int(m.group(3))
+    return pv, h, min_
+
+
+def viikon_alku(nyt, env=None):
+    """Viimeisin viikon vaihtohetki (oletus lauantai 21:59, Europe/Helsinki) hetkeen nyt mennessa. Vaihtohetkella uusi viikko on jo alkanut."""
     n = nyt.astimezone(TZ)
-    return (n - timedelta(days=n.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+    pv, h, min_ = viikon_vaihto(env)
+    alku = (n - timedelta(days=(n.weekday() - pv) % 7)).replace(hour=h, minute=min_, second=0, microsecond=0)
+    if alku > n:
+        alku -= timedelta(days=7)
+    return alku
+
+
+def seuraava_vaihto(nyt, env=None):
+    """Seuraava viikon vaihtohetki: silloin Clauden viikkoraja nollautuu."""
+    return viikon_alku(nyt, env) + timedelta(days=7)
 
 
 def _osa(nimi, m):
@@ -115,12 +142,12 @@ def _ryhma(m):
     return "; ".join(_osa(k, v) for k, v in sorted(m.items())) or "ei ajoja"
 
 
-def kulutusrivi(tila, nyt):
+def kulutusrivi(tila, nyt, env=None):
     """Aamukoosteen kulutusosa: eilinen kulutus malleittain + viikon kertyma. Claude-mallien USD on API-hintainen arvo, ei lasku."""
     nyt = nyt.astimezone(TZ)
     tanaan = nyt.replace(hour=0, minute=0, second=0, microsecond=0)
     eilen = malleittain(lue(tila, tanaan - timedelta(days=1), tanaan))
-    viikko = malleittain(lue(tila, viikon_alku(nyt), nyt + timedelta(seconds=1)))
+    viikko = malleittain(lue(tila, viikon_alku(nyt, env), nyt + timedelta(seconds=1)))
     return f"Mallikulutus eilen: {_ryhma(eilen)}. Viikko: {_ryhma(viikko)} (Clauden USD = API-hintainen arvo, tilauksessa ei lasku)."
 
 

@@ -163,7 +163,7 @@ def keraa(repo, perus, nyt, hae=None, yksikot=None):
     kulutus_teksti = varaus_rivi = varaus_kysymys = None
     try:   # mallikohtainen kulutus ja Tonyn varaus; puuttuva loki ei kaada koostetta
         tila = Path(repo).parent
-        kulutus_teksti = kulutus.kulutusrivi(tila, nyt)
+        kulutus_teksti = kulutus.kulutusrivi(tila, nyt, os.environ)
         varaus_rivi, varaus_kysymys = varaus.aamukooste_osa(tila, os.environ, nyt)
     except Exception:
         pass

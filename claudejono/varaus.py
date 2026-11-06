@@ -18,6 +18,7 @@ tehtavaa yritetaan enintaan RAJA_YRITYKSIA kertaa, minka jalkeen se kirjataan ep
 import argparse
 import json
 import os
+import re
 import sys
 import time
 from datetime import datetime, timedelta
@@ -54,7 +55,7 @@ def osuus_pros(env):
 
 
 def kirjaa_kalibrointi(tila, pros, nyt=None):
-    """Tonyn ilmoittama luku 0..100. Palauttaa True, jos tallennettiin."""
+    """Tonyn ilmoittama luku 0..100 (nyt = ilmoituksen aika; menneen ilmoituksen saa kirjata --aika-valitsimella). Palauttaa True, jos tallennettiin."""
     nyt = nyt or datetime.now(TZ)
     if isinstance(pros, bool) or not isinstance(pros, (int, float)) or not 0 <= pros <= 100:
         return False
@@ -84,7 +85,7 @@ def arvio(tila, env, nyt):
     from .ajuri import kaistojen_maara
     raja = osuus_pros(env)
     kaikki_kaistat = kaistojen_maara(env)
-    viikko_alku = kulutus.viikon_alku(nyt)
+    viikko_alku = kulutus.viikon_alku(nyt, env)
     ilmoitukset = sorted(kulutus.lue(tila, nyt - timedelta(days=28), nyt + timedelta(seconds=1), tiedosto=KALIBROINTI), key=lambda r: r["_aika"])
     ulos = {"osuus": raja, "agentit_pros": None, "kaistoja": kaikki_kaistat, "tila": "ei_kalibroitu", "syy": "viikkorajan prosenttia ei ole kalibroitu"}
     tuore = [r for r in ilmoitukset if r["_aika"] >= viikko_alku and (nyt - r["_aika"]).total_seconds() <= TUORE_ILMOITUS_H * 3600]
@@ -93,7 +94,7 @@ def arvio(tila, env, nyt):
     # Suhde (% / USD) niista ilmoitusparista, jotka ovat samalla viikolla (viikkoraja nollautuu, joten viikon yli ei verrata)
     sum_pros = sum_usd = 0.0
     for a, b in zip(ilmoitukset, ilmoitukset[1:]):
-        if kulutus.viikon_alku(a["_aika"]) != kulutus.viikon_alku(b["_aika"]):
+        if kulutus.viikon_alku(a["_aika"], env) != kulutus.viikon_alku(b["_aika"], env):
             continue
         usd = _claude_usd(kulutus.lue(tila, a["_aika"], b["_aika"]))
         dp = float(b.get("pros", 0)) - float(a.get("pros", 0))
@@ -132,12 +133,30 @@ def raja_tauolla(tila, nyt_s=None):
     return max(0, int(asti - nyt_s))
 
 
-def kirjaa_raja(tila, kaista, tehtava, env, nyt_s=None):
-    """Pysayttaa kaikki Claude-kaistat tauoksi ja laskee tehtavan yritykset. Palauttaa (taukoa_s, yritykset)."""
+# Viikkorajan tayttyminen (toisin kuin ohimeneva ylikuormitus): kayttokrediitit ovat paalla, joten uusi yritys ennen viikon vaihtoa
+# voisi kuluttaa maksullisia krediitteja. Siksi tauko kestaa seuraavaan viikon vaihtoon (oletus la 21.59), ei tuntia.
+VIIKKORAJA_RE = re.compile(r"usage limit|limit reached|hit your limit|weekly limit|credits?|quota", re.IGNORECASE)
+
+
+def on_viikkoraja(teksti):
+    return bool(VIIKKORAJA_RE.search(teksti or ""))
+
+
+def kesto_teksti(s):
+    s = int(s)
+    return f"{s // 3600} h {s % 3600 // 60} min" if s >= 3600 else f"{s // 60} min"
+
+
+def kirjaa_raja(tila, kaista, tehtava, env, nyt_s=None, viikkoraja=False):
+    """Pysayttaa kaikki Claude-kaistat tauoksi ja laskee tehtavan yritykset. Palauttaa (taukoa_s, yritykset).
+    viikkoraja=True: tauko kestaa seuraavaan viikon vaihtoon (vahintaan normaali tauko)."""
     nyt_s = time.time() if nyt_s is None else nyt_s
     tauko = raja_tauko_s(env)
+    if viikkoraja:
+        vaihto = kulutus.seuraava_vaihto(datetime.fromtimestamp(nyt_s, TZ), env).timestamp()
+        tauko = max(tauko, int(vaihto - nyt_s))
     try:
-        (Path(tila) / RAJA_TILA).write_text(json.dumps({"asti": nyt_s + tauko, "kaista": kaista, "tehtava": tehtava}), encoding="utf-8")
+        (Path(tila) / RAJA_TILA).write_text(json.dumps({"asti": nyt_s + tauko, "kaista": kaista, "tehtava": tehtava, "viikko": bool(viikkoraja)}), encoding="utf-8")
     except OSError:
         pass
     try:
@@ -204,6 +223,9 @@ def aamukooste_osa(tila, env, nyt):
         rivi = f"Tonyn varaus: raja {a['osuus']:g} % agenteille, arvio puuttuu (ei kalibroitu)"
     else:
         rivi = f"Tonyn varaus: agentit {a['agentit_pros']:g} % / {a['osuus']:g} % ({a['tila']})"
+    j = raja_tauolla(tila, nyt.timestamp())
+    if j > 0:
+        rivi += f". Claude-k\u00e4ytt\u00f6raja t\u00e4ynn\u00e4: Claude-kaistat pys\u00e4hdyksiss\u00e4 viel\u00e4 {kesto_teksti(j)} (viikko vaihtuu {kulutus.seuraava_vaihto(nyt, env).strftime('%d.%m. klo %H.%M')}), ei krediittik\u00e4ytt\u00f6\u00e4"
     ika = kalibrointi_aikaisin(tila, nyt)
     kysymys = None
     if ika is None or ika > KALIBROINTI_VANHA_H:
@@ -215,10 +237,18 @@ def main(argv=None):
     p = argparse.ArgumentParser(description="Tonyn varaus: kalibrointi ja tila")
     p.add_argument("komento", choices=["kalibroi", "tila"])
     p.add_argument("luku", nargs="?", type=float)
+    p.add_argument("--aika", help="ilmoituksen aika ISO-muodossa, esim. 2026-11-03T16:11 (oletus: nyt, Helsingin aika)")
     p.add_argument("--tila", default=os.environ.get("CLAUDEJONO_TILA", "/var/lib/claude-jono"))
     a = p.parse_args(argv)
     if a.komento == "kalibroi":
-        if a.luku is None or not kirjaa_kalibrointi(a.tila, a.luku):
+        try:
+            aika = datetime.fromisoformat(a.aika) if a.aika else None
+            if aika is not None and aika.tzinfo is None:
+                aika = aika.replace(tzinfo=TZ)
+        except ValueError:
+            print("aika ei kelpaa", file=sys.stderr)
+            return 2
+        if a.luku is None or not kirjaa_kalibrointi(a.tila, a.luku, aika):
             print("anna luku 0..100", file=sys.stderr)
             return 2
         print(f"kirjattu {a.luku:g} %")
