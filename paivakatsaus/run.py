@@ -77,6 +77,16 @@ def _lokirivi(aika, tila, kaytto, kulu, koodit, muistiinpanot, ehdotuksia, vaihe
             + (f" huom={','.join(muistiinpanot)}" if muistiinpanot else ""))
 
 
+_KOODI_RE = re.compile(r"[A-Za-z0-9_]{1,60}")
+
+
+def _yhteenveto(paluu, vaihe, koodit):
+    """Yksi kiintea stderr-rivi (journal): paluukoodi, vaihe ja virhekoodit. Vain kiinteat koodit; muut korvataan
+    sanalla 'muu', joten rivi ei voi sisaltaa poikkeusviestia, mallin tekstia tai tunnuksia."""
+    puhtaat = [k if isinstance(k, str) and _KOODI_RE.fullmatch(k) else "muu" for k in koodit]
+    return suodata_loki(f"Ajo paattyi: paluu={paluu} vaihe={vaihe} virhekoodi={','.join(puhtaat) if puhtaat else '-'}")
+
+
 def ajo(kayta_llm=False, laheta=False, *, env=None, nyt=None, polut=None, http_llm=None, http_send=None, keraa=None,
         tuloste=None, virhetuloste=None, viive=send.VIIVE):
     """Palauttaa poistumiskoodin: 0 ok, 1 virhe, 2 kulukatto. Oletus on dry-run."""
@@ -98,6 +108,7 @@ def ajo(kayta_llm=False, laheta=False, *, env=None, nyt=None, polut=None, http_l
         rivi = _lokirivi(aika, tila, kaytto, kulu or render.lue_tila(p["kulu"], aika), koodit, muistiinpanot, ehdotuksia, vaihe)
         if not kirjaa_loki(p["loki"], rivi):
             print("Lokia ei voitu kirjoittaa", file=err)
+        print(_yhteenveto(paluu, vaihe, koodit), file=err)                   # journaliin: syy nakyy ilman lokin lukuoikeutta
         return paluu
 
     try:
