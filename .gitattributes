@@ -1,0 +1,2 @@
+# Rinnakkaiset PR:t lisaavat riveja samaan kohtaan CHANGELOGia. Union sailyttaa molempien rivit ilman konfliktia.
+CHANGELOG.md merge=union

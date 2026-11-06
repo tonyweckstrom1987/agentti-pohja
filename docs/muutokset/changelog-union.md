@@ -1,0 +1,1 @@
+- `.gitattributes`: `CHANGELOG.md merge=union`, joten pelkka CHANGELOG-rivien ristiriita ei enaa esta PR:n yhdistamista eika vaadi PR:n karjen vaihtoa (joka mitatoisi tarkastajan paatoksen).
