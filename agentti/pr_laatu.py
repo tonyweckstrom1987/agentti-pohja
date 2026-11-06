@@ -20,7 +20,7 @@ NOSTO_MIN_MERGE_PROS = 75
 NOSTO_MAX_KULU_PER_MERGE = 4.0  # USD; kulu = koko yojonon kulu ikkunassa (myos tarkkailu/katselmointi), jaettuna mergattujen PR:ien maaralla
 OLETUS_PERUS = "/var/lib/yojono"
 PVM_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-AIHE_RE = re.compile(r"yojono:\s*(testit|readme|riippuvuudet|ominaisuus)", re.I)
+AIHE_RE = re.compile(r"\[?yojono\]?:?\s*(testit|readme|riippuvuudet|ominaisuus)", re.I)  # 'yojono: testit', '[yojono] testit', '[yojono] yojono: testit'
 
 
 def _oletushaku(url):
@@ -36,10 +36,22 @@ def _aika(teksti):
         return None
 
 
+def on_botti(login):
+    """Onko PR:n kirjoittaja botti: kayttajatunnus tai GitHub Appin `<tunnus>[bot]`-muoto (kirjainkoolla ei ole merkitysta)."""
+    nimi = str(login or "").lower()
+    return nimi in (BOTTI, BOTTI + "[bot]")
+
+
 def aihe(otsikko):
     """Tehtavan aihe PR:n otsikosta ('yojono: testit llm-stopcheck' -> 'testit'), muuten 'muu'."""
     m = AIHE_RE.search(str(otsikko))
     return m.group(1).lower() if m else "muu"
+
+
+def _virhe_tiiviisti(e):
+    """Poikkeuksen tyyppi ja mahdollinen HTTP-tila (ei viestia: se voi sisaltaa salaisuuksia)."""
+    tila = getattr(e, "code", None)
+    return type(e).__name__ + (" %s" % tila if isinstance(tila, int) else "")
 
 
 def keraa(hae=None, paivia=OLETUS_PAIVIA, nyt=None):
@@ -49,18 +61,19 @@ def keraa(hae=None, paivia=OLETUS_PAIVIA, nyt=None):
     nyt = nyt or datetime.now(timezone.utc)
     raja = nyt - timedelta(days=paivia)
     uusi = lambda: {"mergattu": 0, "suljettu": 0, "auki": 0}
-    tulos = {"yht": uusi(), "repoittain": {}, "aiheittain": {}}
+    tulos = {"yht": uusi(), "repoittain": {}, "aiheittain": {}, "virheet": []}
     for repo in REPOT:
         try:
             prt = hae("https://api.github.com/repos/%s/%s/pulls?state=all&sort=created&direction=desc&per_page=50" % (OMISTAJA, repo))
-        except Exception:
+        except Exception as e:
+            # Hakuvirhe (esim. tuntirajan 403) kirjataan: luvut ovat talloin alarajoja eika hiljaisia nollia. Vain tyyppi ja HTTP-tila.
+            tulos["virheet"].append("%s: %s" % (repo, _virhe_tiiviisti(e)))
             continue
         for p in prt:
             luotu = _aika(p.get("created_at"))
             if luotu is None or luotu < raja:
                 continue
-            kirjoittaja = ((p.get("user") or {}).get("login") or "").lower()
-            if kirjoittaja != BOTTI:
+            if not on_botti((p.get("user") or {}).get("login")):
                 continue
             tila = "auki" if p.get("state") == "open" else ("mergattu" if p.get("merged_at") else "suljettu")
             for kohde in (tulos["yht"], tulos["repoittain"].setdefault(repo, uusi()), tulos["aiheittain"].setdefault(aihe(p.get("title")), uusi())):
@@ -117,6 +130,9 @@ def muotoile(tulos, paivia=OLETUS_PAIVIA):
         osat = ["%s %d/%d" % (nimi, t["mergattu"], t["mergattu"] + t["suljettu"] + t["auki"]) for nimi, t in sorted(tulos[avain].items())]
         if osat:
             rivit.append("  %s (mergattu/kaikki): %s" % (otsikko, ", ".join(osat)))
+    virheet = tulos.get("virheet") or []
+    if virheet:
+        rivit.append("  VAROITUS: %d hakuvirhetta, luvut ovat alarajoja (%s)" % (len(virheet), "; ".join(virheet)))
     return "\n".join(rivit)
 
 

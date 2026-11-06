@@ -57,6 +57,42 @@ class KerausTesti(unittest.TestCase):
             raise OSError("verkko")
         self.assertEqual(pl.keraa(hae, 30, NYT)["yht"], {"mergattu": 0, "suljettu": 0, "auki": 0})
 
+    def test_app_tunnus_bot_paate_lasketaan(self):
+        hae = feikki({"llm-stopcheck": [pr(1, "[yojono] testit x", "open", kirjoittaja="agenttifirma-bot[bot]"),
+                                        pr(2, "[yojono] testit x", "closed", merged=True, kirjoittaja="agenttifirma-bot"),
+                                        pr(3, "[yojono] testit x", "open", kirjoittaja="joku-toinen[bot]")]})
+        self.assertEqual(pl.keraa(hae, 30, NYT)["yht"], {"mergattu": 1, "suljettu": 0, "auki": 1})
+
+    def test_hakuvirhe_nakyy_tulosteessa_ilman_viestia(self):
+        import urllib.error
+        def hae(url):
+            raise urllib.error.HTTPError(url, 403, "SALAINEN-VIESTI", {}, None)
+        t = pl.keraa(hae, 30, NYT)
+        self.assertEqual(len(t["virheet"]), len(pl.REPOT))
+        teksti = pl.muotoile(t)
+        self.assertIn("%d hakuvirhetta, luvut ovat alarajoja" % len(pl.REPOT), teksti)
+        self.assertIn("HTTPError 403", teksti)
+        self.assertNotIn("SALAINEN", teksti)
+
+    def test_osittainen_hakuvirhe_sailyttaa_muut_luvut(self):
+        def hae(url):
+            if "/llm-stopcheck/" in url:
+                raise OSError("verkko")
+            return [pr(1, "[yojono] testit x", "open")] if "/evalkit/" in url else []
+        t = pl.keraa(hae, 30, NYT)
+        self.assertEqual(t["yht"]["auki"], 1)
+        self.assertEqual(t["virheet"], ["llm-stopcheck: OSError"])
+        self.assertIn("1 hakuvirhetta", pl.muotoile(t))
+
+    def test_ei_varoitusta_ilman_virheita(self):
+        self.assertNotIn("VAROITUS", pl.muotoile(pl.keraa(feikki({}), 30, NYT)))
+
+    def test_aihe_hakasulkuotsikosta(self):
+        self.assertEqual(pl.aihe("[yojono] testit llm-stopcheck"), "testit")
+        self.assertEqual(pl.aihe("[yojono] README-paivitys"), "readme")
+        self.assertEqual(pl.aihe("[yojono] yojono: ominaisuus x"), "ominaisuus")
+        self.assertEqual(pl.aihe("[yojono] korjaus x"), "muu")
+
     def test_aihe_otsikosta(self):
         for otsikko, odotus in (("yojono: testit a", "testit"), ("[yojono] yojono: README b", "readme"), ("yojono: riippuvuudet c", "riippuvuudet"),
                                 ("yojono: ominaisuus d", "ominaisuus"), ("yojono: katselmointi e", "muu"), (None, "muu")):
