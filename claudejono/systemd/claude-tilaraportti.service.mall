@@ -1,0 +1,20 @@
+# Mallitiedosto: ei asenna mitaan. Tony yhdistaa yksikon itse (asennus README.md:n osio Isannan tilaraportti).
+[Unit]
+Description=Claude-jono: isannan tilaraportti docs-repoon (vain luku, kirjoittaa vain tila.md)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/agentti-pohja
+Environment=CLAUDEJONO_REPO=/var/lib/claude-jono/docs
+Environment=YOJONO_PERUS=/var/lib/yojono
+# SNAPSHOT_HOST ja SNAPSHOT_KEY samasta asetustiedostosta kuin snapshot-kutsu (isannan osoitetta ei kirjata repoon)
+EnvironmentFile=-/etc/claude-jono/asetukset.env
+ExecStart=/usr/bin/python3 -B -m claudejono.tilaraportti --ulos /var/lib/claude-jono/docs --julkaise
+TimeoutStartSec=300
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/claude-jono
+ProtectHome=true
+NoNewPrivileges=true
