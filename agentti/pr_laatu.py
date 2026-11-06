@@ -9,6 +9,7 @@ import sys
 import urllib.request
 from datetime import datetime, timedelta, timezone
 
+from . import github_luku
 from .pr_kutsu import REPOT
 
 OMISTAJA = "tonyweckstrom1987"
@@ -24,7 +25,7 @@ AIHE_RE = re.compile(r"yojono:\s*(testit|readme|riippuvuudet|ominaisuus)", re.I)
 
 
 def _oletushaku(url):
-    pyynto = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json", "User-Agent": "agenttifirma-pr-laatu"})
+    pyynto = github_luku.pyynto(url, "agenttifirma-pr-laatu")
     with urllib.request.urlopen(pyynto, timeout=20) as v:
         return json.loads(v.read().decode("utf-8"))
 
