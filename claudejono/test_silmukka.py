@@ -156,6 +156,19 @@ class Silmukka(Pohja):
         self.assertIn("pysaytetty", v)
         self.assertEqual(kutsut, [])
 
+    def test_suunnittelija_saa_tarkastetut_opit(self):
+        (self.repo / ajuri.OPIT).parent.mkdir(parents=True, exist_ok=True)
+        (self.repo / ajuri.OPIT).write_text("- X ei onnistu, kayta Y\n", encoding="utf-8")
+        kutsut = []
+        ajuri.suunnittele(self.repo, self.tmp, {}, self.malli("{}", kutsut), nyt=NYT)
+        self.assertEqual(len(kutsut), 1)
+        self.assertTrue(any("<opit>\n- X ei onnistu, kayta Y\n</opit>" in str(osa) for osa in kutsut[0]))
+
+    def test_suunnittelija_ilman_opteja_ei_opit_lohkoa(self):
+        kutsut = []
+        ajuri.suunnittele(self.repo, self.tmp, {}, self.malli("{}", kutsut), nyt=NYT)
+        self.assertFalse(any("<opit>\n" in str(osa) for osa in kutsut[0]))
+
     def test_paivaraja_ja_per_ajo_ennallaan(self):
         self.assertEqual(ajuri.AUTO_MAX_PAIVA, 30)
         self.assertEqual(ajuri.AUTO_PER_AJO, 2)

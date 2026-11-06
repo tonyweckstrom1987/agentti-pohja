@@ -222,3 +222,24 @@ systemctl enable --now claude-tarkastaja.timer
 ```
 Kuiva-ajo listaa tarkastettavat PR:t ajamatta mallia. Loki on tiedostossa `/var/lib/claude-jono/tarkastukset.jsonl`. Jos PR ei kelpaa tarkastukseen rakennesyystä, lokiin tulee yksi rivi per head-commit: `{"repo", "pr", "tulos": "OHITETTU", "syyt": [...], "sha", "aika"}`. Rivi ei kuluta tarkastusta eikä nosta hälytystä. Jos syyt muuttuvat ilman uutta committia, uutta riviä ei tule.
 Peruutus: `systemctl disable --now claude-tarkastaja.timer`. Ilman tarkastajaa mikään ei yhdisty automaattisesti.
+
+## Jonon opit tarkastettuna (Tonyn päätös 4.11.2026, kompassi: "Jatkuva oppiminen")
+
+Agenttien oppimat asiat päätyvät seuraavien ajojen kehotteeseen (`<opit>`-lohko), mutta vasta riippumattoman tarkastajan
+hyväksynnän jälkeen. Koodi on tiedostossa `claudejono/oppiportti.py`.
+
+1. Ajuri poimii VALMIS-raportin `## Uusi oppi` -rivit (enintään 2), suodattaa ne kieltolistalla ja lisää ne tiedostoon
+   `claude-jono/opit-ehdotukset.md` samassa commitissa kuin tuloksen. Agentti ei kirjoita opit.md:hen eikä ehdotuksiin.
+2. Tarkastajan kierros (`claudejono.tarkastaja kierros`) arvioi odottavat ehdotukset yhdellä mallikutsulla (enintään 10)
+   samalla erillisellä käyttäjällä `tarkastaja` ilman työkaluja. Kehote on `opit-tarkastaja-kehote.md`. Päätökset
+   tallentuvat tiedostoon `/var/lib/claude-jono/opit-paatokset.json` (root). Tarkastaja ei tee git-toimia.
+3. Tarkastajan PR-hylkäyksen syy tiivistetään yhdeksi riviksi samaan tiedostoon. Ajuri lisää sen ehdotuksiin lähteellä
+   `tarkastaja`, joten se kulkee saman portin läpi.
+4. Ajuri soveltaa päätökset seuraavan ajon alussa: hyväksytyt siirtyvät `claude-jono/opit.md`:hen (enintään 40 riviä,
+   vanhimmat tiivistetään yhdeksi riviksi), hylätyt poistuvat ehdotuksista ja kirjataan tiedostoon
+   `/var/lib/claude-jono/opit-hylatyt.jsonl`. Hyväksytty teksti on ehdotuksen oma: mallin vastaus ei voi muuttaa sitä,
+   ja kieltolista tarkistetaan uudelleen ennen siirtoa.
+
+Rajat: enintään 12 oppien mallikutsua vuorokaudessa (erillään PR-tarkastusten 40 kutsun rajasta), enintään 30 odottavaa
+ehdotusta. Pois päältä: `CLAUDEJONO_OPIT_TARKASTUS=0` tarkastajan ympäristöön (ehdotukset jäävät odottamaan).
+Tila: `cat /var/lib/claude-jono/opit-paatokset.json` ja `git -C /var/lib/claude-jono/docs log --oneline -- claude-jono/opit.md`.

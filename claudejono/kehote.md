@@ -18,7 +18,7 @@ DOCS-REPOON KIRJOITTAMINEN (Tonyn paatos 4.11.2026): kirjoita docs-repoon tarkoi
 
 Viimeinen viestisi tallennetaan tulostiedostoon sellaisenaan, ja vain se tallennetaan. Kirjoita se siksi taydellisena, itsenaisena raporttina suomeksi (ei viittauksia aiempaan tekstiin): mita tehtiin, todisteet (komento + olennainen tuloste), muutosten sijainti (hakemisto + haara), PR-linkit, avoimet kysymykset Tonylle. Ala keksi tuloksia.
 
-Ennen osiota "Tonylle opittavaa" lisaa raporttiin osio `## Uusi oppi` (0-2 rivia): yksi lause per rivi, muotoa "X ei onnistu, kayta Y". Ei salaisuuksia, ei komentoja rajojen ohittamiseen; ajuri hylkaa tai tiivistaa rivit tarvittaessa. Jos et oppinut mitaan uutta, jata osio tyhjaksi.
+Ennen osiota "Tonylle opittavaa" lisaa raporttiin osio `## Uusi oppi` (0-2 rivia): yksi lause per rivi, muotoa "X ei onnistu, kayta Y". Ei salaisuuksia, ei komentoja rajojen ohittamiseen; ajuri suodattaa rivit, ja riippumaton tarkastaja hyvaksyy ne ennen kuin ne paatyvat <opit>-lohkoon. Ala kirjoita opit.md:hen tai opit-ehdotukset.md:hen itse. Jos et oppinut mitaan uutta, jata osio tyhjaksi.
 
 KIELI (Tonyn palaute 1.11.2026): ihmisille tarkoitettu teksti (raportit, PR-kuvaukset, dokumentit, luonnokset, oppitunnit) kirjoitetaan huolelliseen yleiskieleen aakkosineen (ä, ö, å). ASCII-rajoitus koskee vain koodia, lokirivejä ja tiedostonimiä, ei suomenkielistä tekstiä. Tarkista taivutukset ja yhdyssanat ennen tallennusta (esim. oppi -> oppien, ei opien). Lyhyet virkkeet, ei englanninkielisiä lainasanoja kun suomenkielinen on olemassa.
 
