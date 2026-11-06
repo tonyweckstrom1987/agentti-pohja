@@ -9,6 +9,12 @@ from types import SimpleNamespace
 from claudejono import ajuri
 
 
+KELVOLLINEN = (
+    "# Tehtava\n\nHyoty: Tony lukee aamulla.\nPisteet: hyoty 4, varmuus 4, vaiva 1 h\n"
+    "Todennus: testi ajetaan.\n\nValmis kun: testit vihreina.\n"
+)
+
+
 def git(hak, *a):
     subprocess.run(["git", "-C", str(hak), *a], check=True, capture_output=True, text=True)
 
@@ -30,7 +36,12 @@ class Pohja(unittest.TestCase):
         git(self.repo, "commit", "-q", "-m", "alku")
         git(self.repo, "push", "-q", "origin", "main")
 
-    def lisaa_tehtava(self, nimi, teksti="tee jotain"):
+    def lisaa_tehtava(self, nimi, teksti=None, raaka=False):
+        """raaka=True kirjoittaa tekstin sellaisenaan (tarkastuksen hylkaystestit); muuten lisataan vaaditut rivit."""
+        if teksti is None:
+            teksti = KELVOLLINEN
+        elif not raaka:
+            teksti = teksti + "\n\n" + KELVOLLINEN
         p = self.repo / ajuri.JONO / "tehtavat" / nimi
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(teksti)
@@ -71,6 +82,73 @@ class Valinta(Pohja):
         p = self.lisaa_tehtava("2026-10-30-01-a.md", "x" * (ajuri.TEHTAVA_MAX_TAVUA + 1))
         with self.assertRaises(ajuri.JonoVirhe):
             ajuri.rakenna_kehote(p)
+
+
+class Tarkastus(unittest.TestCase):
+    N = "2026-11-02-01-a.md"
+
+    def puutteet(self, teksti, nimi=None):
+        return ajuri.tarkista_tehtava(nimi or self.N, teksti)
+
+    def test_kelvollinen_menee_lapi(self):
+        self.assertEqual(self.puutteet(KELVOLLINEN), [])
+
+    def test_otsikko_ja_lihavointi_sallitaan_ja_aakkoset(self):
+        t = "**Hy\u00f6ty:** x\n- Pisteet: hy\u00f6ty 4, varmuus 3, vaiva 2 h\n**Todennus:** y\nValmis kun: z\n"
+        self.assertEqual(self.puutteet(t), [])
+
+    def test_puuttuvat_rivit_nimetaan(self):
+        p = " ".join(self.puutteet("# Vain otsikko\n"))
+        for osa in ("Hyoty", "Valmis kun", "Pisteet", "Todennus"):
+            self.assertIn(osa, p)
+
+    def test_pisteet_vaatii_kaikki_kolme(self):
+        self.assertTrue(self.puutteet(KELVOLLINEN.replace(", vaiva 1 h", "")))
+
+    def test_vanha_tehtava_mittarilla_ilman_todennusta(self):
+        t = "Hyoty: x\nMittari: 3\nValmis kun: y\n"
+        self.assertEqual(self.puutteet(t, "2026-11-01-01-a.md"), [])
+        self.assertEqual(self.puutteet(t, "2026-11-02-01-a.md"), ["Todennus-rivi"])
+
+    def test_kelloportti_hylataan(self):
+        for lause in ("Aja vasta klo 8.", "tee vasta klo 22", "AJA VASTA ajon jalkeen"):
+            self.assertTrue(any("kelloportti" in x for x in self.puutteet(KELVOLLINEN + lause)), lause)
+
+    def test_pelkka_maininta_ei_ole_kelloportti(self):
+        """Regressio: "vasta klo" sellaisenaan hylkasi kaikki tekstit, myos selostukset ja saantolainaukset."""
+        for lause in ("Tulos valmistuu vasta klo 8, joten lue se aamulla.",
+                      "Ala ehdota tehtavaa, jossa lukee 'vasta klo X'.",
+                      "Raportti on luettavissa vasta klo 9 jalkeen."):
+            self.assertEqual(self.puutteet(KELVOLLINEN + lause), [], lause)
+
+    def test_kelloportti_lauseen_alussa_hylataan(self):
+        for lause in ("Vasta klo 8 jalkeen.", "Tama on tarkea. Vasta klo 22."):
+            self.assertTrue(any("kelloportti" in x for x in self.puutteet(KELVOLLINEN + lause)), lause)
+
+    def test_suunnittelu_ei_rajaa_pelkkiin_korjauksiin(self):
+        """Kompassin 2.11. klo 16.10 linjaus: itsesuunnittelu ei rajaudu vain korjauksiin."""
+        teksti = (Path(ajuri.__file__).parent / "suunnittelu.md").read_text(encoding="utf-8")
+        self.assertNotIn("rajataan (1) korjauksiin", teksti)
+        self.assertNotIn("Ala ehdota muuta", teksti)
+
+    def test_todennus_riittaa_valmis_kun_lauseessa(self):
+        """Regressio: jonon oikeat tehtavat (4.11.) vaativat todennuksen Valmis kun -lauseessa ("rivi Todennettu kaytossa: miten"),
+        ei omalla Todennus-rivillaan. Ilman tata tarkastus hylkaisi koko jonon."""
+        t = ("Hy\u00f6ty: x\nMittari: 3\n"
+             "Valmis kun: raportissa on taulukko ja rivi \"Todennettu k\u00e4yt\u00f6ss\u00e4: miten\".\n")
+        self.assertEqual(self.puutteet(t, "2026-11-04-29-a.md"), [])
+        self.assertEqual(self.puutteet(t.replace("Todennettu k\u00e4yt\u00f6ss\u00e4", "Jotain"), "2026-11-04-29-a.md"), ["Todennus-rivi"])
+
+    def test_taydennysohje_nimeaa_kaikki_vaaditut_rivit(self):
+        """Regressio (tarkastajan loydos): TAYDENNYS-osio vaati vain Pisteet- ja Suunta-rivin, mutta ajuri hylkaa myos
+        tehtavan, jolta puuttuu Hyoty, Todennus tai Valmis kun. Osion ohjeen mukainen tehtava hylattiin ajon alussa."""
+        teksti = (Path(ajuri.__file__).parent / "suunnittelu.md").read_text(encoding="utf-8")
+        osio = teksti[teksti.index("TAYDENNYS"):]
+        for rivi in ("Hyoty:", "Pisteet:", "Todennus:", "Valmis kun:", "Suunta:"):
+            self.assertIn(rivi, osio, rivi)
+
+    def test_sana_vastaus_ei_ole_kelloportti(self):
+        self.assertEqual(self.puutteet(KELVOLLINEN + "Kirjoita vastaus.\n"), [])
 
 
 class Tulkinta(unittest.TestCase):
@@ -114,6 +192,29 @@ class Ajo(Pohja):
         self.assertIn("VALMIS", tulos.read_text())
         self.assertIn("raportti", tulos.read_text())
         self.assertEqual(ajuri.aja(self.repo, self.tmp, env={"CLAUDEJONO_ITSESUUNNITTELU": "0"}, suorita=f), "jono tyhja")
+
+    def test_puutteellinen_tehtava_hylataan_ilman_ajoa(self):
+        self.lisaa_tehtava("2026-11-02-01-a.md", "# Tee jotain\n", raaka=True)
+        self.lisaa_tehtava("2026-11-02-02-b.md")
+        f, kutsut = self.suorita({"subtype": "success", "result": "raportti"})
+        viesti = ajuri.aja(self.repo, self.tmp, env={"CLAUDEJONO_ITSESUUNNITTELU": "0"}, suorita=f)
+        self.assertIn("2026-11-02-01-a.md HYLATTY", viesti)
+        self.assertIn("2026-11-02-02-b.md ", viesti)
+        self.assertNotIn("2026-11-02-02-b.md HYLATTY", viesti)
+        self.assertEqual(len(kutsut), 1)   # malli ajettiin vain kelvolliselle
+        tarkistus = self.tmp / "tarkistus"
+        subprocess.run(["git", "clone", "-q", str(self.origin), str(tarkistus)], check=True, capture_output=True)
+        tulos = (tarkistus / ajuri.JONO / "tulokset" / "2026-11-02-01-a.md").read_text()
+        self.assertIn("Tila: HYLATTY", tulos)
+        self.assertIn("Todennus-rivi", tulos)
+
+    def test_vain_hylatty_jono_ei_kaynnista_itsesuunnittelua(self):
+        self.lisaa_tehtava("2026-11-02-01-a.md", "Aja vasta klo 8.\n", raaka=True)
+        f, kutsut = self.suorita({"subtype": "success", "result": "x"})
+        viesti = ajuri.aja(self.repo, self.tmp, env={"CLAUDEJONO_ITSESUUNNITTELU": "0"}, suorita=f)
+        self.assertIn("HYLATTY", viesti)
+        self.assertEqual(kutsut, [])
+        self.assertIsNone(ajuri.seuraava_tehtava(self.repo))
 
     def test_agentin_muut_muutokset_estavat_commitin(self):
         self.lisaa_tehtava("2026-10-30-01-a.md")
