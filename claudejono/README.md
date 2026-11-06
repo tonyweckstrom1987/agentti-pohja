@@ -20,6 +20,8 @@ Kolme osaa, joiden koodi on `silmukka.py` ja `laatu.py`. Ne eivät muuta kulukat
 
 **Käyttöönotto (Tony, ajastinmuutos):** kopioi `systemd/claude-laatu.service.mall` ja `claude-laatu.timer.mall` hakemistoon `/etc/systemd/system/` ilman `.mall`-päätettä, aja `systemctl daemon-reload` ja `systemctl enable --now claude-laatu.timer`. Kokeile ensin: `systemctl start claude-laatu.service` ja `journalctl -u claude-laatu -n 20 --no-pager`. Aamukoosteen (PR #160) valmistuttua mittaririvin voi liittää koosteeseen kutsulla `claudejono.laatu.mittaririvi(tyohak, repo, nyt)`.
 
+**Kadonneen raportin palautus:** jos agentin viimeisestä viestistä puuttuu osio `## Tonylle opittavaa` (esim. taustatehtävän ilmoitus herätti vielä yhden vuoron), ajuri hakee viimeisen sen sisältävän viestin saman istunnon lokista `~/.claude/projects/*/<session_id>.jsonl` ja lisää jälkikommentin perään. Symlinkkejä, kovia linkkejä, alitehtäviä ja yli 64 Mt:n lokeja ei lueta.
+
 ## Käyttöönotto CT115:ssä (Tony, kerran)
 
 1. `claude` → `/status`: kirjautuminen tilauksella (ei API-avainta).
