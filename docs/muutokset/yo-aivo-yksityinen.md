@@ -1,0 +1,1 @@
+- aivo: yksityisen tilan ydin (`aivo/yksityinen.py`, A729-A731): paikallinen malli vain loopbackista, oma muisti, ydinohjeiden ehdotus ja Tonin hyvaksynta; mallin nopeusmittaus (`aivo/mittaa_malli.py`); ohje `docs/aivo-yksityinen.md`. Osa 1/2 (PR #231:n pilkonta); chat-palvelu tulee osassa 2.
