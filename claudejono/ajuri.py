@@ -26,7 +26,7 @@ from datetime import datetime
 from pathlib import Path
 
 from claudejono import silmukka
-from . import kulutus, litellm_ajo, varaus
+from . import kulutus, litellm_ajo, nykytila, varaus
 from . import malli as mallit
 
 TEHTAVA_RE = re.compile(r"^\d{4}-\d{2}-\d{2}-\d{2}-[a-z0-9-]{1,60}\.md$")
@@ -844,6 +844,24 @@ def _ilmoita_varaus(tila, env, laheta, nyt):
         pass
 
 
+def hylkaa_ilman_nykytilaa(repo, laheta=None):
+    """Virhelokin 5.-6.11.2026 ehkaisy: infraa luova tai korvaava tehtava ilman rivia `Nykytila tarkistettu: <lahde> -> <mita
+    loytyi>` hylataan ennen mallin kutsua (tulos HYLATTY, ei varausta). Palauttaa hylattyjen nimet."""
+    hylatyt = []
+    for p in odottavat_tehtavat(repo):
+        syy = nykytila.tehtavan_virhe(p.name, _lue_teksti(p))
+        if syy:
+            hylatyt.append((p.name, syy))
+    if not hylatyt:
+        return []
+    polut = [kirjoita_tulos(repo, nimi, False, f"Tehtava hylattiin ennen ajoa: {syy}.\n\nLisaa tehtavaan rivi ja kirjoita se uudelleen uudella nimella.",
+                            tila="HYLATTY") for nimi, syy in hylatyt]
+    julkaise(repo, polut, f"claude-jono: {len(polut)} tehtavaa hylatty (nykytilarivi puuttuu)")
+    if laheta:
+        laheta("claude-jono: hylatty (Nykytila tarkistettu -rivi puuttuu): " + ", ".join(n for n, _ in hylatyt))
+    return [n for n, _ in hylatyt]
+
+
 def aja(repo, tyohak, env=None, suorita=subprocess.run, laheta=None, kaista=1, litellm=None):
     """litellm = testattava korvike litellm_ajo.aja:lle (alias, teksti, env) -> (ok, teksti, luvut)."""
     env = dict(os.environ if env is None else env)
@@ -867,6 +885,7 @@ def aja(repo, tyohak, env=None, suorita=subprocess.run, laheta=None, kaista=1, l
     # Valinta + varaus yhden lyhyen git-lukon sisalla: pull, tulosten tarkistus ja atominen varaus eivat lomitu toisen kaistan kanssa.
     with git_lukko(tila) as odotus:
         git(repo, "pull", "-q", "--rebase", "origin", "main")
+        hylkaa_ilman_nykytilaa(repo, laheta)
         if env.get("CLAUDEJONO_ITSESUUNNITTELU", "1") == "1" and env.get("CLAUDEJONO_TOISTUVAT") == "1":
             luo_toistuvat(repo, tyohak)   # toistuvat (esim. viikon optimointikierros) vain kun palvelu kytkee ne paalle
         t = varaa_seuraava(repo, tila, kaista, vanhenee_s=vanhenee, kaistoja=kaistojen_maara(env), ohita=ohita)

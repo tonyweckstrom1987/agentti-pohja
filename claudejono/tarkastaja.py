@@ -34,7 +34,7 @@ from pathlib import Path
 from agentti import pr_kutsu
 from tools import automerge
 
-from . import kulutus
+from . import kulutus, nykytila
 
 OMISTAJA = "tonyweckstrom1987"
 API = "https://api.github.com"
@@ -300,6 +300,11 @@ def ohitusrivi(repo, nro, sha, syyt):
     return {"repo": repo, "pr": nro, "tulos": "OHITETTU", "syyt": siistit, "sha": sha[:12]}
 
 
+def _kommentit(repo, nro, tunnus, avaa):
+    return [{"user": (k.get("user") or {}).get("login"), "body": k.get("body")}
+            for k in hae_sivutettu("%s/repos/%s/%s/issues/%s/comments" % (API, OMISTAJA, repo, nro), tunnus, avaa=avaa)]
+
+
 def kierros(env, tunnus, nyt=None, suorita=subprocess.run, avaa=urllib.request.urlopen, kuiva=False):
     """Yksi kierros kaikkiin seurattaviin repoihin. Palauttaa lokirivit (dict)."""
     nyt = nyt or datetime.now().astimezone()
@@ -326,6 +331,13 @@ def kierros(env, tunnus, nyt=None, suorita=subprocess.run, avaa=urllib.request.u
                 continue
             try:
                 tiedostot = hae_sivutettu("%s/repos/%s/%s/pulls/%s/files" % (API, OMISTAJA, repo, nro), tunnus, avaa=avaa)
+                virhe = nykytila.pr_virhe(repo, tiedostot, d.get("body"))
+                if virhe:                                              # rakennesaanto: hylataan ilman mallin kutsua, myos rajatulle PR:lle
+                    if not kuiva and automerge.tarkastajan_paatos(_kommentit(repo, nro, tunnus, avaa), pr["head_sha"]) is None:
+                        _pyynto("%s/repos/%s/%s/issues/%s/comments" % (API, OMISTAJA, repo, nro), tunnus,
+                                data={"body": kommentti("HYLATTY", pr["head_sha"], virhe, [], "s\u00e4\u00e4nt\u00f6")}, avaa=avaa)
+                        tehty.append({"repo": repo, "pr": nro, "tulos": "HYLATTY", "syy": "nykytilarivi puuttuu", "sha": pr["head_sha"][:12]})
+                    continue
                 syyt = automerge.rakenne_syyt(pr, tiedostot)
                 if syyt:                                               # Tonylle joka tapauksessa: ei kuluteta tarkastusta
                     pari = (repo, nro, pr["head_sha"][:12])
@@ -333,8 +345,7 @@ def kierros(env, tunnus, nyt=None, suorita=subprocess.run, avaa=urllib.request.u
                         ohitetut.add(pari)
                         tehty.append(ohitusrivi(repo, nro, pr["head_sha"], syyt))
                     continue
-                kommentit = [{"user": (k.get("user") or {}).get("login"), "body": k.get("body")}
-                             for k in hae_sivutettu("%s/repos/%s/%s/issues/%s/comments" % (API, OMISTAJA, repo, nro), tunnus, avaa=avaa)]
+                kommentit = _kommentit(repo, nro, tunnus, avaa)
                 if automerge.tarkastajan_paatos(kommentit, pr["head_sha"]) is not None:
                     continue                                           # tama commit on jo tarkastettu
                 if tila["maara"] >= max_pv:
