@@ -3,6 +3,7 @@ import json
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -532,6 +533,144 @@ class OmaKayttaja(unittest.TestCase):
         self.assertEqual(cwd, "/opt/agentscope")
         self.assertEqual(alaenv, {"A": "1"})
 
+
+
+class TestRaportinPalautus(Pohja):
+    ISTUNTO = "ae50bf5c-8124-417d-b633-d995646336d8"
+    RAPORTTI = "Iso raportti\nTodennettu kaytossa: testi\n\n## Uusi oppi\n- X ei onnistu, kayta Y\n\n## Tonylle opittavaa\nasia"
+
+    def loki(self, rivit, istunto=None):
+        hak = self.tmp / "koti" / ".claude" / "projects" / "-opt-agentscope-tyo"
+        hak.mkdir(parents=True, exist_ok=True)
+        p = hak / f"{istunto or self.ISTUNTO}.jsonl"
+        p.write_text("\n".join(rivit) + "\n", encoding="utf-8")
+        return p
+
+    def viesti(self, teksti, **muut):
+        d = {"type": "assistant", "sessionId": self.ISTUNTO, "isSidechain": False,
+             "message": {"role": "assistant", "content": [{"type": "text", "text": teksti}]}}
+        d.update(muut)
+        return json.dumps(d)
+
+    def stdout(self, teksti="Lopullinen raportti on aiemmassa viestissani."):
+        return json.dumps({"subtype": "success", "result": teksti, "session_id": self.ISTUNTO})
+
+    def palauta(self, teksti="jalkikommentti", koti=None):
+        return ajuri.palauta_raportti(teksti, self.stdout(teksti), koti or self.tmp / "koti")
+
+    def test_jalkikommentin_alta_loytyy_raportti(self):
+        self.loki(['{"type": "user"}', "ei jsonia", self.viesti(self.RAPORTTI), self.viesti("jalkikommentti")])
+        t = self.palauta()
+        self.assertTrue(t.startswith(self.RAPORTTI))
+        self.assertTrue(t.endswith("jalkikommentti"))
+        self.assertIn("[AJURI: raportti palautettu", t)
+
+    def test_uusin_raportti_voittaa(self):
+        self.loki([self.viesti("vanha\n" + self.RAPORTTI), self.viesti(self.RAPORTTI)])
+        self.assertTrue(self.palauta().startswith(self.RAPORTTI))
+
+    def test_ehja_raportti_ei_muutu_eika_lokia_lueta(self):
+        self.loki([self.viesti("vanha " + self.RAPORTTI)])
+        self.assertEqual(self.palauta(self.RAPORTTI), self.RAPORTTI)
+
+    def test_alitehtava_tai_muu_istunto_ei_kelpaa(self):
+        self.loki([self.viesti(self.RAPORTTI, isSidechain=True), self.viesti(self.RAPORTTI, sessionId="muu")])
+        self.assertEqual(self.palauta(), "jalkikommentti")
+
+    def test_puuttuva_loki_tai_outo_istunto_jattaa_tekstin(self):
+        self.assertEqual(self.palauta(), "jalkikommentti")
+        self.assertEqual(ajuri.palauta_raportti("x", "ei jsonia", self.tmp), "x")
+        self.assertEqual(ajuri.palauta_raportti("x", "[1]", self.tmp), "x")
+        self.assertEqual(ajuri.palauta_raportti("x", json.dumps({"session_id": "../../etc/passwd"}), self.tmp), "x")
+        self.assertEqual(ajuri.palauta_raportti("x", self.stdout(), None), "x")
+
+    def test_symlinkki_ja_kova_linkki_torjutaan(self):
+        salainen = self.tmp / "salainen.jsonl"
+        salainen.write_text(self.viesti(self.RAPORTTI) + "\n", encoding="utf-8")
+        p = self.loki([])
+        p.unlink()
+        p.symlink_to(salainen)
+        self.assertEqual(self.palauta(), "jalkikommentti")
+        p.unlink()
+        os.link(salainen, p)
+        self.assertEqual(self.palauta(), "jalkikommentti")
+
+    def _salainen_loki(self):
+        """Loki, joka olisi kelvollinen, mutta sijaitsee koti-hakemiston ulkopuolella."""
+        ulko = self.tmp / "ulko" / "projects" / "-opt-agentscope-tyo"
+        ulko.mkdir(parents=True)
+        (ulko / f"{self.ISTUNTO}.jsonl").write_text(self.viesti(self.RAPORTTI) + "\n", encoding="utf-8")
+        return self.tmp / "ulko"
+
+    def test_symlinkki_polun_keskella_torjutaan_dotclaude(self):
+        ulko = self._salainen_loki()
+        koti = self.tmp / "koti"
+        koti.mkdir()
+        (koti / ".claude").symlink_to(ulko)
+        self.assertEqual(self.palauta(), "jalkikommentti")
+
+    def test_symlinkki_polun_keskella_torjutaan_projects(self):
+        ulko = self._salainen_loki()
+        (self.tmp / "koti" / ".claude").mkdir(parents=True)
+        (self.tmp / "koti" / ".claude" / "projects").symlink_to(ulko / "projects")
+        self.assertEqual(self.palauta(), "jalkikommentti")
+
+    def test_symlinkki_projektihakemistona_torjutaan(self):
+        ulko = self._salainen_loki()
+        pro = self.tmp / "koti" / ".claude" / "projects"
+        pro.mkdir(parents=True)
+        (pro / "-opt-agentscope-tyo").symlink_to(ulko / "projects" / "-opt-agentscope-tyo")
+        self.assertEqual(self.palauta(), "jalkikommentti")
+
+    def test_lukuvirhe_ei_kaada_ajoa(self):
+        self.loki([self.viesti(self.RAPORTTI)])
+        for virhe in (PermissionError("x"), OSError(5, "io"), ValueError("x")):
+            def rikki(*a, _v=virhe, **k):
+                raise _v
+            with mock.patch.object(ajuri, "_lue_istuntoloki", rikki):
+                self.assertEqual(self.palauta(), "jalkikommentti")
+
+    def test_syvaan_sisakkainen_json_ei_kaada_ajoa(self):
+        self.loki(["[" * 200000, self.viesti(self.RAPORTTI)])
+        self.assertTrue(self.palauta().startswith(self.RAPORTTI))
+
+    def test_ylisuuri_loki_torjutaan(self):
+        self.loki([self.viesti(self.RAPORTTI)])
+        vanha = ajuri.ISTUNTOLOKI_MAX_TAVUA
+        ajuri.ISTUNTOLOKI_MAX_TAVUA = 10
+        try:
+            self.assertEqual(self.palauta(), "jalkikommentti")
+        finally:
+            ajuri.ISTUNTOLOKI_MAX_TAVUA = vanha
+
+    def test_koko_ajo_kirjoittaa_palautetun_raportin_ja_tilan(self):
+        self.lisaa_tehtava("2026-11-04-01-a.md")
+        koti = self.tmp / "koti"
+        self.loki([self.viesti(self.RAPORTTI), self.viesti("jalkikommentti")])
+        ajuri.aja(self.repo, self.tmp, env={"HOME": str(koti)},
+                  suorita=lambda kom, **kw: subprocess.CompletedProcess(kom, 0, self.stdout("jalkikommentti"), ""))
+        tulos = (self.repo / ajuri.JONO / "tulokset" / "2026-11-04-01-a.md").read_text(encoding="utf-8")
+        self.assertIn("Tila: VALMIS", tulos)
+        self.assertIn("Iso raportti", tulos)
+
+    def test_tuloksen_2026_11_06_20_muoto_taustailmoituksen_jalkeen(self):
+        """Raportti on omassa viestissaan, sen jalkeen tulee taustatehtavan ilmoitus ja vain lyhyt jalkikommentti."""
+        self.lisaa_tehtava("2026-11-06-20-a.md")
+        koti = self.tmp / "koti"
+        sekaviesti = self.viesti("", message={"role": "assistant", "content": [
+            {"type": "thinking", "thinking": "mietin"},
+            {"type": "text", "text": self.RAPORTTI},
+            {"type": "tool_use", "id": "t1", "name": "Bash", "input": {}}]})
+        ilmoitus = json.dumps({"type": "user", "sessionId": self.ISTUNTO,
+                               "message": {"role": "user", "content": "<task-notification>valmis</task-notification>"}})
+        self.loki([sekaviesti, ilmoitus, self.viesti("Taustatehtava valmistui, ei muuta.")])
+        ajuri.aja(self.repo, self.tmp, env={"HOME": str(koti)},
+                  suorita=lambda kom, **kw: subprocess.CompletedProcess(kom, 0, self.stdout("Taustatehtava valmistui, ei muuta."), ""))
+        tulos = (self.repo / ajuri.JONO / "tulokset" / "2026-11-06-20-a.md").read_text(encoding="utf-8")
+        self.assertIn("Tila: VALMIS", tulos)
+        self.assertIn("Todennettu kaytossa: testi", tulos)
+        self.assertIn("## Tonylle opittavaa", tulos)
+        self.assertIn("Taustatehtava valmistui", tulos)
 
 if __name__ == "__main__":
     unittest.main()
