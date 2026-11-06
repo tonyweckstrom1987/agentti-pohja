@@ -130,7 +130,10 @@ def keraa(hae=None):
                 ryhmat["muut"].append(rivi)
                 continue
             suojattu = any(_suojattu(n, repo) for t in tiedostot for n in (t.get("filename"), t.get("previous_filename")) if n)
-            if suojattu:
+            katkaistu = len(tiedostot) >= MAX_TIEDOSTOJA_HAKUUN   # loppu jai hakematta: suojattu polku voi olla siina
+            if katkaistu and not suojattu:
+                rivi["syy"] = "tiedostolista katkaistu"
+            if suojattu or katkaistu:
                 rivi.update(yhteenveto(tiedostot))
                 ryhmat["tony"].append(rivi)
             elif rivi["ci"] == "vihrea":

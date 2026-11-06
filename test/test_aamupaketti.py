@@ -67,6 +67,32 @@ class KerausTesti(unittest.TestCase):
             raise OSError("x")
         self.assertEqual([(x["numero"], x["syy"]) for x in ap.keraa(hae)["muut"]], [(1, "tiedostoja ei saatu")])
 
+    def test_tiedostolistan_403_ei_koskaan_automergeen(self):
+        import urllib.error
+
+        def hae(url):
+            if "/pulls?state=open" in url:
+                return [pr(1)] if "agentti-pohja" in url else []
+            if "/check-runs" in url:
+                return {"check_runs": [{"status": "completed", "conclusion": "success"}]}
+            raise urllib.error.HTTPError(url, 403, "rate limit", {}, None)
+        r = ap.keraa(hae)
+        self.assertEqual(r["automerge"], [])
+        self.assertEqual(r["tony"], [])
+        self.assertEqual([(x["numero"], x["syy"]) for x in r["muut"]], [(1, "tiedostoja ei saatu")])
+
+    def test_suojattu_ja_tavallinen_polku_ilman_hakuvirhetta(self):
+        hae = feikki({"agentti-pohja": [pr(1), pr(2)]}, {1: ["agentti/rajat.py"], 2: ["test/test_a.py"]})
+        r = ap.keraa(hae)
+        self.assertEqual([x["numero"] for x in r["tony"]], [1])
+        self.assertEqual([x["numero"] for x in r["automerge"]], [2])
+
+    def test_katkaistu_tiedostolista_menee_tonylle_ei_automergeen(self):
+        nimet = ["docs/a%d.md" % i for i in range(ap.MAX_TIEDOSTOJA_HAKUUN)]
+        r = ap.keraa(feikki({"agentti-pohja": [pr(1)]}, {1: nimet}))
+        self.assertEqual(r["automerge"], [])
+        self.assertEqual([(x["numero"], x["syy"]) for x in r["tony"]], [(1, "tiedostolista katkaistu")])
+
     def test_otsikko_lyhennetaan_ja_rivinvaihdot_poistetaan(self):
         r = ap.keraa(feikki({"agentti-pohja": [pr(1, "a\nb " + "x" * 100)]}, {1: ["test/test_a.py"]}))
         otsikko = r["automerge"][0]["otsikko"]
