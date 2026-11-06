@@ -1,0 +1,161 @@
+import http.client
+import json
+import stat
+import tempfile
+import threading
+import unittest
+from pathlib import Path
+from types import SimpleNamespace
+
+from aivo import chat, yksityinen
+
+SAL = "oikea-salasana-123"
+
+
+def ip(*osat):
+    return ".".join(str(o) for o in osat)
+
+
+TS = ".ts" + ".net"
+
+class MuistiValintaTesti(unittest.TestCase):
+    def test_osuvin_tiedosto_ensin_ja_raja_ei_pysayta_pienempia(self):
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "iso.md").write_text("x" * 5000)
+            (Path(d) / "kahvi.md").write_text("Tony juo kahvia aamulla.")
+            (Path(d) / "koulu.md").write_text("Koulussa on ohjelmointikurssi.")
+            teksti, mukana = chat.lue_muisti(d, 100, 400, "milloin Tony juo kahvia")
+            self.assertEqual(mukana[0], "kahvi.md")
+            self.assertNotIn("iso.md", mukana)
+            self.assertIn("koulu.md", mukana)
+
+
+class YksityinenPalveluTesti(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        r = Path(cls.tmp.name)
+        (r / "kirjasto").mkdir()
+        (r / "kirjasto" / "faktat.md").write_text("TYOKALUTILAN-FAKTA")
+        (r / "yks" / "muisti").mkdir(parents=True)
+        (r / "yks" / "muisti" / "oma.md").write_text("Tony pitaa hiljaisuudesta.")
+        (r / "yks" / "ydin").mkdir()
+        (r / "yks" / "ydin" / "saannot.md").write_text("YDINSAANTO-X")
+        cls.claude_kutsut, cls.malli_kutsut, cls.paatokset = [], [], []
+
+        def kysy_claude(muisti, historia):
+            cls.claude_kutsut.append((muisti, historia))
+            return "pilvivastaus"
+
+        def kysy_yks(muisti, historia, ohjeet):
+            cls.malli_kutsut.append((muisti, historia, ohjeet))
+            return "Paikallinen [l\u00e4hde: oma.md].\n[[EHDOTUS saannot.md]]uusi saanto[[/EHDOTUS]]"
+
+        def julkaise(kirjasto, kid, aika, teksti):
+            cls.paatokset.append((kirjasto, teksti))
+            return "ei-gitissa"
+        cls.tila = chat.Tila(chat.tiivista_salasana(SAL), str(r / "kirjasto"), str(r / "data"), [TS],
+                             kysy=kysy_claude, julkaise=julkaise, yks_data=str(r / "yks" / "chat"),
+                             yks_muisti=str(r / "yks" / "muisti"), ydinohjeet=str(r / "yks" / "ydin"),
+                             ehdotukset=str(r / "yks" / "ehd"), kysy_yks=kysy_yks)
+        cls.srv = chat.kaynnista(ip(127, 0, 0, 1), 0, cls.tila)
+        cls.portti = cls.srv.server_address[1]
+        threading.Thread(target=cls.srv.serve_forever, daemon=True).start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.srv.shutdown()
+        cls.srv.server_close()
+        cls.tmp.cleanup()
+
+    def api(self, ev, polku, olio):
+        c = http.client.HTTPConnection(ip(127, 0, 0, 1), self.portti, timeout=10)
+        c.request("POST", polku, body=json.dumps(olio), headers={"Cookie": ev, "X-Aivo": "1", "Content-Type": "application/json"})
+        r = c.getresponse()
+        return r.status, json.loads(r.read())
+
+    def kirjaudu(self):
+        c = http.client.HTTPConnection(ip(127, 0, 0, 1), self.portti, timeout=10)
+        c.request("POST", "/kirjaudu", body="salasana=" + SAL, headers={"Content-Type": "application/x-www-form-urlencoded"})
+        r = c.getresponse()
+        r.read()
+        return r.getheader("Set-Cookie").split(";")[0]
+
+    def test_oletus_on_yksityinen_eika_claudea_kutsuta(self):
+        ev = self.kirjaudu()
+        s, d = self.api(ev, "/api/uusi", {})
+        self.assertEqual((s, d["tila"]), (200, "yksityinen"))
+        n = len(self.claude_kutsut)
+        s, v = self.api(ev, "/api/viesti", {"keskustelu": d["id"], "teksti": "mit\u00e4 pid\u00e4n hiljaisuudesta?"})
+        self.assertEqual(s, 200)
+        self.assertEqual(len(self.claude_kutsut), n)                 # Claude ei kutsuttu
+        muisti, _, ohjeet = self.malli_kutsut[-1]
+        self.assertIn("hiljaisuudesta", muisti)
+        self.assertNotIn("TYOKALUTILAN-FAKTA", muisti)              # tyokalutilan muisti ei sekoitu
+        self.assertIn("YDINSAANTO-X", ohjeet)
+        self.assertIn("[l\u00e4hde: oma.md]", v["vastaus"])
+        self.assertNotIn("uusi saanto", v["vastaus"])
+        self.assertIn("ei ole voimassa", v["vastaus"])
+        [eid] = yksityinen.listaa_ehdotukset(self.tila.ehdotukset)[-1:]
+        self.assertEqual(yksityinen.lue_ehdotus(self.tila.ehdotukset, eid)["teksti"], "uusi saanto\n")
+        self.assertEqual((Path(self.tmp.name) / "yks" / "ydin" / "saannot.md").read_text(), "YDINSAANTO-X")
+        # tallennus 0600 yksityiseen kansioon, ei tyokalukansioon
+        p = Path(self.tmp.name) / "yks" / "chat" / (d["id"] + ".jsonl")
+        self.assertEqual(stat.S_IMODE(p.stat().st_mode), 0o600)
+        self.assertFalse((Path(self.tmp.name) / "data" / (d["id"] + ".jsonl")).exists())
+
+    def test_tyokalutila_ei_nae_ydinohjeita_eika_yksityista_muistia(self):
+        ev = self.kirjaudu()
+        s, d = self.api(ev, "/api/uusi", {"tila": "tyokalu"})
+        self.assertEqual((s, d["tila"]), (200, "tyokalu"))
+        m = len(self.malli_kutsut)
+        s, v = self.api(ev, "/api/viesti", {"keskustelu": d["id"], "teksti": "moi"})
+        self.assertEqual(s, 200)
+        muisti, historia = self.claude_kutsut[-1]
+        self.assertIn("TYOKALUTILAN-FAKTA", muisti)
+        self.assertNotIn("YDINSAANTO-X", muisti + json.dumps(historia))
+        self.assertNotIn("hiljaisuudesta", muisti)
+        self.assertEqual(len(self.malli_kutsut), m)
+
+    def test_paatos_yksityisesta_menee_yksityiseen_muistiin(self):
+        ev = self.kirjaudu()
+        _, d = self.api(ev, "/api/uusi", {})
+        self.api(ev, "/api/viesti", {"keskustelu": d["id"], "teksti": "p\u00e4\u00e4t\u00e4n lep\u00e4\u00e4v\u00e4ni"})
+        s, _ = self.api(ev, "/api/paatos", {"keskustelu": d["id"], "indeksi": 0})
+        self.assertEqual(s, 200)
+        self.assertEqual(self.paatokset[-1], (self.tila.yks_muisti, "p\u00e4\u00e4t\u00e4n lep\u00e4\u00e4v\u00e4ni"))
+
+    def test_tuntematon_tila_hylataan(self):
+        s, _ = self.api(self.kirjaudu(), "/api/uusi", {"tila": "muu"})
+        self.assertEqual(s, 400)
+
+    def test_sivulla_valinta_ja_oletus_yksityinen(self):
+        ev = self.kirjaudu()
+        c = http.client.HTTPConnection(ip(127, 0, 0, 1), self.portti, timeout=10)
+        c.request("GET", "/", headers={"Cookie": ev})
+        html = c.getresponse().read().decode("utf-8")
+        self.assertIn('<option value="yksityinen" selected>', html)
+        self.assertIn('value="tyokalu"', html)
+
+
+class KaynnistysTesti(unittest.TestCase):
+    def test_ilman_yks_dataa_yksityinen_tila_on_pois(self):
+        with tempfile.TemporaryDirectory() as d:
+            tila = chat.Tila(chat.tiivista_salasana(SAL), d, d, [TS])
+            self.assertIsNone(tila.yks)
+
+    def test_ulkoinen_mallipalvelin_estaa_kaynnistyksen(self):
+        with tempfile.TemporaryDirectory() as d:
+            with self.assertRaises(chat.ChatVirhe):
+                chat.Tila(chat.tiivista_salasana(SAL), d, d, [TS], yks_data=d + "/y", malli_url="http://example.com")
+
+    def test_tyokalukayttaja_lisaa_sudo_etuliitteen(self):
+        kom = []
+
+        def suorita(k, **kw):
+            kom.extend(k)
+            return SimpleNamespace(returncode=0, stdout="ok")
+        chat.kysy_claudelta("m", [{"rooli": "tony", "teksti": "x"}], suorita, env={"AIVO_TYOKALU_KAYTTAJA": "aivo-tyokalu"})
+        self.assertEqual(kom[:5], ["sudo", "-n", "-u", "aivo-tyokalu", "--"])
+        self.assertIn("--tools", kom)
+
