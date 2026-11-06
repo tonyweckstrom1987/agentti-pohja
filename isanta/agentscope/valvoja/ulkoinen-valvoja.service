@@ -1,0 +1,17 @@
+[Unit]
+Description=Ulkoinen valvoja: HTTP-ping ulkopuoliseen palveluun
+Documentation=file:///opt/agentscope/ULKOINEN-VALVOJA.md
+After=network-online.target
+Wants=network-online.target
+# Ilman osoitetiedostoa ei tehda mitaan (Tony asettaa osoitteen itse).
+ConditionPathExists=/etc/claude-jono/healthcheck.url
+
+[Service]
+Type=oneshot
+# Osoite luetaan tiedostosta (600, ei repoon). Pingissa ei lahteta dataa.
+ExecStart=/bin/sh -c 'PING_URL="$(cat /etc/claude-jono/healthcheck.url)" && exec curl -fsS -m 10 --retry 3 -o /dev/null "$PING_URL"'
+TimeoutStartSec=60
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict

@@ -1,0 +1,10 @@
+[Unit]
+Description=Ulkoinen valvoja: ping 5 min valein
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=5min
+AccuracySec=10s
+
+[Install]
+WantedBy=timers.target
