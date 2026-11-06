@@ -12,8 +12,9 @@ import os
 import shutil
 import sys
 import time
+from datetime import datetime, timezone
 
-from . import tapahtumaloki
+from . import oppimittari, tapahtumaloki
 
 TEKSTI_MAX = 1200
 KULUOSUUS_RAJA = 50.0      # %: yksi agentti syo yli puolet kuluista
@@ -22,6 +23,9 @@ HYVAKSYMIS_RAJA = 30.0     # %: hylkaysten maara kasvaa
 MIN_PAATOKSIA = 5
 LEVY_RAJA = 85.0           # % kaytetty
 MUISTI_RAJA = 15.0         # % vapaana
+# Viikkoraportti ajetaan CT115:ssa (viikkoraportti.service). Siella elava klooni on ensin, dokumenttikopio varalla.
+# Ymparistomuuttuja VIRHELOKI ohittaa listan.
+VIRHELOKI_OLETUKSET = ("/var/lib/claude-jono/docs/claude-jono/virheloki.md", "/opt/agenttifirma-docs/claude-jono/virheloki.md")
 
 
 def _koodit(yht, alku, tulos):
@@ -107,7 +111,7 @@ def vihjeet(tiedot, res):
     return v
 
 
-def muodosta(tiedot, res):
+def muodosta(tiedot, res, oppiminen=None):
     """Raportin teksti (pelkka teksti, enintaan TEKSTI_MAX merkkia)."""
     r = ["Viikkoraportti (%d pv)" % tiedot["paivaa"]]
     if not tiedot["tapahtumia"]:
@@ -134,8 +138,24 @@ def muodosta(tiedot, res):
         r.append("Resurssit: " + ", ".join(osat) + ".")
     ehdotukset = vihjeet(tiedot, res)
     r.append("Vihjeet: " + (" ".join(ehdotukset) if ehdotukset else "ei huomautettavaa."))
+    if oppiminen:      # oppimisen mittari (agentti.oppimittari); viimeisena, jotta TEKSTI_MAX-katkaisu leikkaa ensin sen eika halytyksia
+        r.append(oppiminen)
     teksti = "\n".join(r)
     return teksti[:TEKSTI_MAX]
+
+
+def oppimisrivi(nyt=None):
+    """Oppimisen mittarin rivi virhelokista. Lokin puuttuminen kerrotaan rivilla, ettei mittari katoa raportista hiljaa."""
+    ymp = os.environ.get("VIRHELOKI")
+    polut = (ymp,) if ymp else VIRHELOKI_OLETUKSET
+    for polku in polut:
+        try:
+            with open(polku, encoding="utf-8") as f:
+                teksti = f.read()
+        except (OSError, ValueError):     # ValueError: ei UTF-8
+            continue
+        return oppimittari.rivi(teksti, nyt or datetime.now(timezone.utc).date())
+    return "Oppiminen: virhelokia ei l\u00f6ytynyt (%d polkua kokeiltu)." % len(polut)
 
 
 def main(argv=None):
@@ -156,7 +176,7 @@ def main(argv=None):
         return 2
     yht = tapahtumaloki.avaa(polku)
     try:
-        print(muodosta(keraa(yht, paivaa), resurssit()))
+        print(muodosta(keraa(yht, paivaa), resurssit(), oppimisrivi()))
     finally:
         yht.close()
     return 0
