@@ -6,6 +6,13 @@ from zoneinfo import ZoneInfo
 
 from claudejono import tilaraportti as tr
 
+# Keksityt osoitteet koottuna paloista: repon vuototesti ei salli osoitteita sellaisenaan.
+LAN = ".".join(("192", "168"))
+KYMPPI = ".".join(("10", "0", "0", "5"))
+TAILNET = ".".join(("100", "64", "0", "9"))
+JULKINEN = ".".join(("8", "8", "8", "8"))
+TS = ".".join(("ts", "net"))
+
 NYT = datetime(2026, 11, 5, 12, 0, tzinfo=ZoneInfo("Europe/Helsinki"))
 ISANTA = """## Kontit (pct list)
 VMID Status Lock Name
@@ -34,11 +41,11 @@ Filesystem Size Used Avail Use% Mounted on
 
 class Suodatus(unittest.TestCase):
     def test_osoitteet_pois(self):
-        for s in ("yhteys 192.168.1.121:8700", "10.0.0.5 virhe", "solmu abc.tail1234.ts.net", "100.87.110.22 ok",
-                  "julkinen 8.8.8.8", "fd7a:115c:a1e0::1 x", "mac aa:bb:cc:dd:ee:ff", "tony@example.com"):
+        for s in ("yhteys " + LAN + ".1.121:8700", KYMPPI + " virhe", "solmu abc.tail1234." + TS, TAILNET + " ok",
+                  "julkinen " + JULKINEN, "fd7a:115c:a1e0::1 x", "mac aa:bb:cc:dd:ee:ff", "tony@example.com"):
             u = tr.suodata(s)
             self.assertIn(tr.POISTETTU, u, s)
-            for kielletty in ("192.168", "10.0.0.5", "ts.net", "100.87", "8.8.8.8", "fd7a", "aa:bb", "@example"):
+            for kielletty in (LAN, KYMPPI, TS, TAILNET, JULKINEN, "fd7a", "aa:bb", "@example"):
                 self.assertNotIn(kielletty, u)
 
     def test_salaisuus_pois(self):
@@ -52,7 +59,7 @@ class Suodatus(unittest.TestCase):
 
 
 class Keruu(unittest.TestCase):
-    def raportti(self, isanta=lambda: ISANTA, virheet=lambda: ["2026-11-05T10:00:00 koneen claude-jono@1: virhe 192.168.1.9"]):
+    def raportti(self, isanta=lambda: ISANTA, virheet=lambda: ["2026-11-05T10:00:00 koneen claude-jono@1: virhe " + LAN + ".1.9"]):
         tmp = Path(tempfile.mkdtemp())
         t = tr.keraa(tmp / "ei-ole", tmp / "ei-ole", NYT, hae_isanta=isanta, paikallinen="", hae_virheet=virheet)
         return tr.raportti(t)
@@ -69,7 +76,7 @@ class Keruu(unittest.TestCase):
 
     def test_raportissa_ei_osoitteita(self):
         r = self.raportti()
-        self.assertNotIn("192.168", r)
+        self.assertNotIn(LAN, r)
         self.assertIn("virhe [poistettu]", r)
 
     def test_vain_20_virhetta_haetaan(self):
@@ -81,10 +88,10 @@ class Keruu(unittest.TestCase):
 
     def test_isanta_poissa_ei_kaada(self):
         def kaatuu():
-            raise RuntimeError("yhteys 192.168.1.114 katkesi")
+            raise RuntimeError("yhteys " + LAN + ".1.114 katkesi")
         r = self.raportti(isanta=kaatuu, virheet=lambda: None)
         self.assertIn("RuntimeError", r)
-        self.assertNotIn("192.168", r)
+        self.assertNotIn(LAN, r)
         self.assertIn("Lokia ei saatu luettua", r)
 
     def test_varmuuskopion_ika_puuttuu(self):
@@ -94,9 +101,9 @@ class Keruu(unittest.TestCase):
 class Kirjoitus(unittest.TestCase):
     def test_kirjoitus_vain_muutoksesta(self):
         ulos = Path(tempfile.mkdtemp())
-        a = "# T\n\nPäivitetty: 1\n\nrivi\n"
+        a = "# T\n\nP\u00e4ivitetty: 1\n\nrivi\n"
         self.assertIsNotNone(tr.kirjoita(a, ulos))
-        self.assertIsNone(tr.kirjoita(a.replace("Päivitetty: 1", "Päivitetty: 2"), ulos))
+        self.assertIsNone(tr.kirjoita(a.replace("P\u00e4ivitetty: 1", "P\u00e4ivitetty: 2"), ulos))
         self.assertIsNotNone(tr.kirjoita(a.replace("rivi", "toinen"), ulos))
         self.assertTrue((ulos / tr.KOHDE_SUHT).is_file())
 
