@@ -346,11 +346,11 @@ class Aamukooste(Pohja):
         kulutus.kirjaa(self.tmp, "sonnet", "t", 1, "tehtava", True, 1.0, {"usd": 1.25}, nyt - timedelta(days=1, hours=2))
         kulutus.kirjaa(self.tmp, "openrouter:deepseek-flash", "t", 1, "tehtava", True, 1.0, {"usd": 0.002}, nyt - timedelta(days=1, hours=3))
         t = aamukooste.keraa(str(self.repo), str(self.tmp / "yojono"), nyt, hae=lambda url: [], yksikot=lambda: [])
-        rivi = aamukooste.rivit(t)[4]
+        rivi = aamukooste.rivit(t)[6]
         self.assertIn("Mallikulutus eilen: ", rivi)
         self.assertIn("sonnet 1 ajoa 1.25 USD", rivi)
         self.assertIn("Tonyn varaus:", rivi)
-        self.assertIn("T\u00e4ll\u00e4 viikolla", aamukooste.rivit(t)[1])
+        self.assertIn("T\u00e4ll\u00e4 viikolla", aamukooste.rivit(t)[0])
 
 
 if __name__ == "__main__":
