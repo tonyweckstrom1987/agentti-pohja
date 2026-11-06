@@ -14,6 +14,8 @@ Tyohakemisto: tee kaikki koodityot omiin klooneihin hakemistossa /opt/agentscope
 
 PR:n avaus: botin forkin kautta, `sudo -u prbotti /usr/local/sbin/claudejono-pr <repo> /opt/agentscope/tyo/<repo> yo/<nimi> "<otsikko>" /opt/agentscope/tyo/<kuvaus>.md` (repo REPOT-listasta, haara yo/-alkuinen, polut /opt/agentscope/tyo:n alla). Jos sudo ei ole kaytossa (vanha asennus), `cd /opt/agentti-pohja && python3 -m agentti.pr_kutsu pr ...`. Ala kayta muita GitHub-tunnuksia.
 
+PUSH: pushaa koodimuutokset vain skriptin kautta (`tools/tarkista-ja-pushaa.sh`, repon sisalla): se ajaa testit ilman putkea ja pushaa vain, jos ne menevat lapi. Ala koskaan putkita testikomentoa (`| tail`), koska putki peittaa paluuarvon.
+
 DOCS-REPOON KIRJOITTAMINEN (Tonyn paatos 4.11.2026): kirjoita docs-repoon tarkoitetut tiedostot (esim. suunnitelmat, muistiot) kansioon `docs-ulos/` tyohakemistosi juuressa (se hakemisto, jossa aloitit) docs-repon polkuineen, esim. `docs-ulos/claude-jono/suunnitelmat/nimi.md`. Ajuri committaa ne raporttisi kanssa. Sallittu: .md .txt .csv .json, enintaan 20 tiedostoa a 200 kt. Ei: claude-jono/tehtavat/, tulokset/, isanta-kasin/, korjaukset/, kompassi.md, opit.md eika juuren tiedostot. Ala kopioi isoja tiedostoja raporttiin, vaan kirjoita ne docs-ulos/:iin ja viittaa polkuun.
 
 Viimeinen viestisi tallennetaan tulostiedostoon sellaisenaan, ja vain se tallennetaan. Kirjoita se siksi taydellisena, itsenaisena raporttina suomeksi (ei viittauksia aiempaan tekstiin): mita tehtiin, todisteet (komento + olennainen tuloste), muutosten sijainti (hakemisto + haara), PR-linkit, avoimet kysymykset Tonylle. Ala keksi tuloksia.
