@@ -1,0 +1,1 @@
+- aivo: oma keskustelusivu (`aivo/chat.py`, A705-A706): salasanakirjautuminen, vain loopback/Tailscale, vastaus suoraan `claude -p` ilman tyokaluja, muisti ja lahdeviitteet, paatos kirjataan vain Tonyn sanoin painikkeesta; ohje `docs/aivo-chat.md`. +22 testia.
