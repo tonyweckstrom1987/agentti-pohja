@@ -77,7 +77,7 @@ Muistin lisäys (CT115, `pct set`) tehdään erikseen Tonyn toimesta hostilta; a
 - Ajuri kirjaa jokaisesta ajosta rivin tiedostoon `kaistaloki.jsonl`: kaista, kesto, onnistuiko, rajaan osuminen (arvaus virheilmoituksen tekstistä), kierrokset, Clauden ilmoittama API-arvo (arvio, ei lasku) ja git-lukon odotus.
 - `claude-kaistamittaus.timer` kirjaa 15 min välein `/proc/loadavg`- ja muistiluvut tiedostoon `kuorma.jsonl`.
 - Raportti: `python3 -m claudejono.kaistamittaus raportti --kirjoita /var/lib/claude-jono/viikko/kaistakoe-2026-11.md` (taulukot kaistoittain ja vuorokausittain, rinnakkaisuus, kuorma, muisti, yöjonon kulut ja ohjeellinen päätelmä). Tiedosto kirjoitetaan docs-kloonin ulkopuolelle samasta syystä kuin viikkoehdotus: ajuri saa committaa vain sallitut polut. Jos raportin haluaa docs-repoon, polkulistan laajennus on Tonyn päätös.
-- Aamukoosteen ensimmäiselle riville tulee kaistaosa (`kaistat k1 5, k2 4, rinnakkain 80 min, rajaosumia 0, …`), kun `kaistaloki.jsonl` on olemassa. Rivejä on edelleen viisi.
+- Aamukoosteen ensimmäiselle riville tulee kaistaosa (`kaistat k1 5, k2 4, rinnakkain 80 min, rajaosumia 0, …`), kun `kaistaloki.jsonl` on olemassa. Rivejä on enintään kymmenen (ks. Aamukooste).
 - Tilauksen käyttörajasta ei ole suoraa lukua. Mitataan osumat ja kulutuksen arvio; nolla osumaa ei todista, ettei rajaa lähestytty.
 
 ## Mallien työnjako, kulutusmittari ja Tonyn varaus (Tonyn suunta 3.11.2026)
@@ -162,7 +162,7 @@ Peruutus: `systemctl disable --now claude-vahti.timer` ja poista yksikkötiedost
 
 ## Aamukooste ja ilmoitusten rajaus
 
-**Aamukooste** (`python3 -m claudejono.aamukooste`) kokoaa yhden Telegram-viestin: enintään viisi riviä (tehty, tarvitaan sinulta, opittu, hälytykset, kulut) ja linkit. Lähteet ovat edellisen vuorokauden tulokset, `tonylle.md`:n uudet kohdat, avoimet PR:t (GitHubin julkinen API, ei tunnuksia), yöjonon tila (`tila.json`, `jono.json`, vain luku) ja systemd:n failed-yksiköt. Napit ovat GitHub-linkkejä: mergattavien PR:ien sivut (merge-painike on PR-sivulla). Jos GitHub-haku epäonnistuu (esim. 60 haun tuntiraja), rivi kertoo sen eikä näytä tyhjää listaa onnistumisena.
+**Aamukooste** (`python3 -m claudejono.aamukooste`) kokoaa yhden Telegram-viestin: enintään kymmenen riviä ja linkit. Järjestys: 1) päätökset sinulle (mergattavat PR:t, `tonylle.md`:n avoimet päätöspyynnöt otsikoilla `AAMULLA ENSIN`, `päätettävä`, `kyllä/ei` tai `kysymys`, kalibrointipyyntö), 2) tehty, kesken (tila KESKEN eli ei tarkastajan vahvistusta), Aivon sääntöpäivitykset (`claude-jono/saantopaivitykset.md`, otsikot `## <pvm> ...`), opittu, hälytykset, kulut. Avoin päätöspyyntö muistutetaan joka aamu 7 vuorokauden ajan, kunnes otsikossa on sana TEHTY, HOIDETTU, VASTATTU, PÄÄTETTY tai SULJETTU (tai `aiempi`). Lähteet ovat edellisen vuorokauden tulokset, `tonylle.md`:n uudet kohdat, avoimet PR:t (GitHubin julkinen API, ei tunnuksia), yöjonon tila (`tila.json`, `jono.json`, vain luku) ja systemd:n failed-yksiköt. Napit ovat GitHub-linkkejä: mergattavien PR:ien sivut (merge-painike on PR-sivulla). Jos GitHub-haku epäonnistuu (esim. 60 haun tuntiraja), rivi kertoo sen eikä näytä tyhjää listaa onnistumisena.
 
 Kuiva-ajo (ei lähetä): `cd /opt/agentti-pohja && python3 -B -m claudejono.aamukooste`. Lähetys vain lipulla `--laheta`. Testibotti: aseta `YOJONO_TELEGRAM_TOKEN` ja `YOJONO_TELEGRAM_CHAT` testibotin arvoiksi tilapäisessä ympäristötiedostossa ennen ensimmäistä lähetystä.
 

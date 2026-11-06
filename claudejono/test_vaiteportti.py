@@ -49,7 +49,7 @@ class Vaiteportti(unittest.TestCase):
     def test_aamukooste_nostaa_halytyksen(self):
         t = {"tulokset": [], "uudet_prt": [], "opit": [], "tonylle": [], "pr": None, "pr_virheita": [], "yojono": None,
              "yksikot": [], "vaiteportti": ["M01-a"]}
-        self.assertIn("v\u00e4iteportti: M01-a", aamukooste.rivit(t)[3])
+        self.assertIn("v\u00e4iteportti: M01-a", aamukooste.rivit(t)[5])
 
 
 if __name__ == "__main__":

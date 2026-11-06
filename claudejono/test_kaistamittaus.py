@@ -103,15 +103,15 @@ class Mittaus(unittest.TestCase):
         self.assertIn("k1", r)
         self.assertIn("k2", r)
 
-    def test_aamukoosteen_tehty_rivi_saa_kaistaosan_viiden_rivin_sisalla(self):
+    def test_aamukoosteen_tehty_rivi_saa_kaistaosan_kymmenen_rivin_sisalla(self):
         from claudejono import aamukooste
         t = {"nyt": NYT, "tulokset": [], "uudet_prt": [], "opit": [], "tonylle": [], "pr": {"tony": []}, "pr_virheita": [],
              "yojono": None, "yksikot": [], "kaistat": "kaistat k1 3, k2 2"}
         rivit = aamukooste.rivit(t)
-        self.assertEqual(len(rivit), 5)
-        self.assertIn("kaistat k1 3, k2 2", rivit[0])
+        self.assertLessEqual(len(rivit), 10)
+        self.assertIn("kaistat k1 3, k2 2", rivit[1])
         t["kaistat"] = None
-        self.assertNotIn("kaistat", aamukooste.rivit(t)[0])
+        self.assertNotIn("kaistat", aamukooste.rivit(t)[1])
 
 
 if __name__ == "__main__":
