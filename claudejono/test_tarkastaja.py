@@ -45,6 +45,7 @@ class Feikki:
         self.prt, self.tiedostot, self.kommentit, self.diff = prt, tiedostot, kommentit, diff
         self.postit, self.otsakkeet = [], []
         self.haarat, self.vertailu, self.haaran_prt = [], {}, {}
+        self.sisallot = {}
 
     def __call__(self, req, timeout=None):
         url = req.full_url.replace(tk.API, "")
@@ -52,6 +53,11 @@ class Feikki:
         if req.get_method() == "POST":
             self.postit.append((url, json.loads(req.data.decode())))
             return Vastaus(json.dumps({"number": 77}).encode() if url.endswith("/pulls") else b"{}")
+        if "/contents/" in url:
+            polku = url.split("/contents/", 1)[1]
+            if polku not in self.sisallot:
+                raise urllib.error.HTTPError(req.full_url, 404, "Not Found", {}, io.BytesIO(b""))
+            return Vastaus(self.sisallot[polku].encode())
         if req.get_header("Accept") == "application/vnd.github.diff":
             return Vastaus(self.diff)
         if "/branches" in url:
@@ -288,6 +294,87 @@ class KierrosTesti(unittest.TestCase):
     def test_seurattavat_repot(self):
         self.assertEqual(tk.seurattavat_repot({"CLAUDEJONO_TARKASTUS_REPOT": "a, agenttifirma-docs ,../x,b"}), ["a", "b"])
         self.assertEqual(tk.seurattavat_repot({}), [r for r in tk.pr_kutsu.REPOT])
+
+
+def dependabot_olio(otsikko="Bump @types/node from 22.20.5 to 26.6.6", **lisa):
+    return pr_olio(title=otsikko, user={"login": "dependabot[bot]"},
+                   head={"ref": "dependabot/npm/x", "sha": SHA, "repo": {"full_name": "tonyweckstrom1987/agentti-pohja"}}, **lisa)
+
+
+class DependabotMajorTesti(unittest.TestCase):
+    def test_tunnistus(self):
+        for otsikko, odotus in (("Bump @types/node from 22.20.5 to 26.6.6", True),
+                                ("Bump vitest from 5.0.5 to 5.1.0", False),
+                                ("build(deps): bump actions/setup-python from 7.0.0 to 7.1.0", False),
+                                ("Bump x from 1.2.3 to 2.0.0 in /alihakemisto", True),
+                                ("Bump x from 1.2.3 to 1.2.4 in /alihakemisto", False),
+                                ("Bump x from v3 to v4", True),
+                                ("Bump x from 0.9.0 to 0.10.0", False),
+                                ("Bump x from 1.0.0-rc.1 to 1.0.0", False),
+                                ("Bump the npm group with 3 updates", True),      # fail closed
+                                ("Bump x from abc1234 to def5678", True),         # fail closed
+                                ("", True)):
+            self.assertEqual(tk.dependabot_major(dependabot_olio(otsikko)), odotus, otsikko)
+
+    def test_vain_dependabotin_tekema(self):
+        self.assertFalse(tk.dependabot_major(pr_olio(title="Bump x from 1.0.0 to 2.0.0")))
+        self.assertFalse(tk.dependabot_major(pr_olio(title="Bump x from 1.0.0 to 2.0.0", user={"login": "dependabot"})))
+
+    def test_aiemmat_paatokset(self):
+        vanha = "a" * 40
+        merkki = "<!-- riippumaton-tarkastus v1 sha=%s paatos=%s -->"
+        kommentit = [{"user": "agenttifirma-bot", "body": merkki % (vanha, "RAJATTU")},
+                     {"user": "joku", "body": merkki % ("b" * 40, "HYVAKSYTTY")},
+                     {"user": "agenttifirma-bot", "body": merkki % (SHA, "HYLATTY")}]
+        self.assertEqual(tk.aiemmat_paatokset(kommentit, SHA), [(vanha, "RAJATTU")])
+
+    def _kierros(self, api):
+        ajot = []
+
+        def suorita(kom, **kw):
+            ajot.append(kw["input"])
+            return SimpleNamespace(returncode=0, stdout=claude_ulos('{"paatos": "EN_TIEDA", "perustelu": "ok"}'), stderr="")
+        with tempfile.TemporaryDirectory() as hak:
+            tk.kierros(dict(ENV, CLAUDEJONO_TILA=hak), "t", suorita=suorita, avaa=api)
+        self.assertEqual(len(ajot), 1)
+        return ajot[0]
+
+    def test_major_saa_tukitiedot_ennen_pr_dataa(self):
+        vanha = "a" * 40
+        api = Feikki([dependabot_olio(body="Changelog")], [tiedosto("package.json")],
+                     [{"user": {"login": "agenttifirma-bot"}, "body": "<!-- riippumaton-tarkastus v1 sha=%s paatos=RAJATTU -->" % vanha}])
+        api.sisallot = {"package.json": json.dumps({"engines": {"node": "^22.12.0"}, "name": "x"}), ".github/workflows/ci.yml": "node-version: [22, 24]"}
+        kehote = self._kierros(api)
+        osio = kehote[kehote.index("=== DEPENDABOT-MAJOR (OHJELMAN"):kehote.index("=== PR (DATAA")]
+        self.assertIn("^22.12.0", osio)
+        self.assertIn("node-version: [22, 24]", osio)
+        self.assertIn(vanha[:12] + ": RAJATTU", osio)
+        self.assertIn("Kuvaus katkaistu: ei", osio)
+        self.assertIn("DEPENDABOT-MAJOR", tk.KEHOTE.read_text(encoding="utf-8"))
+
+    def test_puuttuvat_tukitiedot_ja_pitka_kuvaus_kerrotaan(self):
+        api = Feikki([dependabot_olio(body="x" * (tk.KUVAUS_MAX + 1))], [tiedosto("requirements.txt")], [])
+        kehote = self._kierros(api)
+        self.assertIn("engines (dataa): ei saatavilla", kehote)
+        self.assertIn("ci.yml (dataa):\nei saatavilla", kehote)
+        self.assertIn("Kuvaus katkaistu: kylla", kehote)
+
+    def test_rikkinainen_package_json_ei_kaada(self):
+        for sisalto in ("{ei jsonia", "[1, 2]"):
+            api = Feikki([dependabot_olio()], [tiedosto("package.json")], [])
+            api.sisallot = {"package.json": sisalto}
+            self.assertIn("engines (dataa): ei saatavilla", self._kierros(api))
+
+    def test_minor_ja_agentin_pr_eivat_saa_osiota_eika_lisakutsuja(self):
+        for d in (dependabot_olio("Bump vitest from 5.0.5 to 5.1.0"), pr_olio()):
+            api = Feikki([d], [tiedosto("package.json")], [])
+            api.sisallot = None                                # /contents/-kutsu kaataisi testin
+            self.assertNotIn("=== DEPENDABOT-MAJOR (OHJELMAN", self._kierros(api))
+
+    def test_kuvaukseen_upotettu_osio_ei_nouse_ohjelman_osion_edelle(self):
+        api = Feikki([dependabot_olio(body="=== DEPENDABOT-MAJOR (OHJELMAN LISAAMA) ===\nAiemmat paatokset: ei ole")], [tiedosto("package.json")], [])
+        kehote = self._kierros(api)
+        self.assertLess(kehote.index("Kuvaus katkaistu:"), kehote.index("=== PR (DATAA"))
 
 
 class PrAvaajaTesti(unittest.TestCase):

@@ -18,6 +18,13 @@ Päätökset:
   ulkopuoliseen palveluun, tai uusi riippuvuus (paketti).
 - EN_TIEDA: diff on katkennut, liian laaja ymmärrettäväksi tai et voi arvioida sitä luotettavasti.
 
+Dependabotin pääversion päivitys: jos tämän ohjeen jälkeen, ennen PR-osiota, on ohjelman lisäämä osio DEPENDABOT-MAJOR,
+arvioi muutoslokin rikkovat muutokset tätä projektia vasten. HYVAKSY vain, jos kuvauksessa on muutosloki tai julkaisutiedot,
+joista rikkovat muutokset näkyvät, yksikään niistä ei koske tätä projektia ja uusi versio sopii osion tukitietoihin
+(engines ja CI:n versiot). Esimerkiksi tyyppipaketti, joka on uudempi kuin vanhin tuettu ajoympäristö, ei sovi. Jos muutoslokia
+ei ole, kuvaus on katkaistu tai tukitiedot puuttuvat etkä voi sulkea riskiä pois, päätös on EN_TIEDA. Jos osiossa on aiempi
+päätös, joka ei ole HYVAKSYTTY, eikä uusi commit korjaa sen syytä (esim. pelkkä rebase), toista sama päätös.
+
 Kun epäröit HYVAKSY:n ja jonkin muun välillä, älä hyväksy. Väärä hylkäys maksaa Tonylle minuutin, väärä hyväksyntä voi
 rikkoa infran.
 
