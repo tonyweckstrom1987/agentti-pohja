@@ -106,12 +106,12 @@ class Ajo(Pohja):
         self.lisaa_tehtava("2026-10-30-01-a.md")
         f, kutsut = self.suorita({"subtype": "success", "result": "raportti\nTodennettu kaytossa: testi"})
         viesti = ajuri.aja(self.repo, self.tmp, env={"YOJONO_TELEGRAM_TOKEN": "salainen"}, suorita=f)
-        self.assertIn("VALMIS", viesti)
+        self.assertIn("TEHTY", viesti)
         self.assertNotIn("YOJONO_TELEGRAM_TOKEN", kutsut[0][1]["env"])
         tarkistus = self.tmp / "tarkistus"
         subprocess.run(["git", "clone", "-q", str(self.origin), str(tarkistus)], check=True, capture_output=True)
         tulos = tarkistus / ajuri.JONO / "tulokset" / "2026-10-30-01-a.md"
-        self.assertIn("VALMIS", tulos.read_text())
+        self.assertIn("TEHTY", tulos.read_text())
         self.assertIn("raportti", tulos.read_text())
         self.assertEqual(ajuri.aja(self.repo, self.tmp, env={"CLAUDEJONO_ITSESUUNNITTELU": "0"}, suorita=f), "jono tyhja")
 
@@ -492,7 +492,7 @@ class JulkaisuPushVirhe(Pohja):
             return subprocess.CompletedProcess(kom, 0, json.dumps({"subtype": "success", "result": "r\nTodennettu kaytossa: testi"}), "")
         lahetetyt = []
         viesti = ajuri.aja(self.repo, self.tmp, env={}, suorita=f, laheta=lahetetyt.append)
-        self.assertEqual(viesti, "claude-jono: 2026-10-30-01-a.md VALMIS (push epaonnistui)")
+        self.assertEqual(viesti, "claude-jono: 2026-10-30-01-a.md TEHTY (push epaonnistui)")
         self.assertIn("push epaonnistui", lahetetyt[0])
 
     def test_suunnittele_pushin_epaonnistuessa_ei_kaadu(self):
@@ -605,7 +605,7 @@ class TulosPortti(Pohja):
         viesti, tiedosto = self.aja_tuloksella("Tehty. Testit menivat.\n\n## Uusi oppi\n- X ei onnistu, kayta Y")
         self.assertIn("KESKEN", viesti)
         self.assertIn("- Tila: KESKEN", tiedosto)
-        self.assertNotIn("VALMIS", tiedosto)
+        self.assertNotIn("TEHTY", tiedosto)
         self.assertFalse((self.repo / ajuri.OPIT).exists())   # keskeneraisen ajon oppeja ei kirjata
 
     def test_tyhja_ja_viiva_ovat_kesken(self):
@@ -615,8 +615,21 @@ class TulosPortti(Pohja):
 
     def test_oikea_rivi_on_valmis(self):
         viesti, tiedosto = self.aja_tuloksella("Tehty.\n\nTodennettu k\u00e4yt\u00f6ss\u00e4: ajettu oikeaa kohdetta vastaan, 12/12 l\u00e4pi")
-        self.assertIn("VALMIS", viesti)
-        self.assertIn("- Tila: VALMIS", tiedosto)
+        self.assertIn("TEHTY", viesti)
+        self.assertIn("- Tila: TEHTY", tiedosto)
+
+    def _ei_valmis(self, tulos):
+        # A836: agentin oma tila on TEHTY; VALMIS tulee vasta riippumattomalta tarkastajalta.
+        viesti, tiedosto = self.aja_tuloksella(tulos)
+        self.assertNotIn("VALMIS", viesti)
+        self.assertNotIn("VALMIS", tiedosto)
+
+    def test_ajuri_ei_kirjoita_valmis_todennettuna(self):
+        self._ei_valmis("Tehty.\n\nTodennettu k\u00e4yt\u00f6ss\u00e4: ajettu, 3/3 l\u00e4pi")
+        self.assertEqual(ajuri.TILA_TEHTY, "TEHTY")
+
+    def test_ajuri_ei_kirjoita_valmis_ilman_riviakaan(self):
+        self._ei_valmis("Tehty ilman todennusta.")
 
     def test_epaonnistunut_pysyy_epaonnistuneena(self):
         self.lisaa_tehtava("2026-11-03-02-b.md")

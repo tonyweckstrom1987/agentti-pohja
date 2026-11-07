@@ -37,7 +37,7 @@ class Pohja(unittest.TestCase):
 class Kooste(Pohja):
     def setUp(self):
         super().setUp()
-        self.kirjoita("tulokset/2026-11-02-01-a.md", tulos("a", "VALMIS", "2026-11-02T20:00+02:00",
+        self.kirjoita("tulokset/2026-11-02-01-a.md", tulos("a", "TEHTY", "2026-11-02T20:00+02:00",
                       "PR https://github.com/tonyweckstrom1987/agentti-pohja/pull/7\n\n## Uusi oppi\nX ei onnistu, kayta Y.\n"))
         self.kirjoita("tulokset/2026-11-02-02-b.md", tulos("b", "EPAONNISTUI", "2026-11-03T02:00+02:00", "aikakatkaisu"))
         self.kirjoita("tulokset/2026-10-30-01-vanha.md", tulos("vanha", "VALMIS", "2026-10-30T10:00+02:00",
@@ -84,7 +84,7 @@ class Kooste(Pohja):
 
     def test_sisalto_oikeasta_datasta(self):
         rivit = aamukooste.rivit(self.keraa())
-        self.assertIn("2 jonotulosta (1 valmis, 1 ep", rivit[0])
+        self.assertIn("2 jonotulosta (1 tehty, 1 ep", rivit[0])
         self.assertIn("agentti-pohja#7", rivit[0])
         self.assertIn("1 PR:", rivit[1])
         self.assertIn("2 uutta kohtaa", rivit[1])
@@ -110,7 +110,7 @@ class Kooste(Pohja):
         self.assertIn("tilaa ei saatu", rivit[4])
 
     def test_tyhja_oppi_ei_nay(self):
-        self.kirjoita("tulokset/2026-11-03-01-c.md", tulos("c", "VALMIS", "2026-11-03T03:00+02:00", "## Uusi oppi\nTama ajo ei tuottanut uutta oppia.\n"))
+        self.kirjoita("tulokset/2026-11-03-01-c.md", tulos("c", "TEHTY", "2026-11-03T03:00+02:00", "## Uusi oppi\nTama ajo ei tuottanut uutta oppia.\n"))
         self.assertNotIn("Tama ajo ei", aamukooste.rivit(self.keraa())[2])
 
     def test_tonylle_aikaleimat(self):
@@ -129,6 +129,16 @@ class Kooste(Pohja):
             with mock.patch("sys.stdout"):
                 self.assertEqual(aamukooste.main(["--laheta"]), 0)
         self.assertIs(m.call_args.kwargs.get("pakota"), True)
+
+
+class TehtyJaVanhaValmis(Pohja):
+    def test_tehty_ja_vanha_valmis_lasketaan_erikseen_ja_opit_poimitaan_molemmista(self):
+        oppi = "## Uusi oppi\nX ei onnistu, kayta Y.\n"
+        self.kirjoita("tulokset/2026-11-03-01-a.md", tulos("a", "TEHTY", "2026-11-03T01:00+02:00", oppi))
+        self.kirjoita("tulokset/2026-11-03-02-b.md", tulos("b", "VALMIS", "2026-11-03T02:00+02:00", oppi.replace("Y", "Z")))
+        t = aamukooste.keraa(self.repo, self.yj, NYT, lambda url: [], lambda: [])
+        self.assertEqual(len(t["opit"]), 2)
+        self.assertIn("(1 tehty, 1 valmis", aamukooste.rivit(t)[0])
 
 
 class TarkastajaVirheet(Pohja):
@@ -203,7 +213,7 @@ class Viikkoehdotus(Pohja):
 
     def test_tehtava_jolla_on_tulos_ei_ehdokas(self):
         self.tehtava("2026-11-03-01-a", "hyoty 5, varmuus 4, vaiva 4 h")
-        self.kirjoita("tulokset/2026-11-03-01-a.md", tulos("a", "VALMIS", "2026-11-03T01:00+02:00"))
+        self.kirjoita("tulokset/2026-11-03-01-a.md", tulos("a", "TEHTY", "2026-11-03T01:00+02:00"))
         self.assertEqual(viikkoehdotus.ehdokkaat(self.repo, NYT), [])
 
     def test_uusinta_epaonnistuneesta(self):

@@ -133,7 +133,7 @@ def keraa(repo, perus, nyt, hae=None, yksikot=None):
     tulokset = lue_tulokset(repo, alku, nyt)
     opit = []
     for t in tulokset:
-        if t["tila"] == "VALMIS":
+        if t["tila"] in ("TEHTY", "VALMIS"):   # TEHTY = agentin oma tila (A836); VALMIS vanhoissa tuloksissa
             opit += [o for o in ajuri.suodata_opit(ajuri.poimi_uusi_oppi(t["teksti"]))[0] if not TYHJA_OPPI_RE.match(o)]
     prt = []
     for t in tulokset:
@@ -183,12 +183,12 @@ def _lyhenna(teksti, raja=RIVI_MAX):
 
 def rivit(t):
     """Viisi rivi\u00e4 (tehty, tarvitaan, opittu, h\u00e4lytykset, kulut) tiedoista."""
-    nimet = {"VALMIS": 0, "KESKEN": 0, "EPAONNISTUI": 0, "HYLATTY": 0}
+    nimet = {"TEHTY": 0, "VALMIS": 0, "KESKEN": 0, "EPAONNISTUI": 0, "HYLATTY": 0}
     for r in t["tulokset"]:
         if r["tila"] in nimet:
             nimet[r["tila"]] += 1
     yj = t["yojono"]
-    osat = [f"{len(t['tulokset'])} jonotulosta ({nimet['VALMIS']} valmis, {str(nimet['KESKEN']) + ' kesken, ' if nimet['KESKEN'] else ''}{nimet['EPAONNISTUI']} ep\u00e4onnistui, {nimet['HYLATTY']} hyl\u00e4tty)"]
+    osat = [f"{len(t['tulokset'])} jonotulosta ({nimet['TEHTY']} tehty, {str(nimet['VALMIS']) + ' valmis, ' if nimet['VALMIS'] else ''}{str(nimet['KESKEN']) + ' kesken, ' if nimet['KESKEN'] else ''}{nimet['EPAONNISTUI']} ep\u00e4onnistui, {nimet['HYLATTY']} hyl\u00e4tty)"]
     if t["uudet_prt"]:
         nayta = ", ".join(t["uudet_prt"][:4]) + (f" (+{len(t['uudet_prt']) - 4})" if len(t["uudet_prt"]) > 4 else "")
         osat.append("PR:t " + nayta)
