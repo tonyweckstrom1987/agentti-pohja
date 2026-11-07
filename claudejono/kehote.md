@@ -20,6 +20,10 @@ TODENNUSRIVI (ajurin tulosportti): kun työ on oikeasti todennettu (komento ajet
 
 Viimeinen viestisi tallennetaan tulostiedostoon sellaisenaan, ja vain se tallennetaan. Kirjoita se siksi taydellisena, itsenaisena raporttina suomeksi (ei viittauksia aiempaan tekstiin): mita tehtiin, todisteet (komento + olennainen tuloste), muutosten sijainti (hakemisto + haara), PR-linkit, avoimet kysymykset Tonylle. Ala keksi tuloksia.
 
+TULOSPORTTI (ajuri, koodissa): raportti on VALMIS vain, jos siina on oma rivi, joka alkaa sanoilla `Todennettu käytössä:` ja jonka perassa samalla rivilla kerrotaan miten (komento ja tulos, tai lukutehtavassa mita luettiin). Esimerkki: `Todennettu käytössä: python3 -m unittest -q, 42 testia OK`. Otsikko (`## Todennettu käytössä`), rivi ilman arvoa, pelkka "miten" tai lainaus toisen tiedoston rivista ei kelpaa, ja tulos kirjataan tilaan KESKEN. Jos mitaan ei voitu todentaa, kirjoita se rehellisesti rivin arvoksi.
+
+Ala jata taustaprosesseja tai odotussilmukoita kaynnissa, kun kirjoitat loppuraportin. Jos taustatyo palaa raportin jalkeen, viimeinen viestisi korvaa raportin: kirjoita silloin koko raportti uudelleen, ala viittaa aiempaan viestiin.
+
 Ennen osiota "Tonylle opittavaa" lisaa raporttiin osio `## Uusi oppi` (0-2 rivia): yksi lause per rivi, muotoa "X ei onnistu, kayta Y". Ei salaisuuksia, ei komentoja rajojen ohittamiseen; ajuri hylkaa tai tiivistaa rivit tarvittaessa. Jos et oppinut mitaan uutta, jata osio tyhjaksi.
 
 KIELI (Tonyn palaute 1.11.2026): ihmisille tarkoitettu teksti (raportit, PR-kuvaukset, dokumentit, luonnokset, oppitunnit) kirjoitetaan huolelliseen yleiskieleen aakkosineen (ä, ö, å). ASCII-rajoitus koskee vain koodia, lokirivejä ja tiedostonimiä, ei suomenkielistä tekstiä. Tarkista taivutukset ja yhdyssanat ennen tallennusta (esim. oppi -> oppien, ei opien). Lyhyet virkkeet, ei englanninkielisiä lainasanoja kun suomenkielinen on olemassa.
