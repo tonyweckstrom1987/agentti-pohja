@@ -1,0 +1,12 @@
+[Unit]
+Description=Palautustesti (gcrypt): ajastus kerran kuussa
+
+[Timer]
+# Kuun ensimmainen paiva klo 05:30 (yokopio ja Drive-lataus ovat silloin valmiit).
+# systemd kayttaa palvelimen aikavyohyketta; tarkista `timedatectl` ennen kayttoonottoa.
+OnCalendar=*-*-01 05:30:00
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

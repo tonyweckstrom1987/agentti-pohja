@@ -1,0 +1,21 @@
+[Unit]
+Description=Palautustesti: Drive-varmuuskopio (gcrypt) kerran kuussa
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+EnvironmentFile=-/etc/palautustesti-gcrypt.env
+ExecStart=/usr/local/sbin/palautustesti-gcrypt.sh
+TimeoutStartSec=3600
+Nice=10
+IOSchedulingClass=idle
+NoNewPrivileges=true
+PrivateTmp=false
+ProtectHome=read-only
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+LockPersonality=true
