@@ -47,6 +47,51 @@ class Nimi(unittest.TestCase):
             self.assertFalse(ajuri.kelvollinen_nimi(n), n)
 
 
+class KelvotonNimi(Pohja):
+    """Vika 7.11.2026: tehtava 2026-11-07-33-KIIRE-... ohitettiin hiljaa 2,5 h, koska TEHTAVA_RE sallii vain pienet kirjaimet."""
+
+    def test_kelvoton_loytyy_kelvollinen_ja_readme_eivat(self):
+        self.lisaa_tehtava("2026-11-07-33-KIIRE-poista.md")
+        self.lisaa_tehtava("2026-11-07-34-ok.md")
+        self.lisaa_tehtava("README.md")
+        self.assertEqual(ajuri.kelvottomat_tehtavat(self.repo), ["2026-11-07-33-KIIRE-poista.md"])
+
+    def test_varoitus_kerran_per_nimi(self):
+        self.lisaa_tehtava("2026-11-07-33-KIIRE-poista.md")
+        viestit = []
+        self.assertEqual(ajuri.varoita_kelvottomista(self.repo, self.tmp, viestit.append), ["2026-11-07-33-KIIRE-poista.md"])
+        self.assertEqual(ajuri.varoita_kelvottomista(self.repo, self.tmp, viestit.append), [])
+        self.assertEqual(len(viestit), 1)
+        self.assertIn("OHITTAA", viestit[0])
+        self.lisaa_tehtava("2026-11-07-35-Toinen.md")
+        ajuri.varoita_kelvottomista(self.repo, self.tmp, viestit.append)
+        self.assertEqual(len(viestit), 2)
+        self.assertIn("2026-11-07-35-Toinen.md", viestit[1])
+        self.assertNotIn("KIIRE", viestit[1])
+
+    def test_rikkinainen_tilatiedosto_ei_kaada(self):
+        self.lisaa_tehtava("2026-11-07-33-KIIRE-poista.md")
+        (self.tmp / ajuri.NIMIVAROITUKSET).write_text("{rikki")
+        viestit = []
+        self.assertEqual(len(ajuri.varoita_kelvottomista(self.repo, self.tmp, viestit.append)), 1)
+
+    def test_ilman_lahettajaa_ei_mitaan(self):
+        self.lisaa_tehtava("2026-11-07-33-KIIRE-poista.md")
+        self.assertEqual(ajuri.varoita_kelvottomista(self.repo, self.tmp, None), [])
+        self.assertFalse((self.tmp / ajuri.NIMIVAROITUKSET).exists())
+
+    def test_aja_varoittaa_ja_ajaa_kelvollisen(self):
+        self.lisaa_tehtava("2026-11-07-33-KIIRE-poista.md")
+        self.lisaa_tehtava("2026-11-07-34-ok.md")
+
+        def f(kom, **kw):
+            return subprocess.CompletedProcess(kom, 0, json.dumps({"subtype": "success", "result": "r\nTodennettu kaytossa: testi"}), "")
+        viestit = []
+        viesti = ajuri.aja(self.repo, self.tmp, env={}, suorita=f, laheta=viestit.append)
+        self.assertIn("2026-11-07-34-ok.md VALMIS", viesti)
+        self.assertTrue(any("OHITTAA" in v and "KIIRE" in v for v in viestit), viestit)
+
+
 class GitVirhe(Pohja):
     def test_git_virhe_kertoo_gitin_viestin(self):
         with self.assertRaises(ajuri.JonoVirhe) as cm:

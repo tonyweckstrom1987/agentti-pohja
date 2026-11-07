@@ -1,0 +1,1 @@
+- claudejono: ajuri varoittaa (laheta) kerran kustakin tehtavasta, jonka nimi ei kelpaa TEHTAVA_RE:lle, koska se ohitettiin ennen hiljaa (7.11.2026 KIIRE-tehtava seisoi 2,5 h isojen kirjainten takia).

@@ -293,6 +293,45 @@ def odottavat_tehtavat(repo):
     return [p for p in sorted(teht.iterdir()) if p.is_file() and kelvollinen_nimi(p.name) and not (tul / p.name).exists()]
 
 
+NIMIVAROITUKSET = "nimivaroitukset.json"
+
+
+def kelvottomat_tehtavat(repo):
+    """tehtavat/-kansion .md-tiedostot, joiden nimi ei kelpaa (TEHTAVA_RE) ja joilla ei ole tulosta. Ajuri ohittaa ne
+    hiljaa, joten ne pitaa nostaa nakyviin (vika 7.11.2026: KIIRE-tehtava seisoi 2,5 h, koska nimessa oli isoja kirjaimia)."""
+    teht = Path(repo) / JONO / "tehtavat"
+    tul = Path(repo) / JONO / "tulokset"
+    if not teht.is_dir():
+        return []
+    return [p.name for p in sorted(teht.iterdir())
+            if p.is_file() and p.suffix.lower() == ".md" and p.name.lower() != "readme.md"
+            and not kelvollinen_nimi(p.name) and not (tul / p.name).exists()]
+
+
+def varoita_kelvottomista(repo, tila, laheta):
+    """Lahettaa viestin kerran kustakin kelvottomasta tehtavanimesta (tila: NIMIVAROITUKSET). Palauttaa uudet nimet.
+    Ei koskaan kaada jonoa: tilatiedoston virhe tarkoittaa vain, etta varoitus voi toistua."""
+    nimet = kelvottomat_tehtavat(repo)
+    if not nimet or not laheta:
+        return []
+    polku = Path(tila) / NIMIVAROITUKSET
+    try:
+        vanhat = set(json.loads(polku.read_text()))
+    except (OSError, ValueError, TypeError):
+        vanhat = set()
+    uudet = [n for n in nimet if n not in vanhat]
+    if not uudet:
+        return []
+    laheta("claude-jono OHITTAA tehtavan, nimi ei kelpaa: " + ", ".join(uudet[:5])
+           + ("" if len(uudet) <= 5 else f" (+{len(uudet) - 5})")
+           + "\nSallittu muoto: VVVV-KK-PP-NN-pienet-kirjaimet-numerot-viivat.md. Nimea tiedosto uudelleen.")
+    try:
+        polku.write_text(json.dumps(sorted(vanhat | set(nimet))))
+    except OSError:
+        pass
+    return uudet
+
+
 def varaa_seuraava(repo, tila, kaista, nyt=None, vanhenee_s=OLETUS_AIKARAJA_S + VARAUS_MARGINAALI_S, kaistoja=KAISTOJA_MAX, ohita=None):
     """Valinta: 1) kaistalle kiinnitetyt (`Kaista: N`) vanhin ensin, 2) vapaat vanhin ensin. Toisen kaistan kiinnittamiin ei
     kosketa eika toisen kaistan varaamiin. Varaa valitun. None jos ei ole.
@@ -867,6 +906,7 @@ def aja(repo, tyohak, env=None, suorita=subprocess.run, laheta=None, kaista=1, l
     # Valinta + varaus yhden lyhyen git-lukon sisalla: pull, tulosten tarkistus ja atominen varaus eivat lomitu toisen kaistan kanssa.
     with git_lukko(tila) as odotus:
         git(repo, "pull", "-q", "--rebase", "origin", "main")
+        varoita_kelvottomista(repo, tila, laheta)   # muuten vaarin nimetty tehtava jaa jonoon nakymatta
         if env.get("CLAUDEJONO_ITSESUUNNITTELU", "1") == "1" and env.get("CLAUDEJONO_TOISTUVAT") == "1":
             luo_toistuvat(repo, tyohak)   # toistuvat (esim. viikon optimointikierros) vain kun palvelu kytkee ne paalle
         t = varaa_seuraava(repo, tila, kaista, vanhenee_s=vanhenee, kaistoja=kaistojen_maara(env), ohita=ohita)
