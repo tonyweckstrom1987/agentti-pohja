@@ -187,6 +187,15 @@ systemctl list-timers 'claude-*'
 
 Ajastus on Helsingin aikaa (`OnCalendar=... Europe/Helsinki`), joten kesäaika ei siirrä kellonaikaa vaikka palvelimen aikavyöhyke on UTC. Kääntäminen päälle: lisää `Environment=CLAUDEJONO_ILMOITUKSET=kooste` tiedostoon `claude-jono.service` (ja yojono-palveluun), `daemon-reload`. Peruutus: poista rivi tai aseta arvoksi `heti`.
 
+## Ajattelun kilpailutus (Tony 4.11.2026)
+
+`claudejono/kilpailu.py`: sama kysymys 2–3 mallille toisistaan tietämättä ja ilman työkaluja. Opus-tuomari (ilman työkaluja) pisteyttää nimettömät vastaukset satunnaisessa järjestyksessä asteikolla 1–5 (oikeellisuus, perustelut, toteutettavuus, riskit, hyöty) ja valitsee voittajan. Pisteet kirjataan tiedostoon `<tila>/kilpailut.jsonl`, kulut tiedostoon `kulutus.jsonl` (laji `kilpailu`, `kilpailu-tuomari`, `otos`).
+
+- Tehtävän rivi: `Kilpailu: opus, openrouter:deepseek-pro, openrouter:qwen-coder`. Sallitut mallit ovat samat kuin `malli.py`:ssä; listaa ei voi laajentaa tehtävästä.
+- Valinnainen rivi `Laji: arkkitehtuuri|strategia|tavoitteet|muu`. Kauppatiimin kilpailut vain paperistrategioista.
+- Kulukatto: `CLAUDEJONO_KILPAILU_USD_PV` (oletus 1.0) OpenRouter-kuluille vuorokaudessa. Kun katto täyttyy, kilpailu ajetaan vain Clauden malleilla (`opus`, `sonnet`). Muut katot eivät muutu.
+- `viikkokooste()` antaa viime viikon tulokset malleittain aamukoosteeseen.
+
 ## Riippumaton tarkastaja ja automerge v2 (Tonyn päätös 4.11.2026)
 
 Kaikki PR:t yhdistyvät ilman Tonya, kun CI on vihreä ja riippumaton tarkastaja on hyväksynyt saman head-commitin. Poikkeus
