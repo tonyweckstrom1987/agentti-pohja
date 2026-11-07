@@ -618,6 +618,50 @@ class TulosPortti(Pohja):
         self.assertIn("VALMIS", viesti)
         self.assertIn("- Tila: VALMIS", tiedosto)
 
+    def test_otsikkomuoto_kelpaa_vain_sisallon_kanssa(self):
+        kelvolliset = ("## Todennettu k\u00e4yt\u00f6ss\u00e4\n\nAjettu `python3 -m unittest`, 20 testi\u00e4 OK.\n",
+                       "# Raportti\n### **Todennettu k\u00e4yt\u00f6ss\u00e4**\n- ajettu oikeaa kohdetta vastaan\n\n## Muu\n",
+                       "## Todennettu kaytossa:\ntesti ajettu\n", "## todennettu k\u00e4yt\u00f6ss\u00e4\n\n\n> ajettu\n")
+        tyhjat = ("## Todennettu k\u00e4yt\u00f6ss\u00e4\n", "## Todennettu k\u00e4yt\u00f6ss\u00e4\n\n## Tonylle opittavaa\nTeksti\n",
+                  "## Todennettu k\u00e4yt\u00f6ss\u00e4\n-\n", "## Todennettu k\u00e4yt\u00f6ss\u00e4\n- TBD\n\n## Muu\nasia\n",
+                  "Todennettu k\u00e4yt\u00f6ss\u00e4 ilman otsikkoa\nmuuta\n")
+        for t in kelvolliset:
+            with self.subTest(kelvollinen=t):
+                self.assertTrue(ajuri.on_todennettu("raportti\n" + t))
+        for t in tyhjat:
+            with self.subTest(tyhja=t):
+                self.assertFalse(ajuri.on_todennettu("raportti\n" + t))
+
+    def test_otsikkomuoto_on_valmis(self):
+        viesti, tiedosto = self.aja_tuloksella("Tehty.\n\n## Todennettu k\u00e4yt\u00f6ss\u00e4\n\nAjettu oikeaa kohdetta vastaan.")
+        self.assertIn("VALMIS", viesti)
+        self.assertNotIn("KESKEN-syy", tiedosto)
+
+    def test_kesken_syy_kirjataan_otsikkoon(self):
+        for syy in ajuri.KESKEN_SYYT:
+            with self.subTest(syy=syy):
+                self.setUp()
+                viesti, tiedosto = self.aja_tuloksella("Tehty.\nKESKEN-syy: %s\n" % syy)
+                self.assertIn("- Tila: KESKEN\n- KESKEN-syy: %s\n- Aika: " % syy, tiedosto)
+
+    def test_kesken_syy_oletus_ja_ei_arvausta(self):
+        self.assertEqual(ajuri.kesken_syy("Tehty, odottaa yhdistamista ja kayttoonottoa."), "rivi-puuttuu")
+        self.assertEqual(ajuri.kesken_syy("KESKEN-syy: keksitty"), "rivi-puuttuu")
+        self.assertEqual(ajuri.kesken_syy(""), "rivi-puuttuu")
+        self.assertEqual(ajuri.kesken_syy("- **KESKEN-syy:** `ei-todennettu`"), "ei-todennettu")
+        viesti, tiedosto = self.aja_tuloksella("Tehty. PR odottaa yhdistamista.")
+        self.assertIn("- KESKEN-syy: rivi-puuttuu\n", tiedosto)
+
+    def test_valmis_ja_epaonnistunut_eivat_saa_syyta(self):
+        _, tiedosto = self.aja_tuloksella("Tehty.\nKESKEN-syy: ei-todennettu\nTodennettu k\u00e4yt\u00f6ss\u00e4: ajettu")
+        self.assertNotIn("- KESKEN-syy:", tiedosto)
+
+    def test_kehote_kertoo_todennusrivin_muodon_ja_syykoodit(self):
+        kehote = ajuri.KEHOTE.read_text(encoding="utf-8")
+        self.assertIn("Todennettu k\u00e4yt\u00f6ss\u00e4: <miten>", kehote)
+        for syy in ajuri.KESKEN_SYYT:
+            self.assertIn(syy, kehote)
+
     def test_epaonnistunut_pysyy_epaonnistuneena(self):
         self.lisaa_tehtava("2026-11-03-02-b.md")
         f, _ = self.suorita({"subtype": "error", "result": "x"}, koodi=1)

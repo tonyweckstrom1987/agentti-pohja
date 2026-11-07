@@ -95,9 +95,46 @@ TODENNETTU_RE = re.compile(r"^[ \t>*_-]*Todennettu k(?:\u00e4|a)yt(?:\u00f6|o)ss
 TODENNETTU_TYHJA_RE = re.compile(r"^[\s\-\u2013\u2014.:*_]*(?:tbd|todo|n/?a|ei mit(?:\u00e4|a)(?:\u00e4|a)n|ei ole)?[\s\-\u2013\u2014.:*_]*$", re.IGNORECASE)
 
 
+# Otsikkomuoto: "## Todennettu kaytossa" (myos ## ... ######, valinnaiset **/__ ja loppudoppa), jonka alla on sisaltoa.
+TODENNETTU_OTSIKKO_RE = re.compile(r"^[ \t]{0,3}#{1,6}[ \t]+(?:\*\*|__)?Todennettu k(?:\u00e4|a)yt(?:\u00f6|o)ss(?:\u00e4|a)[ \t:]*(?:\*\*|__)?[ \t]*:?[ \t]*$",
+                                   re.IGNORECASE)
+# Seuraava otsikko paattaa otsikon alaisen sisallon.
+OTSIKKO_RIVI_RE = re.compile(r"^[ \t]{0,3}#{1,6}[ \t]+\S")
+
+
+def _otsikon_sisalto_kelpaa(rivit):
+    """True, jos otsikon alla (seuraavaan otsikkoon asti) on rivi, jolla on muu sisalto kuin tyhja tai viiva."""
+    for rivi in rivit:
+        if OTSIKKO_RIVI_RE.match(rivi):
+            return False
+        sisalto = re.sub(r"^[ \t>]*(?:[-*+][ \t]+)?", "", rivi)
+        if sisalto.strip() and not TODENNETTU_TYHJA_RE.match(sisalto):
+            return True
+    return False
+
+
 def on_todennettu(teksti):
-    """True, jos raportissa on rivi 'Todennettu kaytossa:' jolla on muu arvo kuin tyhja tai viiva."""
-    return any(not TODENNETTU_TYHJA_RE.match(m.group(1)) for m in TODENNETTU_RE.finditer(teksti or ""))
+    """True, jos raportissa on rivi 'Todennettu kaytossa: miten' tai otsikko 'Todennettu kaytossa', jonka alla on sisaltoa.
+    Tyhja arvo, viiva ja tyhja otsikko eivat kelpaa."""
+    teksti = teksti or ""
+    if any(not TODENNETTU_TYHJA_RE.match(m.group(1)) for m in TODENNETTU_RE.finditer(teksti)):
+        return True
+    rivit = teksti.splitlines()
+    return any(TODENNETTU_OTSIKKO_RE.match(r) and _otsikon_sisalto_kelpaa(rivit[i + 1:]) for i, r in enumerate(rivit))
+
+
+# KESKEN-syy (virhekooste vk 45): agentti ilmoittaa syyn raportissa riviella "KESKEN-syy: <koodi>". Ei arvausta avainsanoista:
+# jos rivia ei ole tai koodi on tuntematon, syy on rivi-puuttuu.
+KESKEN_SYYT = ("rivi-puuttuu", "odottaa-yhdistamista", "odottaa-kayttoonottoa", "ei-todennettu")
+KESKEN_SYY_OLETUS = "rivi-puuttuu"
+KESKEN_SYY_RE = re.compile(r"^[ \t>*_-]*KESKEN-syy[ \t]*:(?:\*\*|__)?[ \t]*`?([A-Za-z-]+)`?[ \t]*$", re.IGNORECASE | re.MULTILINE)
+
+
+def kesken_syy(teksti):
+    """Agentin ilmoittama KESKEN-syy raportista; viimeinen kelvollinen rivi voittaa, muuten 'rivi-puuttuu'."""
+    syyt = [m.group(1).lower() for m in KESKEN_SYY_RE.finditer(teksti or "")]
+    kelvolliset = [s for s in syyt if s in KESKEN_SYYT]
+    return kelvolliset[-1] if kelvolliset else KESKEN_SYY_OLETUS
 
 
 class JonoVirhe(RuntimeError):
@@ -471,7 +508,9 @@ def kirjoita_tulos(repo, nimi, ok, teksti, nyt=None, tila=None, malli=None):
     if len(tavut) > TULOS_MAX_TAVUA:   # 1.11.: M02-lahde katkesi kesken sanan ilman merkintaa
         runko += (f"\n\n[AJURI: raportti katkaistu {TULOS_MAX_TAVUA} tavuun, alkuperainen {len(tavut)} tavua. "
                   "Loppu puuttuu tasta tiedostosta.]")
-    polku.write_text(f"# Tulos: {nimi}\n\n- Tila: {tila or ('VALMIS' if ok else 'EPAONNISTUI')}\n- Aika: {nyt.isoformat(timespec='minutes')}\n{('- Malli: ' + malli + chr(10)) if malli else ''}\n{runko}\n",
+    tila = tila or ("VALMIS" if ok else "EPAONNISTUI")
+    syy = f"- KESKEN-syy: {kesken_syy(teksti)}\n" if tila == "KESKEN" else ""
+    polku.write_text(f"# Tulos: {nimi}\n\n- Tila: {tila}\n{syy}- Aika: {nyt.isoformat(timespec='minutes')}\n{('- Malli: ' + malli + chr(10)) if malli else ''}\n{runko}\n",
                      encoding="utf-8")
     return polku
 

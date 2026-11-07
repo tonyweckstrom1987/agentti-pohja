@@ -111,6 +111,57 @@ class OsioTesti(unittest.TestCase):
             self.assertEqual(vm.main(["--docs", str(d / "ei-ole")]), 1)
 
 
+class KeskenSyyTesti(unittest.TestCase):
+    def kesken(self, syy=None, aika="2026-11-03"):
+        rivi = "- KESKEN-syy: %s\n" % syy if syy else ""
+        return "# Tulos: x\n\n- Tila: KESKEN\n%s- Aika: %sT10:00+02:00\n\nraportti\n" % (rivi, aika)
+
+    def test_virhesyyt_ja_vanha_tulos_ovat_luokka_1(self):
+        for syy in ("rivi-puuttuu", "ei-todennettu", "outo-koodi"):
+            self.assertEqual(vm.luokittele_ajo("KESKEN", self.kesken(syy)), "1", syy)
+        self.assertEqual(vm.luokittele_ajo("KESKEN", self.kesken()), "1")   # vanha tulos ilman syykoodia
+
+    def test_odottavat_eivat_ole_virheita(self):
+        for syy in ("odottaa-yhdistamista", "odottaa-kayttoonottoa"):
+            self.assertEqual(vm.luokittele_ajo("KESKEN", self.kesken(syy)), "O")
+
+    def test_laske_erottaa_odottavat_omaan_sarakkeeseen(self):
+        nyt = datetime.date(2026, 11, 5)
+        tulokset = [self.kesken("rivi-puuttuu"), self.kesken("ei-todennettu"), self.kesken(),
+                    self.kesken("odottaa-yhdistamista"), self.kesken("odottaa-kayttoonottoa")]
+        rivit, t = vm.laske("", tulokset, nyt)
+        v45 = dict(rivit)[(2026, 45)]
+        self.assertEqual((v45["yht"], v45["ajot"], v45["odottaa"], v45["luokat"]["1"]), (3, 3, 2, 3))
+        self.assertEqual(t["ajot"], 3)
+        self.assertEqual(t["tulostiedostoa"], 5)
+        osio = "\n".join(vm.muodosta_osio(rivit, t, nyt))
+        self.assertIn("Odottaa (ei virhe)", osio)
+        self.assertIn("| 45 (2.11.\u20138.11.), kesken | 3 | 0 | 3 | 0 | 2 | 3 |", osio)
+
+
+class LokiOtsikkoTesti(unittest.TestCase):
+    LOKI2 = (
+        "# Virheloki\n\n"
+        "## 5.\u20136.11.2026 \u2013 V\u00e4ite oli v\u00e4\u00e4r\u00e4\n- Mit\u00e4: x\n- Vakavuus: vakava\n\n"
+        "## 5.11.2026 klo 14.03 \u2013 V\u00e4\u00e4r\u00e4 palvelu\n- Mit\u00e4: y\n\n"
+        "## 6.11.2026 \u2013 Tiivistevertailu\n- Mit\u00e4: z\n- Vakavuus: tavallinen\n"
+    )
+
+    def test_valin_otsikko_luetaan(self):
+        m = vm.lue_loki(self.LOKI2)
+        self.assertEqual([p.isoformat() for p, _ in m], ["2026-11-05", "2026-11-05", "2026-11-06"])
+        self.assertEqual(vm.osio_paiva("30.10.\u20132.11.2026 \u2013 x").isoformat(), "2026-10-30")
+        self.assertEqual(vm.osio_paiva("5.-6.11.2026: x").isoformat(), "2026-11-05")
+        self.assertIsNone(vm.osio_paiva("31.2.2026: mahdoton"))
+
+    def test_vakavuus_lasketaan_vain_kirjatusta_rivista(self):
+        rivit, _ = vm.laske(self.LOKI2, [], datetime.date(2026, 11, 6))
+        v45 = dict(rivit)[(2026, 45)]
+        self.assertEqual((v45["loki"], v45["vakavia"]), (3, 1))
+        osio = "\n".join(vm.muodosta_osio(rivit, {"loki": 3, "ajot": 0, "tulostiedostoa": 0}, datetime.date(2026, 11, 6)))
+        self.assertIn("Vakavia (lokissa)", osio)
+
+
 class AsciiTesti(unittest.TestCase):
     def test_koodi_on_ascii(self):
         for p in (Path(vm.__file__), Path(__file__)):
