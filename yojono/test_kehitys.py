@@ -48,13 +48,26 @@ class Pohja(unittest.TestCase):
     def agentti_skripti(self, runko, kulu=0.3):
         kirjoita(self.agentti, "#!/bin/sh\n" + runko + f"\necho '{{\"total_cost_usd\": {kulu}, \"result\": \"agentti valmis\"}}'\n", True)
 
+    # Teko-pr_kutsun `avoin`-alikomento (avoimen PR:n tarkistus ennen mallikutsua): KOE_AVOIN=<osoite> -> loytyi (0),
+    # KOE_AVOIN=virhe -> tarkistus epaonnistui (1), muuten ei avointa (3). Kutsut kirjataan erilliseen .avoin-tiedostoon.
+    AVOIN_RUNKO = ("import os, sys\nif sys.argv[1:2] == ['avoin']:\n"
+                   "    open(sys.argv[0] + '.avoin', 'a').write(' '.join(sys.argv[1:]) + '\\n')\n"
+                   "    a = os.environ.get('KOE_AVOIN', '')\n"
+                   "    if a == 'virhe':\n        print('haku epaonnistui (HTTP 403)', file=sys.stderr); sys.exit(1)\n"
+                   "    if a:\n        print(a); sys.exit(0)\n"
+                   "    sys.exit(3)\n")
+
     def pr_kutsu(self, onnistuu=True):
         kirjoita(self.ajuri / "agentti" / "__init__.py", "")
         if onnistuu:
             runko = f"import sys\nopen(sys.argv[0] + '.kutsut', 'a').write(' '.join(sys.argv[1:]) + '\\n')\nprint('{self.pr_kutsu_tulos}')\n"
         else:
             runko = "import sys\nprint('hylatty', file=sys.stderr)\nsys.exit(1)\n"
-        kirjoita(self.ajuri / "agentti" / "pr_kutsu.py", runko)
+        kirjoita(self.ajuri / "agentti" / "pr_kutsu.py", self.AVOIN_RUNKO + runko)
+
+    def avoin_kutsut(self):
+        f = self.ajuri / "agentti" / "pr_kutsu.py.avoin"
+        return f.read_text().splitlines() if f.exists() else []
 
     def aja(self, *args, kuiva=None, **extra):
         env = dict(os.environ, KEHITYS_PERUS=str(self.perus), KEHITYS_TYO=str(self.perus / "tyo"), YOJONO_AJURI=str(self.ajuri), KEHITYS_ENV=str(self.env_tiedosto),
@@ -442,6 +455,87 @@ class Ohitus(Pohja):
         self.agentti_onnistuu()
         self.aja(REPO, "1.00", "testit", kuiva="1")
         self.assertFalse((self.perus / "kehitys-tyhjat.tsv").exists())
+
+
+
+@unittest.skipUnless(sys.platform.startswith("linux"), "kehitys.sh on palvelinskripti: vaatii GNU timeoutin (Linux)")
+class AvoinPr(Pohja):
+    """Tulos 07-40 (7.11.2026): haaran nimessa on paiva, joten joka ajo avasi uuden PR:n saman aiheen avoimen PR:n viereen."""
+    VANHA = "https://github.com/tonyweckstrom1987/koe-repo/pull/18"
+
+    def setUp(self):
+        super().setUp()
+        kirjoita(self.agentti, "#!/bin/sh\necho x >> \"$0.kutsut\"\necho rivi >> README.md\n"
+                 "echo '{\"total_cost_usd\": 0.4, \"is_error\": false, \"subtype\": \"success\", \"result\": \"tehty\"}'\n", True)
+        self.pr_kutsu()
+
+    def agentin_kutsuja(self):
+        f = self.agentti.parent / "claude.kutsut"
+        return len(f.read_text().split()) if f.exists() else 0
+
+    def test_avoin_saman_aiheen_pr_ohittaa_mallikutsun_ja_prn(self):
+        r = self.aja(REPO, "1.00", "readme", KOE_AVOIN=self.VANHA)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.agentin_kutsuja(), 0)
+        self.assertEqual(self.kutsut(), "")
+        self.assertEqual(self.avoin_kutsut(), ["avoin %s readme" % REPO])
+        rap = self.raportti()
+        self.assertIn("jo avoin PR (%s)" % self.VANHA, rap)
+        self.assertIn("- PR: ei avattu", rap)
+        (js,) = list((self.perus / "raportit").glob("*.json"))
+        d = json.loads(js.read_text())
+        self.assertEqual(d["total_cost_usd"], 0)
+        self.assertTrue(d["ohitettu"])
+        self.assertFalse((self.perus / "kehitys-tyhjat.tsv").exists())
+
+    def test_ei_avointa_ajaa_ja_avaa_prn_kuten_ennen(self):
+        r = self.aja(REPO, "1.00", "readme")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.agentin_kutsuja(), 1)
+        self.assertIn("- PR: " + self.pr_kutsu_tulos, self.raportti())
+        self.assertNotIn("- Huom:", self.raportti())
+
+    def test_tarkistuksen_virhe_ei_esta_ajoa_vaan_kirjataan(self):
+        r = self.aja(REPO, "1.00", "readme", KOE_AVOIN="virhe")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.agentin_kutsuja(), 1)
+        rap = self.raportti()
+        self.assertIn("- PR: " + self.pr_kutsu_tulos, rap)
+        self.assertIn("- Huom: avoimen PR:n tarkistus epaonnistui (koodi 1: haku epaonnistui (HTTP 403)", rap)
+
+    def test_puuttuva_pr_kutsu_ei_esta_ajoa(self):
+        (self.ajuri / "agentti" / "pr_kutsu.py").unlink()
+        r = self.aja(REPO, "1.00", "testit")
+        self.assertEqual(self.agentin_kutsuja(), 1, r.stderr)
+        self.assertIn("avoimen PR:n tarkistus epaonnistui", self.raportti("testit"))
+
+    def test_kelvoton_tuloste_ei_ohita(self):
+        for tuloste in ("https://github.com/x/y/pull/1 ; rm -rf /", "http://muu.example/1", "ok"):
+            with self.subTest(tuloste=tuloste):
+                shutil.rmtree(self.perus, ignore_errors=True)
+                n = self.agentin_kutsuja()
+                self.aja(REPO, "1.00", "readme", KOE_AVOIN=tuloste)
+                self.assertEqual(self.agentin_kutsuja(), n + 1)
+                self.assertNotIn("jo avoin PR", self.raportti())
+
+    def test_tunnus_valitetaan_tarkistukseen(self):
+        self.aja(REPO, "1.00", "readme", YOJONO_TUNNUS="teema-a")
+        self.assertEqual(self.avoin_kutsut(), ["avoin %s readme teema-a" % REPO])
+
+    def test_pakota_ja_kuiva_ajo_eivat_tarkista(self):
+        self.aja(REPO, "1.00", "readme", KOE_AVOIN=self.VANHA, YOJONO_PAKOTA="1")
+        self.assertEqual(self.agentin_kutsuja(), 1)
+        self.aja(REPO, "1.00", "readme", kuiva="1", KOE_AVOIN=self.VANHA)
+        self.assertEqual(self.avoin_kutsut(), [])
+
+    def test_head_ohitus_ensin_ilman_verkkokutsua(self):
+        kirjoita(self.agentti, "#!/bin/sh\necho x >> \"$0.kutsut\"\n"
+                 "echo '{\"total_cost_usd\": 0.4, \"is_error\": false, \"subtype\": \"success\", \"result\": \"ei tehtavaa\"}'\n", True)
+        self.aja(REPO, "1.00", "testit")
+        self.assertEqual(len(self.avoin_kutsut()), 1)
+        self.aja(REPO, "1.00", "testit", KOE_AVOIN=self.VANHA)
+        self.assertEqual(len(self.avoin_kutsut()), 1)
+        self.assertIn("ohitettu: repo ei muuttunut", self.raportti("testit"))
 
 
 if __name__ == "__main__":

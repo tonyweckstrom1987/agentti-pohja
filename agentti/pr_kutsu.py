@@ -420,6 +420,66 @@ def olemassa_oleva_pr(repo, haara, botti, tunnus, avaa=urllib.request.urlopen):
     return None
 
 
+AIHE_RE = re.compile(r"^[a-z]{1,30}$")
+TUNNISTE_RE = re.compile(r"^[a-z0-9_-]{0,60}$")
+HAARA_MAX = 63                                             # kehitys.sh: cut -c1-63
+
+
+def avoin_aihe_pr(repo, aihe, tunniste, botti, tunnus, avaa=urllib.request.urlopen, sivuja=3):
+    """Botin avoin yojono-PR samalle aiheelle (ja tunnisteelle) mina tahansa paivana: osoite tai None.
+
+    Miksi (tulos 07-40, 7.11.2026): kehitys.sh:n haaran nimessa on paiva (yo/<aihe>-<pvm>[-tunniste]), joten joka ajo avasi uuden PR:n
+    edellisen, yha avoimen PR:n viereen (esim. llm-stopcheck #18 ja #20, ai-pr-reviewer-action #24 ja #26), ja avoimien PR:ien kasa kasvoi.
+    Vertailu tehdaan tasmalleen samalla nimen muodostuksella kuin kehitys.sh (myos 63 merkin katkaisu), joten eri tunnisteen PR ei esta.
+    Nostaa PrVirhe, jos listaa ei saada luettua (kutsuja paattaa, estaako virhe ajon)."""
+    if not AIHE_RE.match(str(aihe)) or not TUNNISTE_RE.match(str(tunniste)):
+        raise PrVirhe("virheellinen aihe tai tunniste")
+    malli = re.compile(r"^yo/" + re.escape(aihe) + r"-(\d{4}-\d{2}-\d{2})")
+    for sivu in range(1, sivuja + 1):
+        kysely = urllib.parse.urlencode({"state": "open", "per_page": 100, "page": sivu})
+        pyynto = urllib.request.Request(
+            f"https://api.github.com/repos/{OMISTAJA}/{repo}/pulls?{kysely}",
+            headers={"Authorization": "Bearer " + tunnus, "Accept": "application/vnd.github+json", "User-Agent": "yojono-pr-kutsu"})
+        try:
+            with avaa(pyynto, timeout=30) as vastaus:
+                lista = json.loads(vastaus.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            raise PrVirhe("avoimien PR:ien haku epaonnistui (HTTP %s)" % e.code)
+        except (urllib.error.URLError, ValueError, OSError) as e:
+            raise PrVirhe("avoimien PR:ien haku epaonnistui: " + type(e).__name__)
+        if not isinstance(lista, list):
+            raise PrVirhe("avoimien PR:ien vastaus ei ole lista")
+        for pr in lista:
+            head = pr.get("head") if isinstance(pr, dict) else None
+            if not isinstance(head, dict):
+                continue
+            ref = head.get("ref")
+            kayttaja = (head.get("user") or {}).get("login") if isinstance(head.get("user"), dict) else None
+            if not isinstance(ref, str) or not isinstance(kayttaja, str) or kayttaja.lower() != botti.lower():
+                continue
+            m = malli.match(ref)
+            if not m:
+                continue
+            odotettu = ("yo/%s-%s" % (aihe, m.group(1)) + ("-" + tunniste if tunniste else ""))[:HAARA_MAX]
+            osoite = pr.get("html_url")
+            if ref == odotettu and isinstance(osoite, str) and osoite.startswith("https://github.com/"):
+                return osoite
+        if len(lista) < 100:
+            return None
+    return None
+
+
+def avoin(repo, aihe, tunniste="", env=None, avaa=urllib.request.urlopen):
+    """CLI-kaare: tarkistaa repon ja hakee tunnuksen 'pr'-roolilla (sama kuin PR:n avauksessa, vain luku)."""
+    env = os.environ if env is None else env
+    if not sallittu_repo(repo):
+        raise PrVirhe("repo ei ole sallittu: " + str(repo))
+    botti = botti_kayttaja(env)
+    with tempfile.TemporaryDirectory() as tmp:
+        tunnus = lue_tunnus(tunnus_tiedosto(env, repo, "pr", tmp))
+    return avoin_aihe_pr(repo, aihe, tunniste, botti, tunnus, avaa=avaa)
+
+
 def tarkista_todennus(kuvaus):
     """Nostaa PrVirhe, jos kuvauksesta puuttuu rivi 'Todennettu kaytossa: <miten>' tai arvo on tyhja tai '-'."""
     runko = str(kuvaus)[:KUVAUS_MAX]
@@ -483,6 +543,13 @@ def main(argv=None):
             tiedostot = tarkista(argv[1], argv[2], argv[3])
             print("ok: %d tiedostoa" % len(tiedostot))
             return 0
+        if len(argv) in (3, 4) and argv[0] == "avoin":
+            # Paluuarvot: 0 = avoin PR loytyi (osoite tulostetaan), 3 = ei avointa, 1 = tarkistus epaonnistui
+            osoite = avoin(argv[1], argv[2], argv[3] if len(argv) == 4 else "")
+            if osoite:
+                print(osoite)
+                return 0
+            return 3
         if len(argv) == 6 and argv[0] == "pr":
             with open(argv[5], encoding="utf-8") as f:
                 kuvaus = f.read()
@@ -494,7 +561,7 @@ def main(argv=None):
     except OSError as e:
         print("pr_kutsu: tiedostovirhe: %s" % type(e).__name__, file=sys.stderr)
         return 1
-    print("kaytto: pr_kutsu tarkista REPO HAKEMISTO HAARA | pr REPO HAKEMISTO HAARA OTSIKKO KUVAUSTIEDOSTO", file=sys.stderr)
+    print("kaytto: pr_kutsu tarkista REPO HAKEMISTO HAARA | pr REPO HAKEMISTO HAARA OTSIKKO KUVAUSTIEDOSTO | avoin REPO AIHE [TUNNISTE]", file=sys.stderr)
     return 2
 
 

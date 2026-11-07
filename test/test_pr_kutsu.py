@@ -1016,3 +1016,87 @@ class TodennusPortti(unittest.TestCase):
                 pk.luo_pr("agentti-pohja", d, "yo/koe", "o", "Muutos ilman todennusta", env={"YOJONO_PR_TILA": tila}, suorita=suorita)
             suorita.assert_not_called()
             self.assertFalse(os.path.exists(tila))
+
+
+def _pr(ref, kayttaja="agenttifirma-bot", nro=1):
+    return {"html_url": "https://github.com/tonyweckstrom1987/r/pull/%d" % nro, "head": {"ref": ref, "user": {"login": kayttaja}}}
+
+
+class AvoinAihePr(unittest.TestCase):
+    """Tulos 07-40 (7.11.2026): kehitys.sh avasi joka paiva uuden PR:n saman aiheen avoimen PR:n viereen."""
+
+    def hae(self, sivut, aihe="testit", tunniste=""):
+        kutsut = []
+
+        def avaa(pyynto, timeout=None):
+            kutsut.append(pyynto.full_url)
+            return Vastaus(sivut[len(kutsut) - 1])
+        return pk.avoin_aihe_pr("r", aihe, tunniste, "agenttifirma-bot", TUNNUS, avaa=avaa), kutsut
+
+    def test_eilinen_saman_aiheen_pr_loytyy(self):
+        osoite, kutsut = self.hae([[_pr("yo/readme-2026-11-07", nro=20), _pr("yo/testit-2026-11-06", nro=18)]])
+        self.assertEqual(osoite, "https://github.com/tonyweckstrom1987/r/pull/18")
+        self.assertIn("state=open", kutsut[0])
+        self.assertIn("/repos/tonyweckstrom1987/r/pulls", kutsut[0])
+
+    def test_eri_aihe_tai_kasin_tehty_haara_ei_esta(self):
+        osoite, _ = self.hae([[_pr("yo/readme-2026-11-07"), _pr("korjaus/testit-2026-11-06"), _pr("yo/testit-uusi")]])
+        self.assertIsNone(osoite)
+
+    def test_toisen_kayttajan_pr_ei_esta(self):
+        osoite, _ = self.hae([[_pr("yo/testit-2026-11-06", kayttaja="tonyweckstrom1987")]])
+        self.assertIsNone(osoite)
+
+    def test_kayttajan_kirjainkoko_ei_vaikuta(self):
+        osoite, _ = self.hae([[_pr("yo/testit-2026-11-06", kayttaja="AgenttiFirma-Bot")]])
+        self.assertIsNotNone(osoite)
+
+    def test_tunniste_tasmaa_tarkasti(self):
+        sivu = [[_pr("yo/ominaisuus-2026-11-06-teema-a", nro=3)]]
+        self.assertIsNotNone(self.hae(sivu, "ominaisuus", "teema-a")[0])
+        self.assertIsNone(self.hae(sivu, "ominaisuus", "teema-b")[0])
+        self.assertIsNone(self.hae(sivu, "ominaisuus", "")[0])
+        self.assertIsNone(self.hae([[_pr("yo/ominaisuus-2026-11-06")]], "ominaisuus", "teema-a")[0])
+
+    def test_63_merkin_katkaisu_kuten_kehitys_sh(self):
+        tunniste = "t" * 60
+        ref = ("yo/ominaisuus-2026-11-06-" + tunniste)[:63]
+        self.assertIsNotNone(self.hae([[_pr(ref)]], "ominaisuus", tunniste)[0])
+
+    def test_sivutus_jatkuu_taydesta_sivusta_ja_loppuu_vajaaseen(self):
+        taysi = [_pr("korjaus/x-%d" % i, nro=i) for i in range(100)]
+        osoite, kutsut = self.hae([taysi, [_pr("yo/testit-2026-11-01", nro=150)]])
+        self.assertEqual(osoite, "https://github.com/tonyweckstrom1987/r/pull/150")
+        self.assertEqual(len(kutsut), 2)
+        self.assertIsNone(self.hae([[]])[0])
+
+    def test_hakuvirhe_nostaa_prvirheen_eika_ole_none(self):
+        def avaa(pyynto, timeout=None):
+            raise urllib.error.HTTPError(pyynto.full_url, 403, "kiintio", {}, None)
+        with self.assertRaises(pk.PrVirhe) as k:
+            pk.avoin_aihe_pr("r", "testit", "", "agenttifirma-bot", TUNNUS, avaa=avaa)
+        self.assertIn("403", str(k.exception))
+        self.assertNotIn(TUNNUS, str(k.exception))
+        with self.assertRaises(pk.PrVirhe):
+            pk.avoin_aihe_pr("r", "testit", "", "agenttifirma-bot", TUNNUS, avaa=lambda p, timeout=None: Vastaus({"message": "x"}))
+
+    def test_virheellinen_aihe_tai_tunniste_hylataan_ennen_hakua(self):
+        avaa = mock.Mock()
+        for aihe, tunniste in (("Testit", ""), ("tes.it", ""), ("testit", "a b"), ("testit", "../x")):
+            with self.assertRaises(pk.PrVirhe):
+                pk.avoin_aihe_pr("r", aihe, tunniste, "agenttifirma-bot", TUNNUS, avaa=avaa)
+        avaa.assert_not_called()
+
+    def test_cli_paluuarvot(self):
+        with mock.patch.object(pk, "avoin", return_value="https://github.com/tonyweckstrom1987/r/pull/5"), \
+                mock.patch("sys.stdout", new_callable=io.StringIO) as ulos:
+            self.assertEqual(pk.main(["avoin", "r", "testit"]), 0)
+        self.assertEqual(ulos.getvalue().strip(), "https://github.com/tonyweckstrom1987/r/pull/5")
+        with mock.patch.object(pk, "avoin", return_value=None):
+            self.assertEqual(pk.main(["avoin", "r", "testit", "teema"]), 3)
+        with mock.patch.object(pk, "avoin", side_effect=pk.PrVirhe("haku epaonnistui")), mock.patch("sys.stderr", new_callable=io.StringIO):
+            self.assertEqual(pk.main(["avoin", "r", "testit"]), 1)
+
+    def test_kielletty_repo_hylataan(self):
+        with self.assertRaises(pk.PrVirhe):
+            pk.avoin("../x", "testit", env={})

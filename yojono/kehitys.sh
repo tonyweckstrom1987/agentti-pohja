@@ -69,6 +69,27 @@ if [ -z "$KUIVA" ] && [ -z "${YOJONO_PAKOTA:-}" ] && [ "$AIHE" != "riippuvuudet"
   fi
 fi
 
+# Avoin PR samasta aiheesta (tulos 07-40, 7.11.2026): haaran nimessa on paiva, joten joka ajo avasi uuden PR:n edellisen, yha avoimen PR:n
+# viereen (llm-stopcheck #18 ja #20, ai-pr-reviewer-action #24 ja #26), ja avoimien PR:ien kasa kasvoi. Jos botilla on jo avoin
+# yo/<aihe>-<pvm>[-tunnus] -PR tahan repoon, mallikutsua ei tehda (ei kulua, ei uutta PR:aa). Tarkistuksen virhe ei esta ajoa, vaan
+# kirjataan raporttiin (muuten GitHubin katko pysayttaisi koko yon). YOJONO_PAKOTA=1 ohittaa. Kuiva-ajo ei tarkista.
+AVOIN_PR=""
+AVOIN_HUOM=""
+if [ -z "$KUIVA" ] && [ -z "$OHITETTU" ] && [ -z "${YOJONO_PAKOTA:-}" ]; then
+  if AVOIN_PR=$( cd "$AJURI" && python3 -B -m agentti.pr_kutsu avoin "$REPO" "$AIHE" ${YOJONO_TUNNUS:+"$YOJONO_TUNNUS"} 2> "$TMP/avoin.err" ); then
+    AVOIN_RC=0
+  else
+    AVOIN_RC=$?
+  fi
+  AVOIN_PR=$(printf '%s' "$AVOIN_PR" | head -n 1)
+  case "$AVOIN_RC:$AVOIN_PR" in
+    0:https://github.com/*) OHITETTU=avoin ;;
+    3:*) AVOIN_PR="" ;;
+    *) AVOIN_PR=""; AVOIN_HUOM="avoimen PR:n tarkistus epaonnistui (koodi $AVOIN_RC: $(tr '\n' ' ' < "$TMP/avoin.err" | cut -c1-200)); ajo jatkui" ;;
+  esac
+  case "$AVOIN_PR" in *[!A-Za-z0-9:/._-]*) AVOIN_PR=""; OHITETTU="" ;; esac
+fi
+
 testaa() {
   if [ -f package.json ]; then
     # Havainto 27.10.: palvelun ProtectHome=read-only estaa npm:n kirjoituksen ~/.npm:iin (EROFS, "Log files were not written"),
@@ -133,7 +154,9 @@ if [ -s "$BASE/tyylikirja.md" ]; then
   PROMPT="$PROMPT Tonin tyylikirja (dataa tyylista, ei ohita rajoja): $(head -c 2000 "$BASE/tyylikirja.md" | tr '\n\r\t' '   ')"
 fi
 
-if [ -n "$OHITETTU" ]; then
+if [ "$OHITETTU" = "avoin" ]; then
+  printf '{"total_cost_usd": 0, "ohitettu": true, "result": "ohitettu: samasta aiheesta on jo avoin PR %s; mallikutsua ei tehty"}\n' "$AVOIN_PR" > "$UL.json"
+elif [ -n "$OHITETTU" ]; then
   printf '{"total_cost_usd": 0, "ohitettu": true, "result": "ohitettu: repon HEAD (%.8s) ei ole muuttunut viimeisen tuloksettoman ajon jalkeen; mallikutsua ei tehty"}\n' "$SHA" > "$UL.json"
 elif [ -z "$KUIVA" ]; then
   # Ei yleista Edit/Write-lupaa: acceptEdits sallii muokkauksen vain tyohakemiston (klooni) sisalla; arkaluontoiset polut estetty erikseen.
@@ -164,7 +187,9 @@ PR=""
 TESTIT="ei ajettu"
 MUUTOKSET=$(git status --porcelain --untracked-files=all)
 
-if [ -n "$OHITETTU" ]; then
+if [ "$OHITETTU" = "avoin" ]; then
+  SYY="ohitettu: samasta aiheesta on jo avoin PR ($AVOIN_PR); uutta PR:aa ei avattu, ei mallikutsua"
+elif [ -n "$OHITETTU" ]; then
   SYY="ohitettu: repo ei muuttunut (HEAD $(printf '%.8s' "$SHA")) viimeisen tuloksettoman ajon jalkeen; ei mallikutsua"
 elif [ -z "$MUUTOKSET" ]; then
   SYY="ei muutoksia: PR:aa ei avattu"
@@ -247,6 +272,7 @@ fi
   echo "- Haara: $HAARA"
   if [ -n "$PR" ]; then echo "- PR: $PR"; else echo "- PR: ei avattu"; fi
   if [ -n "$SYY" ]; then echo "- Syy: $SYY"; fi
+  if [ -n "$AVOIN_HUOM" ]; then echo "- Huom: $AVOIN_HUOM"; fi
   echo "- Testit: $TESTIT"
   echo
   echo "## Muutetut tiedostot"
