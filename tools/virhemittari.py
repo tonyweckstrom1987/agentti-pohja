@@ -20,6 +20,12 @@ import re
 import sys
 from pathlib import Path
 
+try:
+    from claudejono import virheopit
+except ImportError:   # `python3 tools/virhemittari.py`: polun alussa on tools/, ei repon juuri
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from claudejono import virheopit
+
 OTSIKKO_ALKU = "## Virhemittari"
 LUOKAT = ("1", "2", "3", "4", "?")
 LUOKKA_OTSIKOT = {
@@ -76,8 +82,11 @@ def viikko(paiva):
     return (iso[0], iso[1])
 
 
+KENTTA_JUURISYY_RE = re.compile(r"Juurisyy:\s*([1-4])\b", re.IGNORECASE)   # uuden muodon merkinta (claudejono/virheopit.py)
+
+
 def luokittele_loki(teksti):
-    m = TUNNISTE_RE.search(teksti)
+    m = KENTTA_JUURISYY_RE.search(teksti) or TUNNISTE_RE.search(teksti)
     if m:
         return m.group(1)
     for osa, luokka in LOKI_SAANNOT:
@@ -195,9 +204,18 @@ def viikko_nimi(v, nyt):
     return nimi
 
 
-def muodosta_osio(rivit, tilastot, nyt):
+def oppimittari(oppi, v):
+    """Viikon solu: 'toisto/uusia' = montako viikon uudesta virhelokimerkinnasta oli jo lokissa. 'ei kirjattu', jos viikolla ei
+    ole uuden muodon merkintoja (vanhoista ei tiedeta, joten ei arvata)."""
+    r = (oppi or {}).get(v)
+    return "ei kirjattu" if not r else "%d/%d" % (r["toisto"], r["yht"])
+
+
+def muodosta_osio(rivit, tilastot, nyt, oppi=None):
+    """oppi = virheopit.toistotilasto(...): oppimittari (virheet, jotka oli jo lokissa, ja miksi ehkaisy ei toiminut)."""
     ot = ["Viikko", "Virheit\u00e4", "Virhelokissa", "Ajoissa (EP\u00c4ONNISTUI/KESKEN)"]
     ot += [LUOKKA_OTSIKOT[k] for k in LUOKAT]
+    ot.append("Oli jo lokissa (toisto/uusia)")
     ot.append("Toistuiko sama juurisyy")
     out = ["Luvut tuottaa `tools/virhemittari.py` (ajo sunnuntaisin ennen viikkokatsausta). Viikko = ISO-viikko; "
            "tulokset viikotetaan tulostiedoston ajan mukaan.", "",
@@ -205,8 +223,12 @@ def muodosta_osio(rivit, tilastot, nyt):
     for v, r in rivit:
         solut = [viikko_nimi(v, nyt), str(r["yht"]), str(r["loki"]), str(r["ajot"])]
         solut += [str(r["luokat"][k]) for k in LUOKAT]
+        solut.append(oppimittari(oppi, v))
         solut.append(r["toisto"])
         out.append("| " + " | ".join(solut) + " |")
+    syyt = ["- %s (vk %d): %s" % (pvm, v[1], syy) for v, r in sorted((oppi or {}).items()) for pvm, syy in r["syyt"]]
+    out += ["", "Miksi ehk\u00e4isy ei toiminut (virhelokin `Toisto: kyll\u00e4` -merkinn\u00e4t, oppimittari):"]
+    out += syyt or ["- Ei toistoja kirjattu uuden muodon merkinn\u00f6iss\u00e4 (muoto: `claudejono/virheopit.py`, voimassa %s alkaen)." % virheopit.ALKAEN]
     out += ["",
             "Luokitus: virhelokin merkinn\u00e4t `virheiden-ehkaisy.md`:n kolmen juurisyyn mukaan; jos luokkaa ei n\u00e4e, "
             "merkint\u00e4 on luokittelematon (ei arvata). Ajoista KESKEN (ei kelvollista \"Todennettu k\u00e4yt\u00f6ss\u00e4\" -rivi\u00e4) on luokka 1 "
@@ -242,7 +264,7 @@ def main(argv=None):
         loki = (d / "virheloki.md").read_text(encoding="utf-8")
         tulokset = [p.read_text(encoding="utf-8", errors="replace") for p in sorted((d / "tulokset").glob("*.md"))]
         rivit, tilastot = laske(loki, tulokset, nyt)
-        osio = muodosta_osio(rivit, tilastot, nyt)
+        osio = muodosta_osio(rivit, tilastot, nyt, virheopit.toistotilasto(virheopit.jasenna(loki)))
         if a.kirjoita or a.ulos:
             uusi = korvaa_osio((d / "tulostaulu.md").read_text(encoding="utf-8"), osio)
             kohde = Path(a.ulos) if a.ulos else d / "tulostaulu.md"
