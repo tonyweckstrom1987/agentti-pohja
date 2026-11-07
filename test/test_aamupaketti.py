@@ -58,6 +58,30 @@ class KerausTesti(unittest.TestCase):
             raise OSError("verkko")
         self.assertEqual(ap.keraa(hae), {"tony": [], "automerge": [], "muut": []})
 
+    def test_vajaus_kirjaa_hakuvirheet_repoittain(self):
+        def hae(url):
+            if "/agentti-pohja/" in url:
+                raise OSError("kiintio")
+            return []
+        vajaus = {}
+        self.assertEqual(ap.keraa(hae, vajaus), {"tony": [], "automerge": [], "muut": []})
+        self.assertEqual(vajaus["virheet"], [("agentti-pohja", "OSError")])
+        self.assertEqual(vajaus["katkaistut"], [])
+
+    def test_vajaus_kirjaa_katkaistun_listan(self):
+        n = ap.MAX_PR_REPOA_KOHDEN
+        hae = feikki({"agentti-pohja": [pr(i, draft=True) for i in range(1, n + 1)], "mcp-doctor": [pr(99, draft=True)]}, {})
+        vajaus = {}
+        r = ap.keraa(hae, vajaus)
+        self.assertEqual(len(r["muut"]), n + (1 if "mcp-doctor" in ap.REPOT else 0))
+        self.assertEqual(vajaus["katkaistut"], ["agentti-pohja"])
+        self.assertEqual(vajaus["virheet"], [])
+
+    def test_alle_rajan_ei_katkaistu(self):
+        vajaus = {}
+        ap.keraa(feikki({"agentti-pohja": [pr(1, draft=True)]}, {}), vajaus)
+        self.assertEqual(vajaus, {"virheet": [], "katkaistut": []})
+
     def test_tiedostojen_hakuvirhe_menee_muihin(self):
         def hae(url):
             if "/pulls?state=open" in url:
@@ -154,6 +178,29 @@ class MuotoiluJaMainTesti(unittest.TestCase):
 
     def test_tyhja(self):
         self.assertIn("Ei avoimia PR:ita.", ap.muotoile({"tony": [], "automerge": [], "muut": []}))
+
+    def test_hakuvirhe_ei_nayta_tyhjalta_onnistumiselta(self):
+        teksti = ap.muotoile({"tony": [], "automerge": [], "muut": []}, {"virheet": [("agentti-pohja", "HTTPError")], "katkaistut": []})
+        self.assertNotIn("Ei avoimia PR:ita.", teksti)
+        self.assertIn("PR-lista vajaa: haku epaonnistui: agentti-pohja (HTTPError)", teksti)
+
+    def test_katkaisu_nakyy_otsikon_alla(self):
+        teksti = ap.muotoile({"tony": [], "automerge": [], "muut": []}, {"virheet": [], "katkaistut": ["agentti-pohja"]})
+        self.assertEqual(teksti.splitlines()[1], "PR-lista vajaa: vain %d uusinta PR:aa: agentti-pohja" % ap.MAX_PR_REPOA_KOHDEN)
+
+    def test_ilman_vajausta_muoto_ennallaan(self):
+        r = {"tony": [], "automerge": [], "muut": []}
+        self.assertEqual(ap.muotoile(r), ap.muotoile(r, {"virheet": [], "katkaistut": []}))
+
+    def test_main_kertoo_hakuvirheen(self):
+        def rikki(url):
+            raise OSError("verkko")
+        ulos = io.StringIO()
+        with contextlib.redirect_stdout(ulos), contextlib.redirect_stderr(io.StringIO()):
+            rc = ap.main([], hae=rikki, env={}, suorita=lambda *a: "")
+        self.assertEqual(rc, 0)
+        self.assertIn("PR-lista vajaa: haku epaonnistui: agentti-pohja (OSError)", ulos.getvalue())
+        self.assertNotIn("Ei avoimia PR:ita.", ulos.getvalue())
 
     def ajaa(self, argv, env=None, laheta=True):
         ulos, virhe = io.StringIO(), io.StringIO()

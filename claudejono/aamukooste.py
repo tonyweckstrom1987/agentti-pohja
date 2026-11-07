@@ -151,8 +151,9 @@ def keraa(repo, perus, nyt, hae=None, yksikot=None):
             virheet.append(type(virhe).__name__)
             raise
 
+    pr_vajaus = {}
     try:
-        pr_ryhmat = aamupaketti.keraa(laskeva_hae)
+        pr_ryhmat = aamupaketti.keraa(laskeva_hae, pr_vajaus)
     except Exception as virhe:   # GitHub-haku ei saa kaataa koostetta
         print(f"aamukooste: PR-haku epaonnistui ({type(virhe).__name__})", file=sys.stderr)
         pr_ryhmat = None
@@ -173,7 +174,7 @@ def keraa(repo, perus, nyt, hae=None, yksikot=None):
     except Exception:
         tarkastaja_virheet = []
     return {"nyt": nyt, "tarkastaja_virheet": tarkastaja_virheet, "kaistat": kaistat, "kulutus": kulutus_teksti, "varaus": varaus_rivi, "varaus_kysymys": varaus_kysymys, "tulokset": tulokset, "uudet_prt": prt, "opit": opit, "tonylle": tonylle_uudet(repo, alku),
-            "pr": pr_ryhmat, "pr_virheita": virheet, "yojono": yojono_tila(perus, nyt),
+            "pr": pr_ryhmat, "pr_virheita": virheet, "pr_katkaistut": pr_vajaus.get("katkaistut", []), "yojono": yojono_tila(perus, nyt),
             "yksikot": (yksikot or rikkinaiset_yksikot)(), "vaiteportti": vaiteportti.puutteet(repo)}
 
 
@@ -206,6 +207,9 @@ def rivit(t):
         tarvitaan_osat.append(f"{n} PR:\u00e4\u00e4 mergattavaksi" if n else "ei mergattavia PR:j\u00e4")
         if t.get("pr_virheita"):
             tarvitaan_osat.append(f"PR-lista voi olla vajaa ({len(t['pr_virheita'])} hakuvirhett\u00e4, esim. {t['pr_virheita'][0]})")
+        if t.get("pr_katkaistut"):   # keraa lukee vain MAX_PR_REPOA_KOHDEN uusinta: vanhemmat mergattavat eivat ole luvussa
+            from agentti import aamupaketti
+            tarvitaan_osat.append(f"luku vain {aamupaketti.MAX_PR_REPOA_KOHDEN} uusimmasta PR:st\u00e4 ({', '.join(t['pr_katkaistut'])})")
         if t["pr"].get("automerge"):
             tarvitaan_osat.append(f"{len(t['pr']['automerge'])} hoituu automergell\u00e4")
     if t["tonylle"]:

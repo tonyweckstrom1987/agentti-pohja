@@ -99,15 +99,24 @@ def _ci(hae, repo, sha):
     return "punainen" if huonot else "vihrea"
 
 
-def keraa(hae=None):
-    """Palauttaa {'tony': [...], 'automerge': [...], 'muut': [...]}, kukin rivi dict (repo, numero, otsikko, url, ci, syy)."""
+def keraa(hae=None, vajaus=None):
+    """Palauttaa {'tony': [...], 'automerge': [...], 'muut': [...]}, kukin rivi dict (repo, numero, otsikko, url, ci, syy).
+    vajaus (valinnainen dict) kertoo, miksi lista voi olla vajaa: 'virheet' = [(repo, virhetyyppi)] epaonnistuneista
+    PR-listan hauista ja 'katkaistut' = [repo], joissa avoimia PR:ia oli vahintaan MAX_PR_REPOA_KOHDEN (vanhimmat puuttuvat)."""
     hae = hae or _oletushaku
+    if vajaus is not None:
+        vajaus.setdefault("virheet", [])
+        vajaus.setdefault("katkaistut", [])
     ryhmat = {"tony": [], "automerge": [], "muut": []}
     for repo in REPOT:
         try:
             prt = hae("https://api.github.com/repos/%s/%s/pulls?state=open&per_page=%d" % (OMISTAJA, repo, MAX_PR_REPOA_KOHDEN))
-        except Exception:
+        except Exception as virhe:
+            if vajaus is not None:
+                vajaus["virheet"].append((repo, type(virhe).__name__))
             continue
+        if vajaus is not None and len(prt) >= MAX_PR_REPOA_KOHDEN:
+            vajaus["katkaistut"].append(repo)
         for p in prt[:MAX_PR_REPOA_KOHDEN]:
             nro = p.get("number")
             rivi = {"repo": repo, "numero": nro, "otsikko": " ".join(str(p.get("title", "")).split())[:OTSIKKO_MAX],
@@ -151,14 +160,29 @@ def _rivi(r):
     return "- %s #%s %s%s\n  %s" % (r["repo"], r["numero"], r["otsikko"], lisa, r["url"])
 
 
-def muotoile(ryhmat):
+def vajausrivi(vajaus):
+    """Yksi rivi siita, miksi PR-lista on vajaa, tai '' jos ei ole syyta epailla vajausta."""
+    osat = []
+    virheet = (vajaus or {}).get("virheet") or []
+    katkaistut = (vajaus or {}).get("katkaistut") or []
+    if virheet:
+        osat.append("haku epaonnistui: " + ", ".join("%s (%s)" % v for v in virheet))
+    if katkaistut:
+        osat.append("vain %d uusinta PR:aa: %s" % (MAX_PR_REPOA_KOHDEN, ", ".join(katkaistut)))
+    return ("PR-lista vajaa: " + "; ".join(osat)) if osat else ""
+
+
+def muotoile(ryhmat, vajaus=None):
     osat = ["Aamupaketti: avoimet PR:t"]
+    rivi = vajausrivi(vajaus)
+    if rivi:
+        osat.append(rivi)
     for avain, otsikko in (("tony", "Sinun mergattavat (suojatut polut)"), ("automerge", "Automerge hoitaa (CI vihrea)"), ("muut", "Muut (luonnos, CI kesken tai punainen)")):
         rivit = ryhmat.get(avain) or []
         osat.append("\n%s: %d" % (otsikko, len(rivit)))
         osat.extend(_rivi(r) for r in rivit)
     if not any(ryhmat.values()):
-        osat.append("\nEi avoimia PR:ita.")
+        osat.append("\nEi PR:ia nakyvissa (hakuvirheita, ks. ylla)." if (vajaus or {}).get("virheet") else "\nEi avoimia PR:ita.")
     return "\n".join(osat)
 
 
@@ -205,7 +229,8 @@ def main(argv=None, hae=None, env=None, suorita=None):
     if any(x not in ("--laheta",) for x in a):
         print("kaytto: python3 -m agentti.aamupaketti [--laheta]", file=sys.stderr)
         return 2
-    teksti = muotoile(keraa(hae))
+    vajaus = {}
+    teksti = muotoile(keraa(hae, vajaus), vajaus)
     osio = muotoile_failed(failed_yksikot(suorita))
     if osio:
         teksti += "\n\n" + osio

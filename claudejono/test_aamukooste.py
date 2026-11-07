@@ -102,6 +102,24 @@ class Kooste(Pohja):
         self.assertIn("vajaa", rivit[1])
         self.assertIn("OSError", rivit[1])
 
+    def test_katkaistu_pr_lista_kerrotaan(self):
+        """keraa lukee vain MAX_PR_REPOA_KOHDEN uusinta PR:aa: mergattavien luku ei saa nayttaa koko totuudelta."""
+        from agentti import aamupaketti
+        def paljon(url):
+            if "/pulls?state=open" in url and "/agentti-pohja/" in url:
+                return [{"number": 100 + i, "title": "t", "head": {"sha": "abc"}, "draft": True} for i in range(aamupaketti.MAX_PR_REPOA_KOHDEN)]
+            return self.hae(url)
+        t = self.keraa(hae=paljon)
+        self.assertEqual(t["pr_katkaistut"], ["agentti-pohja"])
+        rivi = aamukooste.rivit(t)[1]
+        self.assertIn("luku vain %d uusimmasta" % aamupaketti.MAX_PR_REPOA_KOHDEN, rivi)
+        self.assertIn("agentti-pohja", rivi)
+
+    def test_ei_katkaisua_ei_rivia(self):
+        t = self.keraa()
+        self.assertEqual(t["pr_katkaistut"], [])
+        self.assertNotIn("uusimmasta", aamukooste.rivit(t)[1])
+
     def test_puuttuva_yojono_ja_systemd_ei_kaada(self):
         t = aamukooste.keraa(self.repo, self.tmp / "ei-ole", NYT, self.hae, lambda: None)
         rivit = aamukooste.rivit(t)
