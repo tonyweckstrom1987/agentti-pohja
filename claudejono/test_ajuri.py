@@ -1,3 +1,5 @@
+import contextlib
+import io
 import os
 import json
 import subprocess
@@ -78,6 +80,35 @@ class KelvotonNimi(Pohja):
     def test_ilman_lahettajaa_ei_mitaan(self):
         self.lisaa_tehtava("2026-11-07-33-KIIRE-poista.md")
         self.assertEqual(ajuri.varoita_kelvottomista(self.repo, self.tmp, None), [])
+        self.assertFalse((self.tmp / ajuri.NIMIVAROITUKSET).exists())
+
+    def test_lahetysvirhe_ei_kaada_eika_kirjaa_tilaa(self):
+        self.lisaa_tehtava("2026-11-07-33-KIIRE-poista.md")
+
+        def rikki(_):
+            raise OSError("verkko alhaalla")
+        self.assertEqual(ajuri.varoita_kelvottomista(self.repo, self.tmp, rikki), [])
+        self.assertEqual(ajuri.varoita_kelvottomista(self.repo, self.tmp, lambda _: False), [])
+        self.assertFalse((self.tmp / ajuri.NIMIVAROITUKSET).exists())
+        viestit = []
+        self.assertEqual(len(ajuri.varoita_kelvottomista(self.repo, self.tmp, viestit.append)), 1)
+
+    def test_aja_ajaa_kelvollisen_vaikka_lahetys_kaatuu(self):
+        self.lisaa_tehtava("2026-11-07-33-KIIRE-poista.md")
+        self.lisaa_tehtava("2026-11-07-34-ok.md")
+
+        def f(kom, **kw):
+            return subprocess.CompletedProcess(kom, 0, json.dumps({"subtype": "success", "result": "r\nTodennettu kaytossa: testi"}), "")
+
+        muut = []
+
+        def rikki(teksti):   # vain nimivaroitus kaatuu; muut viestit kulkevat (testataan, ettei varoitus esta ajoa)
+            if "OHITTAA" in teksti:
+                raise RuntimeError("telegram alhaalla")
+            muut.append(teksti)
+        with contextlib.redirect_stderr(io.StringIO()):
+            viesti = ajuri.aja(self.repo, self.tmp, env={}, suorita=f, laheta=rikki)
+        self.assertIn("2026-11-07-34-ok.md VALMIS", viesti)
         self.assertFalse((self.tmp / ajuri.NIMIVAROITUKSET).exists())
 
     def test_aja_varoittaa_ja_ajaa_kelvollisen(self):

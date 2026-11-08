@@ -322,9 +322,16 @@ def varoita_kelvottomista(repo, tila, laheta):
     uudet = [n for n in nimet if n not in vanhat]
     if not uudet:
         return []
-    laheta("claude-jono OHITTAA tehtavan, nimi ei kelpaa: " + ", ".join(uudet[:5])
-           + ("" if len(uudet) <= 5 else f" (+{len(uudet) - 5})")
-           + "\nSallittu muoto: VVVV-KK-PP-NN-pienet-kirjaimet-numerot-viivat.md. Nimea tiedosto uudelleen.")
+    teksti = ("claude-jono OHITTAA tehtavan, nimi ei kelpaa: " + ", ".join(uudet[:5])
+              + ("" if len(uudet) <= 5 else f" (+{len(uudet) - 5})")
+              + "\nSallittu muoto: VVVV-KK-PP-NN-pienet-kirjaimet-numerot-viivat.md. Nimea tiedosto uudelleen.")
+    try:
+        lahti = laheta(teksti)
+    except Exception as virhe:  # ilmoituskanavan vika ei saa estaa kelvollisten tehtavien ajoa (tarkastus #265)
+        print(f"varoita_kelvottomista: lahetys epaonnistui ({type(virhe).__name__})", file=sys.stderr)
+        return []
+    if lahti is False:   # laheta_telegram palauttaa False epaonnistuessaan: tilaa ei kirjata, joten varoitus yritetaan uudelleen
+        return []
     try:
         polku.write_text(json.dumps(sorted(vanhat | set(nimet))))
     except OSError:
