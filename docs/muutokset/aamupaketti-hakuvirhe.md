@@ -1,0 +1,1 @@
+- Aamupaketti: hakuvirhe näkyy rivinä "tieto puuttuu" eikä hiljaisena nollana (PR-lista, CI ja tiedostohaku; vain virheen tyyppi ja HTTP-tila).

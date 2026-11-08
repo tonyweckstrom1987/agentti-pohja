@@ -16,6 +16,7 @@ import os
 import posixpath
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tarfile
@@ -26,7 +27,7 @@ from datetime import datetime
 from pathlib import Path
 
 from claudejono import silmukka
-from . import kulutus, litellm_ajo, varaus
+from . import aivo_arvio, kulutus, litellm_ajo, tavoite, varaus
 from . import malli as mallit
 
 TEHTAVA_RE = re.compile(r"^\d{4}-\d{2}-\d{2}-\d{2}-[a-z0-9-]{1,60}\.md$")
@@ -36,6 +37,14 @@ TULOS_MAX_TAVUA = 60000
 # kymmenia kertoja. Tauko: tyhjan kierroksen jalkeen uutta suunnittelua ei ajeta ennen kuin tauko on kulunut tai uusi tulos on tullut.
 SUUNNITTELU_TAUKO_S = 3 * 3600
 SUUNNITTELU_TILA = "suunnittelu-tila.json"
+# Hylatty PR jai 4.11. makaamaan, koska mikaan ei vienyt hylkaysta jonoon: suunnittelu saa ne tarkastajan lokista.
+TARKASTUSLOKI = "tarkastukset.jsonl"
+TARKASTUSLOKI_MAX_TAVUA = 512 * 1024
+TARKASTAJAN_PAATOKSET = {"HYVAKSYTTY", "HYLATTY", "RAJATTU", "EN_TIEDA"}
+HYLATYT_IKA_PV = 7
+HYLATYT_MAX = 10
+REPO_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}\Z")
+SHA_LYHYT_RE = re.compile(r"^[0-9a-f]{7,40}\Z")
 OLETUS_AIKARAJA_S = 45 * 60
 OLETUS_MAX_KIERROKSET = 60
 # Tonyn paatos 4.11.2026: Opus-tehtaville pidempi raja ja enemman kierroksia (suunnittelija pilkkoo yli 2 h tyot).
@@ -247,7 +256,8 @@ def avoimet_tehtavat(repo, tila, nyt=None, vanhenee_s=OLETUS_AIKARAJA_S + VARAUS
         return 0
     varatut = set(aktiiviset_varaukset(tila, nyt, vanhenee_s))
     return sum(1 for p in teht.iterdir()
-               if p.is_file() and kelvollinen_nimi(p.name) and not (tul / p.name).exists() and p.name not in varatut)
+               if p.is_file() and kelvollinen_nimi(p.name) and not (tul / p.name).exists() and p.name not in varatut
+               and tavoite.luokittele(p)[0] is not None)   # ilman Tavoite-riviae hylatty tehtava ei tayta jonoa
 
 
 def suunnittelu_tarpeen(repo, tila, env, nyt=None, vanhenee_s=OLETUS_AIKARAJA_S + VARAUS_MARGINAALI_S):
@@ -344,11 +354,11 @@ def varaa_seuraava(repo, tila, kaista, nyt=None, vanhenee_s=OLETUS_AIKARAJA_S + 
     kosketa eika toisen kaistan varaamiin. Varaa valitun. None jos ei ole.
     ohita(polku) -> True ohittaa tehtavan (esim. Claude-reitti, kun Tonyn varaus tai kayttoraja estaa sen)."""
     odottavat = [(p, tehtavan_kaista(p, kaistoja)) for p in odottavat_tehtavat(repo)]
-    for omat in (True, False):
-        for p, k in odottavat:
-            if ((k == kaista) if omat else (k is None)) and not (ohita and ohita(p)):
-                if varaa(tila, p.name, kaista, nyt, vanhenee_s):
-                    return p
+    # Tavoitesidonta (A840): ilman Tavoite-rivia ei aloiteta (kirjaus), ja kaistan tavoiteosuus ratkaisee jarjestyksen (tavoite.py).
+    jarjestys = tavoite.valitse(odottavat, kaista, kaistoja, ohitettu=lambda p, peruste: tavoite.kirjaa_hylkays(tila, p.name, peruste))
+    for p in jarjestys:
+        if not (ohita and ohita(p)) and varaa(tila, p.name, kaista, nyt, vanhenee_s):
+            return p
     return None
 
 
@@ -783,6 +793,64 @@ def suodata_uudet(repo, ehdotukset, portti=None):
     return ok, hylatyt
 
 
+def hylatyt_prt(tila_hak, nyt=None, ika_pv=HYLATYT_IKA_PV):
+    """Riippumattoman tarkastajan hylkaamat PR:t lokista (tarkastukset.jsonl): repo#nro, jonka uusin paatos on HYLATTY.
+    Vain tarkistetut kentat (repo, nro, sha) paatyvat kehotteeseen: lokin tekstia ei viedan mallille.
+    Ajuri on root, eika tiedostoon luoteta: luetaan rajattu loppu, ei seurata linkkeja eika jaada FIFOon jumiin."""
+    nyt = nyt or datetime.now().astimezone()
+    polku = Path(tila_hak) / TARKASTUSLOKI
+    try:
+        fd = os.open(polku, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError:
+        return []
+    try:
+        tieto = os.fstat(fd)
+        if not stat.S_ISREG(tieto.st_mode):
+            return []
+        os.lseek(fd, max(0, tieto.st_size - TARKASTUSLOKI_MAX_TAVUA), os.SEEK_SET)
+        data = os.read(fd, TARKASTUSLOKI_MAX_TAVUA)
+    except OSError:
+        return []
+    finally:
+        os.close(fd)
+    uusin = {}
+    ohitetut = {}                                                      # virheen tyyppi -> rivien maara (vain tyyppi, ei viestia)
+    for rivi in data.decode("utf-8", "replace").splitlines():
+        try:
+            d = json.loads(rivi)
+            aika = datetime.fromisoformat(d["aika"])
+            repo, nro, tulos = d["repo"], d["pr"], d["tulos"]
+            if tulos not in TARKASTAJAN_PAATOKSET:                     # lista/olio ei ole hajautettava: TypeError, kirjataan
+                continue                                               # esim. ohitus tai virhe ei ole paatos
+        except (ValueError, KeyError, TypeError, RecursionError) as virhe:
+            # Syvasti sisakkainen rivi nostaa RecursionErrorin: yksi huono rivi ei saa kaataa suunnittelua.
+            ohitetut[type(virhe).__name__] = ohitetut.get(type(virhe).__name__, 0) + 1
+            continue
+        if not isinstance(nro, int) or not isinstance(repo, str) or not REPO_RE.match(repo):
+            continue
+        sha = d.get("sha")
+        uusin[(repo, nro)] = (tulos, sha if isinstance(sha, str) and SHA_LYHYT_RE.match(sha) else None, aika)
+    for tyyppi, maara in sorted(ohitetut.items()):
+        if tyyppi in ("TypeError", "RecursionError"):                  # muut (ValueError, KeyError) ovat tavallisia huonoja riveja
+            print(f"claude-jono: tarkastusloki: {maara} rivia ohitettu ({tyyppi})", file=sys.stderr)
+    ulos = []
+    for (repo, nro), (tulos, sha, aika) in sorted(uusin.items()):
+        try:
+            tuore = (nyt - aika).total_seconds() <= ika_pv * 86400
+        except TypeError:                                              # aika ilman aikavyohyketta
+            continue
+        if tulos == "HYLATTY" and sha and tuore:
+            ulos.append({"repo": repo, "pr": nro, "sha": sha})
+    return ulos[:HYLATYT_MAX]
+
+
+def hylatyt_kehote(hylatyt):
+    if not hylatyt:
+        return ""
+    rivit = "".join(f"- {h['repo']}#{h['pr']} commit {h['sha']} (ehdotettava nimi pr-{h['pr']}-{h['sha'][:7]})\n" for h in hylatyt)
+    return "\n\nRIIPPUMATTOMAN TARKASTAJAN HYLKAAMAT PR:T (ajurin lokista, katso ohje edelta):\n" + rivit
+
+
 def suunnittele(repo, tyohak, env, suorita, laheta=None, nyt=None, kaista=1):
     """Jono tyhja: Claude ehdottaa jatkotehtavat. Ajuri nimeaa, rajaa (AUTO_MAX_PAIVA, AUTO_PER_AJO) ja committaa ne."""
     nyt = nyt or datetime.now().astimezone()
@@ -796,6 +864,7 @@ def suunnittele(repo, tyohak, env, suorita, laheta=None, nyt=None, kaista=1):
     if suunnittelu_tauolla(tyohak, repo, nyt, int(env.get("CLAUDEJONO_SUUNNITTELU_TAUKO_S", SUUNNITTELU_TAUKO_S))):
         return "jono tyhja (suunnittelu tauolla: edellinen kierros ei tuottanut tehtavia eika uusia tuloksia ole)"
     kehote = (KEHOTE.read_text(encoding="utf-8") + "\n\n" + SUUNNITTELU.read_text(encoding="utf-8")
+              + hylatyt_kehote(hylatyt_prt(Path(repo).parent, nyt))
               + f"\n\nEhdota enintaan {tilaa} tehtavaa.\n")
     luo_kaistan_tyohak(tyohak, kaista, env)
     sm = mallit.suunnittelun_malli()   # suunnittelu = Opus (mallien tyonjako 3.11.2026)
@@ -825,6 +894,8 @@ def suunnittele(repo, tyohak, env, suorita, laheta=None, nyt=None, kaista=1):
         hyvaksytyt, sunnuntai, _hylatyt_portti = silmukka.suodata(suunn["tehtavat"])
         if sunnuntai:
             suunn["tonylle"] = (suunn["tonylle"].strip() + "\n" + silmukka.sunnuntairivit(sunnuntai)).strip()
+        # Tavoitesidonta (A840): itse keksitty tehtava ilman sallittua Tavoite-rivia ei paase jonoon.
+        hyvaksytyt = [t for t in hyvaksytyt if tavoite.tavoite_tekstista(t.get("sisalto", ""))]
         uudet, _hylatyt = suodata_uudet(repo, hyvaksytyt, PORTTI)
         for t in uudet[:tilaa]:
             p = Path(repo) / JONO / "tehtavat" / f"{pvm}-{nro:02d}-auto-{t['nimi']}.md"
@@ -890,8 +961,9 @@ def _ilmoita_varaus(tila, env, laheta, nyt):
         pass
 
 
-def aja(repo, tyohak, env=None, suorita=subprocess.run, laheta=None, kaista=1, litellm=None):
-    """litellm = testattava korvike litellm_ajo.aja:lle (alias, teksti, env) -> (ok, teksti, luvut)."""
+def aja(repo, tyohak, env=None, suorita=subprocess.run, laheta=None, kaista=1, litellm=None, aivo_arvioija=None):
+    """litellm = testattava korvike litellm_ajo.aja:lle (alias, teksti, env) -> (ok, teksti, luvut).
+    aivo_arvioija = Aivon tyokalutila varjotilassa (teksti -> (kylla, syy)); None = ei arviota. Arvio ei koskaan esta ajoa (A841)."""
     env = dict(os.environ if env is None else env)
     kaista = tarkista_kaista(kaista, env) if kaista != 1 else 1
     tila = Path(repo).parent
@@ -932,6 +1004,8 @@ def aja(repo, tyohak, env=None, suorita=subprocess.run, laheta=None, kaista=1, l
             suunnittelu = varaa(tila, SUUNNITTELU_VARAUS, kaista, vanhenee_s=vanhenee)
             if not suunnittelu:
                 return "jono tyhja (toinen kaista suunnittelee)"
+    if t is not None:
+        aivo_arvio.arvioi_varjossa(tila, t, aivo_arvioija)   # varjotila: kirjaus isannan tilahakemistoon, ei GitHubiin
     alku = time.monotonic()
     if suunnittelu:
         try:

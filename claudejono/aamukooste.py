@@ -1,4 +1,4 @@
-"""Aamukooste: yksi Telegram-viesti Tonylle (enintaan 5 rivi\u00e4 + linkit), joka kootaan oikeista tiedoista.
+"""Aamukooste: yksi Telegram-viesti Tonylle (enintaan 10 rivi\u00e4, p\u00e4\u00e4t\u00f6kset ensin, + linkit), joka kootaan oikeista tiedoista.
 
 Lahteet (kaikki vain luku):
   - docs-repon claude-jono/tulokset/ (edellinen vuorokausi), tonylle.md:n uudet kohdat ja opit
@@ -18,7 +18,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from . import ajuri, kaistamittaus, kulutus, vaiteportti, varaus
+from . import aivo_arvio, ajuri, kaistamittaus, kulutus, vaiteportti, varaus
 
 TZ = ZoneInfo("Europe/Helsinki")
 OLETUS_REPO = "/var/lib/claude-jono/docs"
@@ -26,6 +26,26 @@ OLETUS_YOJONO = "/var/lib/yojono"
 DOCS_URL = "https://github.com/tonyweckstrom1987/agenttifirma-docs/blob/main/claude-jono"
 IKKUNA_H = 24
 RIVI_MAX = 300
+RIVI_YHT_MAX = 10   # A546: enintaan 10 rivi\u00e4 (aiemmin 5)
+SAANTOPAIVITYKSET = "saantopaivitykset.md"   # Aivon itse tekem\u00e4t s\u00e4\u00e4nt\u00f6p\u00e4ivitykset (A529): otsikot `## <pvm> ...`
+PAATOS_IKKUNA_PV = 7   # A490: avoin p\u00e4\u00e4t\u00f6s muistutetaan p\u00e4ivitt\u00e4in t\u00e4m\u00e4n ajan, ellei otsikossa ole suljettu-merkint\u00e4\u00e4
+PAATOS_RE = re.compile(r"(?i)aamulla ensin|p\u00e4\u00e4tett\u00e4v\u00e4|paatettava|kyll\u00e4/ei|kysymys")   # vain n\u00e4m\u00e4 otsikot ovat p\u00e4\u00e4t\u00f6spyynt\u00f6j\u00e4 (tonylle.md sis\u00e4lt\u00e4\u00e4 my\u00f6s tiedotteita)
+SULJETTU_SANAT = r"(?:aiempi|tehty|hoidettu|vastattu|p\u00e4\u00e4tetty|paatetty|suljettu)"
+SULJETTU_LOPUSSA_RE = re.compile(r"(?i)(?:^|[\s\[(:\-\u2013\u2014])" + SULJETTU_SANAT + r"[\s.!)\]]*$")      # otsikon lopussa (myos suluissa)
+SULJETTU_ALUSSA_RE = re.compile(r"(?i)^[\[(]\s*" + SULJETTU_SANAT + r"\s*[\])]|\b" + SULJETTU_SANAT + r"\s*:")     # [TEHTY] alussa tai TEHTY: (kaksoispiste = tilamerkinta)
+KIELTO_RE = re.compile(r"(?i)\b(ei|ole|viela|viel\u00e4|ilman)\s+(?:\w+\s+)?" + SULJETTU_SANAT + r"[\s.!)\]]*$")   # "ei ole tehty"
+
+
+def suljettu(otsikko):
+    """Otsikko on suljettu vain, jos sulkusana on tilamerkint\u00e4 otsikon alussa ([TEHTY], TEHTY:) tai lopussa
+    (\u2026 VASTATTU). Sana kesken otsikkoa ('aiempi korjaus rikki'), kielteinen muoto ('ei ole tehty') ja
+    kysymysmerkkiin p\u00e4\u00e4ttyv\u00e4 kysymys ('onko X tehty?') j\u00e4\u00e4v\u00e4t avoimiksi."""
+    o = " ".join((otsikko or "").split())
+    if SULJETTU_ALUSSA_RE.search(o):
+        return True
+    return bool(SULJETTU_LOPUSSA_RE.search(o)) and not KIELTO_RE.search(o)
+
+
 KULU_RIVI_MAX = 700   # kulutusrivi (mallit + viikko + Tonyn varaus) on pidempi kuin muut rivit
 MAX_MERGELINKKEJA = 4
 BUDJETTI_HALYTYS = 0.8   # nayttorajaus: kuukausikulu >= 80 % katosta nostetaan halytyksiin (ei muuta kattoa)
@@ -67,10 +87,10 @@ def lue_tulokset(repo, alku, loppu):
     return ulos
 
 
-def tonylle_uudet(repo, alku):
+def tonylle_uudet(repo, alku, tiedosto=None, koko=False):
     """tonylle.md:n kohdat (`## <pvm>[Thh:mm | klo hh.mm] ...`), jotka ovat alkua uudempia. Pelkka paiva lasketaan uudeksi,
     jos paiva >= alun paiva. Palauttaa listan (aika, loppuotsikko)."""
-    p = Path(repo) / ajuri.JONO / ajuri.TONYLLE
+    p = Path(repo) / ajuri.JONO / (tiedosto or ajuri.TONYLLE)
     try:
         teksti = p.read_text(encoding="utf-8", errors="replace")
     except OSError:
@@ -89,8 +109,17 @@ def tonylle_uudet(repo, alku):
         except ValueError:
             continue
         if uusi:
-            ulos.append((aika, " ".join(m.group(8).split())[:60]))
+            otsikko = " ".join(m.group(8).split())
+            ulos.append((aika, otsikko if koko else otsikko[:60]))
     return ulos
+
+
+def avoimet_paatokset(repo, nyt):
+    """tonylle.md:n kohdat viimeiselt\u00e4 PAATOS_IKKUNA_PV p\u00e4iv\u00e4lt\u00e4, joiden otsikossa ei ole suljettu-merkint\u00e4\u00e4 (TEHTY, HOIDETTU, VASTATTU, P\u00c4\u00c4TETTY).
+    Vastauksen merkkaa Tony tai pilvi-Claude otsikkoon; ilman merkint\u00e4\u00e4 kohta muistutetaan joka aamu (A490)."""
+    # sulkumerkinta tarkistetaan koko otsikosta (nayttoon leikataan 60 merkkiin vasta sen jalkeen)
+    return [(a, o[:60]) for a, o in tonylle_uudet(repo, nyt - timedelta(days=PAATOS_IKKUNA_PV), koko=True)
+            if PAATOS_RE.search(o) and not suljettu(o)]
 
 
 def yojono_tila(perus, nyt):
@@ -167,12 +196,16 @@ def keraa(repo, perus, nyt, hae=None, yksikot=None):
         varaus_rivi, varaus_kysymys = varaus.aamukooste_osa(tila, os.environ, nyt)
     except Exception:
         pass
+    try:
+        aivo_valmis = aivo_arvio.valmius_taynna(repo)
+    except Exception:
+        aivo_valmis = False
     from . import tarkastaja
     try:   # tarkastajan ja PR-avaajan viat nakyviin; puuttuva loki ei kaada koostetta
         tarkastaja_virheet = tarkastaja.virheet_lokista(Path(repo).parent, alku)
     except Exception:
         tarkastaja_virheet = []
-    return {"nyt": nyt, "tarkastaja_virheet": tarkastaja_virheet, "kaistat": kaistat, "kulutus": kulutus_teksti, "varaus": varaus_rivi, "varaus_kysymys": varaus_kysymys, "tulokset": tulokset, "uudet_prt": prt, "opit": opit, "tonylle": tonylle_uudet(repo, alku),
+    return {"nyt": nyt, "aivo_valmis": aivo_valmis, "tarkastaja_virheet": tarkastaja_virheet, "kaistat": kaistat, "kulutus": kulutus_teksti, "varaus": varaus_rivi, "varaus_kysymys": varaus_kysymys, "tulokset": tulokset, "uudet_prt": prt, "opit": opit, "tonylle": tonylle_uudet(repo, alku), "paatokset": avoimet_paatokset(repo, nyt), "saannot": tonylle_uudet(repo, alku, SAANTOPAIVITYKSET),
             "pr": pr_ryhmat, "pr_virheita": virheet, "yojono": yojono_tila(perus, nyt),
             "yksikot": (yksikot or rikkinaiset_yksikot)(), "vaiteportti": vaiteportti.puutteet(repo)}
 
@@ -182,13 +215,44 @@ def _lyhenna(teksti, raja=RIVI_MAX):
 
 
 def rivit(t):
-    """Viisi rivi\u00e4 (tehty, tarvitaan, opittu, h\u00e4lytykset, kulut) tiedoista."""
+    """Enint\u00e4\u00e4n 10 rivi\u00e4, p\u00e4\u00e4t\u00f6kset ensin: P\u00e4\u00e4t\u00f6kset, Tehty, Kesken, S\u00e4\u00e4nn\u00f6t, Opittu, H\u00e4lytykset, Kulut."""
     nimet = {"VALMIS": 0, "KESKEN": 0, "EPAONNISTUI": 0, "HYLATTY": 0}
     for r in t["tulokset"]:
         if r["tila"] in nimet:
             nimet[r["tila"]] += 1
     yj = t["yojono"]
-    osat = [f"{len(t['tulokset'])} jonotulosta ({nimet['VALMIS']} valmis, {str(nimet['KESKEN']) + ' kesken, ' if nimet['KESKEN'] else ''}{nimet['EPAONNISTUI']} ep\u00e4onnistui, {nimet['HYLATTY']} hyl\u00e4tty)"]
+
+    paatos_osat = []
+    if t["pr"] is None:
+        paatos_osat.append("PR-listaa ei saatu (GitHub-haku ep\u00e4onnistui)")
+    else:
+        from agentti.aamupaketti import puuttuu_rivi
+        n = len(t["pr"].get("tony", []))
+        puuttuu = puuttuu_rivi(t["pr"].get("puuttuu"))
+        if n:
+            paatos_osat.append(f"{n} PR:\u00e4\u00e4 mergattavaksi (kyll\u00e4/ei)")
+        elif not puuttuu and not t.get("pr_virheita"):
+            paatos_osat.append("ei mergattavia PR:j\u00e4")   # nolla vain kun kaikki haut onnistuivat
+        if puuttuu:   # lahde + virhetyyppi + HTTP-tila: tieto puuttuu, ei aitoa nollaa
+            paatos_osat.append(puuttuu)
+        elif t.get("pr_virheita"):
+            paatos_osat.append(f"PR-lista voi olla vajaa ({len(t['pr_virheita'])} hakuvirhett\u00e4, esim. {t['pr_virheita'][0]})")
+        if t["pr"].get("automerge"):
+            paatos_osat.append(f"{len(t['pr']['automerge'])} hoituu automergell\u00e4")
+    if t.get("aivo_valmis"):   # Tony 7.11.2026: kerro HETI, kun kaikki aivo-valmius.md:n kohdat t\u00e4yttyv\u00e4t
+        paatos_osat.insert(0, "Aivo on valmis OpenRouteriin ja itsekehitykseen: kaikki aivo-valmius.md:n kohdat t\u00e4yttyv\u00e4t")
+    avoimet = t.get("paatokset") or []
+    muut = [k for k in (t.get("tonylle") or []) if k not in avoimet]   # ei hiljaa katoavia kohtia: avainsanaan osumattomat vain laskurina
+    if muut:
+        paatos_osat.append(f"+{len(muut)} muuta kohtaa tonylle.md:ss\u00e4")
+    # kalibrointipyynt\u00f6 ennen vapaamittaisia otsikoita: _lyhenna leikkaa rivin lopusta, joten pyynt\u00f6 ei saa j\u00e4\u00e4d otsikoiden taakse
+    if t.get("varaus_kysymys"):
+        paatos_osat.append(t["varaus_kysymys"])
+    if avoimet:
+        paatos_osat.append(f"{len(avoimet)} avointa kohtaa tonylle.md:ss\u00e4 (muistutus p\u00e4ivitt\u00e4in): " + "; ".join(f"{a.day}.{a.month}. {o}".strip() for a, o in avoimet[:2]))
+    paatokset = "P\u00e4\u00e4t\u00f6kset sinulle: " + ", ".join(paatos_osat) + "."
+
+    osat = [f"{len(t['tulokset'])} jonotulosta ({nimet['VALMIS']} valmis, {nimet['EPAONNISTUI']} ep\u00e4onnistui, {nimet['HYLATTY']} hyl\u00e4tty)"]
     if t["uudet_prt"]:
         nayta = ", ".join(t["uudet_prt"][:4]) + (f" (+{len(t['uudet_prt']) - 4})" if len(t["uudet_prt"]) > 4 else "")
         osat.append("PR:t " + nayta)
@@ -198,21 +262,13 @@ def rivit(t):
         osat.append(t["kaistat"])
     tehty = "Tehty: " + "; ".join(osat) + "."
 
-    tarvitaan_osat = []
-    if t["pr"] is None:
-        tarvitaan_osat.append("PR-listaa ei saatu (GitHub-haku ep\u00e4onnistui)")
-    else:
-        n = len(t["pr"].get("tony", []))
-        tarvitaan_osat.append(f"{n} PR:\u00e4\u00e4 mergattavaksi" if n else "ei mergattavia PR:j\u00e4")
-        if t.get("pr_virheita"):
-            tarvitaan_osat.append(f"PR-lista voi olla vajaa ({len(t['pr_virheita'])} hakuvirhett\u00e4, esim. {t['pr_virheita'][0]})")
-        if t["pr"].get("automerge"):
-            tarvitaan_osat.append(f"{len(t['pr']['automerge'])} hoituu automergell\u00e4")
-    if t["tonylle"]:
-        tarvitaan_osat.append(f"{len(t['tonylle'])} uutta kohtaa tonylle.md:ss\u00e4")
-    if t.get("varaus_kysymys"):
-        tarvitaan_osat.append(t["varaus_kysymys"])
-    tarvitaan = "Tarvitaan sinulta: " + ", ".join(tarvitaan_osat) + "."
+    kesken_nimet = [r["nimi"].removesuffix(".md") for r in t["tulokset"] if r["tila"] == "KESKEN"]
+    kesken = ("Kesken (ei tarkastajan vahvistusta): " + ", ".join(kesken_nimet[:3]) + (f" (+{len(kesken_nimet) - 3})" if len(kesken_nimet) > 3 else "") + "."
+              if kesken_nimet else "Kesken: ei mit\u00e4\u00e4n.")
+
+    sn = t.get("saannot") or []
+    saannot = ("S\u00e4\u00e4nt\u00f6p\u00e4ivitykset (Aivo): " + "; ".join(f"{a.day}.{a.month}. {o}".strip() for a, o in sn[:3]) + (f" (+{len(sn) - 3})" if len(sn) > 3 else "") + "."
+               if sn else "S\u00e4\u00e4nt\u00f6p\u00e4ivitykset (Aivo): ei.")
 
     opittu = "Opittu: " + ("; ".join(o.rstrip(".") for o in t["opit"][:2]) if t["opit"] else "ei uusia oppeja viime vuorokaudessa") + "."
 
@@ -243,7 +299,9 @@ def rivit(t):
     else:
         kulut = "Kulut: y\u00f6jonon tilaa ei saatu luettua."
     kulut = " ".join(x.rstrip(".") + "." for x in (kulut, t.get("kulutus"), t.get("varaus")) if x)
-    return [_lyhenna(r, KULU_RIVI_MAX if r is kulut else RIVI_MAX) for r in (tehty, tarvitaan, opittu, hal, kulut)]
+    ulos = [_lyhenna(r, KULU_RIVI_MAX if r is kulut else RIVI_MAX) for r in (paatokset, tehty, kesken, saannot, opittu, hal, kulut)]
+    assert len(ulos) <= RIVI_YHT_MAX
+    return ulos
 
 
 def linkit(t):
@@ -252,7 +310,7 @@ def linkit(t):
         ulos.append(f"Merge: {r['repo']} #{r['numero']} {r['otsikko'][:50]}\n{r['url']}")
     if t["pr"] and len(t["pr"].get("tony", [])) > MAX_MERGELINKKEJA:
         ulos.append(f"(+{len(t['pr']['tony']) - MAX_MERGELINKKEJA} muuta mergattavaa: aja python3 -m agentti.aamupaketti)")
-    if t["tonylle"]:
+    if t["tonylle"] or t.get("paatokset"):
         ulos.append(f"tonylle.md: {DOCS_URL}/tonylle.md")
     ulos.append(f"Tulokset: {DOCS_URL}/tulokset")
     return ulos

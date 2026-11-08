@@ -69,6 +69,37 @@ def sopii(ilmoitus, hakusanat, paikat=()):
     return True
 
 
+# Korkeakouluvaatimus (Tonin paatos 8.11.2026, A904): Tony opiskelee ammatillista perustutkintoa, joten kohteet, joissa
+# vaaditaan korkeakouluopiskelua, merkitaan "ei sovi" eika niita nosteta. Lauseet haetaan otsikosta, tiimista ja
+# mahdollisesta kuvauskentasta (lukijat eivat nyt tayta kuvausta; silloin tarkin keino on asetusten ei_sovi-lista).
+KORKEAKOULULAUSEET = ("bachelor student", "bachelors student", "master student", "masters student",
+                      "university student", "korkeakouluopiskelija", "korkeakouluopiskelijat",
+                      "ammattikorkeakouluopiskelija", "yliopisto-opiskelija", "yliopisto-opiskelijat")
+
+
+def _vaatimusteksti(teksti):
+    t = laskosta(teksti)
+    for a in ("'", "\u2019", "\u2018"):
+        t = t.replace(a, "")
+    return t
+
+
+def ei_sovi_syy(ilmoitus, ei_sovi=()):
+    """Palauttaa syyn (str), jos ilmoitus ei sovi korkeakouluvaatimuksen takia, muuten None.
+    ei_sovi: asetusten lista {'yritys': ..., 'otsikko': ..., 'syy': ...}; yritys ja otsikko ovat osamerkkijonoja,
+    joiden molempien pitaa tasmata (puuttuva kentta tasmaa aina; saanto ilman kumpaakaan ohitetaan)."""
+    for r in ei_sovi or ():
+        if not isinstance(r, dict) or not (r.get("yritys") or r.get("otsikko")):
+            continue
+        if laskosta(r.get("yritys", "")) in laskosta(ilmoitus.get("yritys", "")) and \
+                laskosta(r.get("otsikko", "")) in laskosta(ilmoitus.get("otsikko", "")):
+            return str(r.get("syy") or "ei sovi")[:120]
+    teksti = _vaatimusteksti(" ".join(str(ilmoitus.get(k, "")) for k in ("otsikko", "tiimi", "kuvaus")))
+    if any(_sana_re(l).search(teksti) for l in KORKEAKOULULAUSEET):
+        return "ei sovi: korkeakouluvaatimus"
+    return None
+
+
 def hae_json(osoite, avaa=None):
     avaa = avaa or _avaa
     return json.loads(avaa(osoite).decode("utf-8"))
@@ -174,12 +205,14 @@ def muodosta_viestit(uudet):
 
 
 
-def aja(asetukset, tila_polku, laheta=False, avaa=None, laheta_fn=None, ilmoita_args=None):
+def aja(asetukset, tila_polku, laheta=False, avaa=None, laheta_fn=None, ilmoita_args=None, hylatyt=None):
     """Palauttaa (osumat, virheet). Lahetetyt kirjataan tilaan era kerrallaan vasta onnistuneen lahetyksen jalkeen;
     epaonnistunut era yritetaan uudelleen seuraavalla ajolla. Ilman laheta ei kirjata mitaan.
-    Yhdella ajolla lahetetaan enintaan MAX_AJOSSA; loput tulevat seuraavalla ajolla."""
+    Yhdella ajolla lahetetaan enintaan MAX_AJOSSA; loput tulevat seuraavalla ajolla.
+    Korkeakouluvaatimuksen takia hylatyt (ei_sovi_syy) eivat mene osumiin; ne lisataan listaan hylatyt (jos annettu)."""
     hakusanat = asetukset.get("hakusanat") or OLETUS_HAKUSANAT
     paikat = asetukset.get("paikat") or []
+    ei_sovi = asetukset.get("ei_sovi") or []
     nahdyt = lataa_nahdyt(tila_polku)
     nahdyt_joukko = set(nahdyt)
     uudet, virheet, kasitelty = [], [], set()
@@ -194,6 +227,11 @@ def aja(asetukset, tila_polku, laheta=False, avaa=None, laheta_fn=None, ilmoita_
                 continue
             kasitelty.add(i["id"])
             if sopii(i, hakusanat, paikat):
+                syy = ei_sovi_syy(i, ei_sovi)
+                if syy:
+                    if hylatyt is not None:
+                        hylatyt.append((i, syy))
+                    continue
                 uudet.append(i)
     # ei-osuvia ei tarvitse kirjata: jos hakusanat muuttuvat, aiemmin hylatyt arvioidaan uudelleen
     osumat, jaljelle = uudet[:MAX_AJOSSA], len(uudet) - len(uudet[:MAX_AJOSSA])
@@ -225,12 +263,15 @@ def main(argv=None):
     except (OSError, ValueError) as e:
         print("asetukset: %s" % type(e).__name__, file=sys.stderr)
         return 2
-    osumat, virheet = aja(asetukset, a.tila, laheta=a.laheta)
+    hylatyt = []
+    osumat, virheet = aja(asetukset, a.tila, laheta=a.laheta, hylatyt=hylatyt)
     for i in osumat:
         print("%s | %s | %s" % (i["yritys"], i["otsikko"], i["osoite"]))
+    for i, syy in hylatyt:
+        print("EI SOVI | %s | %s | %s" % (i["yritys"], i["otsikko"], syy))
     for v in virheet:
         print("virhe: %s" % v, file=sys.stderr)
-    print("osumia: %d, virheita: %d" % (len(osumat), len(virheet)))
+    print("osumia: %d, ei sovi: %d, virheita: %d" % (len(osumat), len(hylatyt), len(virheet)))
     return 1 if virheet and not osumat else 0
 
 

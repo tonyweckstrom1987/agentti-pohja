@@ -85,6 +85,38 @@ class RemoteAlueTest(unittest.TestCase):
         self.assertFalse(t.sopii({"otsikko": "Python dev", "sijainti": "Austin, US"}, ["python"], self.P))
 
 
+class EiSoviTest(unittest.TestCase):
+    RIVI = {"yritys": "ICEYE", "otsikko": "ICEYE Engineering Intern Lab 2027"}
+
+    def test_lista_osuu(self):
+        syy = t.ei_sovi_syy(self.RIVI, [{"yritys": "iceye", "otsikko": "intern lab", "syy": "A904"}])
+        self.assertEqual(syy, "A904")
+
+    def test_lista_ei_osu_muuhun_ilmoitukseen(self):
+        lista = [{"yritys": "iceye", "otsikko": "intern lab"}]
+        self.assertIsNone(t.ei_sovi_syy({"yritys": "ICEYE", "otsikko": "DevOps Engineer"}, lista))
+        self.assertIsNone(t.ei_sovi_syy({"yritys": "Muu", "otsikko": "Intern Lab"}, lista))
+
+    def test_tyhja_saanto_ei_osu_kaikkeen(self):
+        self.assertIsNone(t.ei_sovi_syy(self.RIVI, [{"syy": "x"}, "roska"]))
+
+    def test_lauseet(self):
+        for teksti in ("Open to master's student", "Bachelor\u2019s student, year 3", "Korkeakouluopiskelija, kes\u00e4"):
+            self.assertTrue(t.ei_sovi_syy({"otsikko": "Intern", "kuvaus": teksti}), teksti)
+        self.assertIsNone(t.ei_sovi_syy({"otsikko": "DevOps Intern", "kuvaus": "no degree needed"}))
+
+    def test_aja_hylkaa_eika_kirjaa(self):
+        with tempfile.TemporaryDirectory() as d:
+            tila = os.path.join(d, "n.json")
+            ase = {"lahteet": [{"tyyppi": "greenhouse", "nimi": "X", "tunnus": "x"}], "hakusanat": ["devops"],
+                   "ei_sovi": [{"yritys": "x", "otsikko": "devops", "syy": "testi"}]}
+            hylatyt = []
+            osumat, virheet = t.aja(ase, tila, avaa=avaa_mock, hylatyt=hylatyt)
+            self.assertEqual(osumat, [])
+            self.assertEqual([(i["otsikko"], s) for i, s in hylatyt], [("Senior DevOps Engineer", "testi")])
+            self.assertFalse(os.path.exists(tila))
+
+
 class LukuTest(unittest.TestCase):
     def test_lahteet(self):
         self.assertEqual(len(t.lue_greenhouse("g", GH)), 2)

@@ -46,6 +46,13 @@ Haku kohdistuu otsikkoon ja tiimiin/osastoon, skandit ja isot kirjaimet ei haitt
   LATAM, APAC, India jne.), ilmoitus hylataan (esim. "Remote - United States"). Pelkka "Remote" tai remote + Europe/EU/
   EMEA/Finland/Nordics kelpaa. Rajaus koskee vain sijaintia, jossa remote-sana esiintyy ja paikat on annettu.
 - Hylkays on tarkoituksella tiukka: "Helsinki / Remote US" hylataan myos. Sijaintikentan vapaa teksti voi olla muutakin.
+- Korkeakouluvaatimus (Tonin paatos 8.11.2026, A904): Tony opiskelee ammatillista perustutkintoa, joten kohteet, joissa
+  vaaditaan korkeakouluopiskelua, merkitaan "ei sovi" eika niita laheteta. Kaksi tapaa: (1) asetusten valinnainen
+  `ei_sovi`-lista, esim. `{"yritys": "iceye", "otsikko": "intern lab", "syy": "A904: korkeakouluvaatimus"}`
+  (osamerkkijonot, molempien pitaa tasmata); (2) lauseet (`KORKEAKOULULAUSEET`, esim. "master's student",
+  "korkeakouluopiskelija") otsikossa, tiimissa tai `kuvaus`-kentassa. Nykyiset lukijat eivat hae ilmoituksen kuvausta,
+  joten ilmoitus, jonka otsikko ei paljasta vaatimusta, tarvitsee `ei_sovi`-rivin. Hylatyt eivat kirjaudu nahdyiksi, ja
+  ne tulostetaan ajon lopussa riveina `EI SOVI | yritys | otsikko | syy`.
 - Lahdelista ei kuulu koodiin vaan asetustiedostoon (ei GitLabia).
 
 ## Kayttoonotto (Tony tekee itse; systemd/ on suojattu polku, siksi mallit ovat tassa)

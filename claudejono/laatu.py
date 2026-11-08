@@ -22,6 +22,7 @@ import urllib.request
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
+from agentti import github_luku
 from claudejono import ajuri, silmukka
 
 JONO = "claude-jono"
@@ -180,12 +181,12 @@ def laatuotos(repo, tyohak, env, suorita=subprocess.run, nyt=None, pvm=None, rng
 
 def hae_pr_luvut(pvm, repot=OLETUS_PR_REPOT, avaa=urllib.request.urlopen):
     """(hyvaksytyt, hylatyt) PR:t, jotka suljettiin paivana pvm (UTC-paiva). None, jos haku epaonnistui.
-    Julkinen API ilman tunnusta (60 hakua/h): yksi haku per repo."""
+    Vain luku -tunnus tiedostosta (5000 hakua/h), muuten julkinen API (60 hakua/h): yksi haku per repo."""
     hyv = hyl = 0
     for repo in repot:
         url = f"https://api.github.com/repos/tonyweckstrom1987/{repo}/pulls?state=closed&sort=updated&direction=desc&per_page=50"
         try:
-            with avaa(urllib.request.Request(url, headers={"User-Agent": "claudejono-laatu"}), timeout=15) as r:
+            with avaa(github_luku.pyynto(url, "claudejono-laatu"), timeout=15) as r:
                 lista = json.loads(r.read().decode("utf-8"))
         except Exception:
             return None

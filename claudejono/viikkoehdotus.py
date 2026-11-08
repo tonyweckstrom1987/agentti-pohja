@@ -164,6 +164,13 @@ def rakenna(repo, nyt):
     if aukot:
         rivit += ["", "## Pisteytett\u00e4v\u00e4t aukot (v\u00e4litavoite ilman pisteytetty\u00e4 ehdotusta)", ""]
         rivit += [f"- Tavoite {n}: {t[:200]}" for n, t in sorted(aukot.items())]
+    # Tavoitesidonta ja Aivon varjoarviot (A840-A841); tila = repon vieressa oleva isannan hakemisto, GitHub-haku vain tuloksen PR-linkeille.
+    from . import aivo_arvio, tavoite
+    alku = (nyt.astimezone(TZ).date() - timedelta(days=7))
+    pr = tavoite.pr_avaimet(repo, alku)
+    yh = tavoite.yhdistetyt_haku(pr) if pr and os.environ.get("CLAUDEJONO_PR_HAKU", "1") == "1" else (set() if not pr else None)
+    rivit += ["", tavoite.jalkimittari_teksti(tavoite.jalkimittari(repo, yh, alku), yh is not None).rstrip(),
+              "", aivo_arvio.viikkoosio(Path(repo).parent).rstrip()]
     rivit += ["", "Pisteytetyn listan j\u00e4lkeen: valitaan ensin suurin pistem\u00e4\u00e4r\u00e4, mutta v\u00e4litavoitteen alle kuulumaton ty\u00f6 j\u00e4\u00e4 pois (kompassi: ei uusia suuntia ilman, ett\u00e4 vanha tuottaa)."]
     return nimi, "\n".join(rivit) + "\n", lista
 

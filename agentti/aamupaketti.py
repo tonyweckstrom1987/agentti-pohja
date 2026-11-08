@@ -10,7 +10,7 @@ import subprocess
 import sys
 import urllib.request
 
-from . import pr_laatu, telegram
+from . import github_luku, pr_laatu, telegram
 from .pr_kutsu import REPOT, suojattu as _kriittinen_polku
 from .yksikot import suodata_kohina
 
@@ -82,16 +82,18 @@ def _suojattu(polku, repo="agentti-pohja"):
 
 
 def _oletushaku(url):
-    pyynto = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json", "User-Agent": "agenttifirma-aamupaketti"})
+    pyynto = github_luku.pyynto(url, "agenttifirma-aamupaketti")
     with urllib.request.urlopen(pyynto, timeout=20) as v:
         return json.loads(v.read().decode("utf-8"))
 
 
-def _ci(hae, repo, sha):
-    """'vihrea', 'punainen' tai 'kesken' check-runeista."""
+def _ci(hae, repo, sha, puuttuu=None):
+    """'vihrea', 'punainen' tai 'kesken' check-runeista. Hakuvirhe = 'kesken' ja kirjaus `puuttuu`-listaan (jos annettu)."""
     try:
         runit = hae("https://api.github.com/repos/%s/%s/commits/%s/check-runs?per_page=50" % (OMISTAJA, repo, sha)).get("check_runs", [])
-    except Exception:
+    except Exception as virhe:
+        if puuttuu is not None:
+            puuttuu.append(("CI", repo, pr_laatu._virhe_tiiviisti(virhe)))
         return "kesken"
     if not runit or any(r.get("status") != "completed" for r in runit):
         return "kesken"
@@ -100,13 +102,18 @@ def _ci(hae, repo, sha):
 
 
 def keraa(hae=None):
-    """Palauttaa {'tony': [...], 'automerge': [...], 'muut': [...]}, kukin rivi dict (repo, numero, otsikko, url, ci, syy)."""
+    """Palauttaa {'tony': [...], 'automerge': [...], 'muut': [...], 'puuttuu': [...]}.
+    Ryhmien rivit ovat dicteja (repo, numero, otsikko, url, ci, syy). 'puuttuu' = epaonnistuneet haut
+    (lahde, repo, 'Tyyppi [HTTP-tila]'); tyhja lista = kaikki haut onnistuivat, joten tyhja ryhma on aidosti tyhja.
+    Poikkeusviestia ei tallenneta (voi sisaltaa salaisuuksia), vain tyyppi ja HTTP-tila."""
     hae = hae or _oletushaku
-    ryhmat = {"tony": [], "automerge": [], "muut": []}
+    puuttuu = []
+    ryhmat = {"tony": [], "automerge": [], "muut": [], "puuttuu": puuttuu}
     for repo in REPOT:
         try:
             prt = hae("https://api.github.com/repos/%s/%s/pulls?state=open&per_page=%d" % (OMISTAJA, repo, MAX_PR_REPOA_KOHDEN))
-        except Exception:
+        except Exception as virhe:
+            puuttuu.append(("PR-lista", repo, pr_laatu._virhe_tiiviisti(virhe)))
             continue
         for p in prt[:MAX_PR_REPOA_KOHDEN]:
             nro = p.get("number")
@@ -116,10 +123,11 @@ def keraa(hae=None):
                 rivi["syy"] = "luonnos"
                 ryhmat["muut"].append(rivi)
                 continue
-            rivi["ci"] = _ci(hae, repo, (p.get("head") or {}).get("sha", ""))
+            rivi["ci"] = _ci(hae, repo, (p.get("head") or {}).get("sha", ""), puuttuu)
             try:
                 tiedostot = hae("https://api.github.com/repos/%s/%s/pulls/%s/files?per_page=%d" % (OMISTAJA, repo, nro, MAX_TIEDOSTOJA_HAKUUN))
-            except Exception:
+            except Exception as virhe:
+                puuttuu.append(("tiedostot", repo, pr_laatu._virhe_tiiviisti(virhe)))
                 tiedostot = None
             if tiedostot is None:
                 rivi["syy"] = "tiedostoja ei saatu"
@@ -130,7 +138,10 @@ def keraa(hae=None):
                 ryhmat["muut"].append(rivi)
                 continue
             suojattu = any(_suojattu(n, repo) for t in tiedostot for n in (t.get("filename"), t.get("previous_filename")) if n)
-            if suojattu:
+            katkaistu = len(tiedostot) >= MAX_TIEDOSTOJA_HAKUUN   # loppu jai hakematta: suojattu polku voi olla siina
+            if katkaistu and not suojattu:
+                rivi["syy"] = "tiedostolista katkaistu"
+            if suojattu or katkaistu:
                 rivi.update(yhteenveto(tiedostot))
                 ryhmat["tony"].append(rivi)
             elif rivi["ci"] == "vihrea":
@@ -151,14 +162,34 @@ def _rivi(r):
     return "- %s #%s %s%s\n  %s" % (r["repo"], r["numero"], r["otsikko"], lisa, r["url"])
 
 
+def puuttuu_rivi(puuttuu):
+    """Yksi rivi puuttuvista tiedoista tai '' kun kaikki haut onnistuivat. Ryhmitelty lahteen ja virheen mukaan, repot sulkeissa."""
+    ryhmat = {}
+    for lahde, repo, virhe in puuttuu or []:
+        repot = ryhmat.setdefault((lahde, virhe), [])
+        if repo not in repot:
+            repot.append(repo)
+    if not ryhmat:
+        return ""
+    return "tieto puuttuu: " + "; ".join("%s %s (%s)" % (lahde, virhe, ", ".join(repot)) for (lahde, virhe), repot in ryhmat.items())
+
+
 def muotoile(ryhmat):
     osat = ["Aamupaketti: avoimet PR:t"]
+    rivi = puuttuu_rivi(ryhmat.get("puuttuu"))
+    if rivi:
+        osat.append(rivi)
     for avain, otsikko in (("tony", "Sinun mergattavat (suojatut polut)"), ("automerge", "Automerge hoitaa (CI vihrea)"), ("muut", "Muut (luonnos, CI kesken tai punainen)")):
         rivit = ryhmat.get(avain) or []
         osat.append("\n%s: %d" % (otsikko, len(rivit)))
         osat.extend(_rivi(r) for r in rivit)
-    if not any(ryhmat.values()):
-        osat.append("\nEi avoimia PR:ita.")
+    if not any(ryhmat.get(a) for a in ("tony", "automerge", "muut")):
+        if not ryhmat.get("puuttuu"):
+            osat.append("\nEi avoimia PR:ita.")
+        elif len({r for l, r, _ in ryhmat["puuttuu"] if l == "PR-lista"}) >= len(REPOT):
+            osat.append("\nEi tietoa avoimista PR:ista (kaikki PR-listahaut epaonnistuivat).")   # ei nollaa
+        else:
+            osat.append("\nEi avoimia PR:ita haetuista repoista (osa hauista epaonnistui).")
     return "\n".join(osat)
 
 

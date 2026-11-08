@@ -56,7 +56,47 @@ class KerausTesti(unittest.TestCase):
     def test_hakuvirhe_ei_kaada(self):
         def hae(url):
             raise OSError("verkko")
-        self.assertEqual(ap.keraa(hae), {"tony": [], "automerge": [], "muut": []})
+        t = ap.keraa(hae)
+        self.assertEqual([t["tony"], t["automerge"], t["muut"]], [[], [], []])
+        self.assertEqual({v for _, _, v in t["puuttuu"]}, {"OSError"})   # vain tyyppi, ei viestia "verkko"
+        self.assertEqual(len(t["puuttuu"]), len(ap.REPOT))
+        teksti = ap.muotoile(t)
+        self.assertIn("tieto puuttuu: PR-lista OSError (", teksti)
+        self.assertNotIn("verkko", teksti)
+        self.assertNotIn("Ei avoimia PR:ita", teksti)   # puuttuva tieto ei ole nolla
+        self.assertIn("Ei tietoa avoimista PR:ista", teksti)
+
+    def test_http_403_ja_429_nayttavat_tilan(self):
+        import urllib.error
+        for koodi in (403, 429):
+            def hae(url, koodi=koodi):
+                raise urllib.error.HTTPError(url, koodi, "salainen viesti", {}, None)
+            t = ap.keraa(hae)
+            self.assertEqual({v for _, _, v in t["puuttuu"]}, {"HTTPError %d" % koodi})
+            teksti = ap.muotoile(t)
+            self.assertEqual(teksti.count("tieto puuttuu:"), 1)   # yksi rivi, ryhmitelty
+            self.assertIn("PR-lista HTTPError %d (agentti-pohja" % koodi, teksti)
+            self.assertNotIn("salainen", teksti)
+
+    def test_aidosti_tyhja_tulos_ei_nayta_puuttuvaa_tietoa(self):
+        t = ap.keraa(feikki({}, {}))
+        self.assertEqual(t["puuttuu"], [])
+        teksti = ap.muotoile(t)
+        self.assertNotIn("tieto puuttuu", teksti)
+        self.assertIn("Ei avoimia PR:ita.", teksti)
+
+    def test_osittainen_virhe_ci_ja_tiedostot_kirjataan(self):
+        import urllib.error
+        def hae(url):
+            if "/pulls?state=open" in url:
+                return [pr(1)] if "/agentti-pohja/" in url else []
+            if "/check-runs" in url:
+                raise urllib.error.HTTPError(url, 403, "x", {}, None)
+            raise OSError("x")
+        t = ap.keraa(hae)
+        self.assertEqual(sorted((l, r, v) for l, r, v in t["puuttuu"]),
+                         [("CI", "agentti-pohja", "HTTPError 403"), ("tiedostot", "agentti-pohja", "OSError")])
+        self.assertIn("Ei avoimia PR:ita haetuista repoista", ap.muotoile({"tony": [], "automerge": [], "muut": [], "puuttuu": t["puuttuu"]}))
 
     def test_tiedostojen_hakuvirhe_menee_muihin(self):
         def hae(url):
@@ -66,6 +106,32 @@ class KerausTesti(unittest.TestCase):
                 return {"check_runs": [{"status": "completed", "conclusion": "success"}]}
             raise OSError("x")
         self.assertEqual([(x["numero"], x["syy"]) for x in ap.keraa(hae)["muut"]], [(1, "tiedostoja ei saatu")])
+
+    def test_tiedostolistan_403_ei_koskaan_automergeen(self):
+        import urllib.error
+
+        def hae(url):
+            if "/pulls?state=open" in url:
+                return [pr(1)] if "agentti-pohja" in url else []
+            if "/check-runs" in url:
+                return {"check_runs": [{"status": "completed", "conclusion": "success"}]}
+            raise urllib.error.HTTPError(url, 403, "rate limit", {}, None)
+        r = ap.keraa(hae)
+        self.assertEqual(r["automerge"], [])
+        self.assertEqual(r["tony"], [])
+        self.assertEqual([(x["numero"], x["syy"]) for x in r["muut"]], [(1, "tiedostoja ei saatu")])
+
+    def test_suojattu_ja_tavallinen_polku_ilman_hakuvirhetta(self):
+        hae = feikki({"agentti-pohja": [pr(1), pr(2)]}, {1: ["agentti/rajat.py"], 2: ["test/test_a.py"]})
+        r = ap.keraa(hae)
+        self.assertEqual([x["numero"] for x in r["tony"]], [1])
+        self.assertEqual([x["numero"] for x in r["automerge"]], [2])
+
+    def test_katkaistu_tiedostolista_menee_tonylle_ei_automergeen(self):
+        nimet = ["docs/a%d.md" % i for i in range(ap.MAX_TIEDOSTOJA_HAKUUN)]
+        r = ap.keraa(feikki({"agentti-pohja": [pr(1)]}, {1: nimet}))
+        self.assertEqual(r["automerge"], [])
+        self.assertEqual([(x["numero"], x["syy"]) for x in r["tony"]], [(1, "tiedostolista katkaistu")])
 
     def test_otsikko_lyhennetaan_ja_rivinvaihdot_poistetaan(self):
         r = ap.keraa(feikki({"agentti-pohja": [pr(1, "a\nb " + "x" * 100)]}, {1: ["test/test_a.py"]}))
@@ -153,7 +219,7 @@ class MuotoiluJaMainTesti(unittest.TestCase):
         self.assertIn("- agentti-pohja #2 tavallinen (CI vihrea)\n  https://github.com/o/r/pull/2", teksti)
 
     def test_tyhja(self):
-        self.assertIn("Ei avoimia PR:ita.", ap.muotoile({"tony": [], "automerge": [], "muut": []}))
+        self.assertIn("Ei avoimia PR:ita.", ap.muotoile({"tony": [], "automerge": [], "muut": []}))   # vanha muoto ilman puuttuu-avainta toimii
 
     def ajaa(self, argv, env=None, laheta=True):
         ulos, virhe = io.StringIO(), io.StringIO()

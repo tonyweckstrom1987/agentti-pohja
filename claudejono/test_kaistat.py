@@ -147,7 +147,7 @@ def _suunnitteleva_kaista(repo, tyohak, kaista, loki, viive, env):
             time.sleep(0.5)
             _kirjaa(loki, f"suunnittelu-loppu {kaista} {time.time():.4f}")
             return subprocess.CompletedProcess(kom, 0, malli_vastaus(json.dumps(
-                {"tehtavat": [{"nimi": f"uusi-{kaista}", "sisalto": f"# Uusi {kaista}"}], "tonylle": ""})), "")
+                {"tehtavat": [{"nimi": f"uusi-{kaista}", "sisalto": f"# Uusi {kaista}\nTavoite: yllapito"}], "tonylle": ""})), "")
         _kirjaa(loki, f"tehtava-alku {kaista} {time.time():.4f}")
         time.sleep(1.5)
         _kirjaa(loki, f"tehtava-loppu {kaista} {time.time():.4f}")
@@ -368,7 +368,7 @@ class Ajo(Pohja):
     def test_vapaa_kaista_suunnittelee_vaikka_toinen_kaista_on_toissa(self):
         # 3.11. klo 11: kaistat 2 ja 3 jaivat tyhjaksi, koska suunnittelu odotti kaikkien kaistojen vapautumista
         self.assertTrue(ajuri.varaa(self.tmp, "2026-11-03-01-a.md", 1))
-        vastaus = json.dumps({"tehtavat": [{"nimi": "uusi", "sisalto": "# Uusi"}], "tonylle": ""})
+        vastaus = json.dumps({"tehtavat": [{"nimi": "uusi", "sisalto": "# Uusi\nTavoite: yllapito"}], "tonylle": ""})
         v = ajuri.aja(self.repo, self.tmp, env={"CLAUDEJONO_KAISTOJA": "3"}, kaista=2,
                       suorita=self.f({"subtype": "success", "result": vastaus}))
         self.assertIn("itsesuunnittelu", v)
@@ -398,8 +398,8 @@ class Ajo(Pohja):
         vastaus = json.dumps({"tehtavat": [
             {"nimi": "sama-nimi", "sisalto": "# Muu"},                    # nimi jo tehty
             {"nimi": "kopio", "sisalto": "<!-- x -->\n# TEHTY tee tama."},  # sisalto sama (tyhjat, kirjainkoko, kommentti ohitetaan)
-            {"nimi": "oikeasti-uusi", "sisalto": "# Uusi"},
-            {"nimi": "oikeasti-uusi", "sisalto": "# Uusi 2"},             # sama nimi samassa erassa
+            {"nimi": "oikeasti-uusi", "sisalto": "# Uusi\nTavoite: yllapito"},
+            {"nimi": "oikeasti-uusi", "sisalto": "# Uusi 2\nTavoite: yllapito"},             # sama nimi samassa erassa
         ], "tonylle": ""})
         ajuri.aja(self.repo, self.tmp, env={"CLAUDEJONO_KAISTOJA": "3"}, kaista=2,
                   suorita=self.f({"subtype": "success", "result": vastaus}))
@@ -445,7 +445,7 @@ class Ajo(Pohja):
         self.assertEqual(kutsut, [])
 
     def test_suunnittelu_varaa_ja_vapauttaa(self):
-        vastaus = json.dumps({"tehtavat": [{"nimi": "a", "sisalto": "# A\n\nPisteet: hyoty 4, varmuus 4, vaiva 2 h\nSuunta: jatkoa (kompassi 1)\nValmis kun: PR.\n"}], "tonylle": ""})
+        vastaus = json.dumps({"tehtavat": [{"nimi": "a", "sisalto": "# A\n\nTavoite: yllapito\nPisteet: hyoty 4, varmuus 4, vaiva 2 h\nSuunta: jatkoa (kompassi 1)\nValmis kun: PR.\n"}], "tonylle": ""})
         nahdyt = []
         v = ajuri.aja(self.repo, self.tmp, env={"CLAUDEJONO_KAISTOJA": "2"}, kaista=2,
                       suorita=self.f({"subtype": "success", "result": vastaus},
