@@ -1,0 +1,11 @@
+# Kopioi: /etc/systemd/system/aivo-kysymykset.timer. Sunnuntaisin klo 18.00 Suomen aikaa, jotta lista on valmis maanantain koulumatkalle.
+[Unit]
+Description=Aivo: kysymyslista sunnuntaisin
+
+[Timer]
+OnCalendar=Sun *-*-* 18:00:00 Europe/Helsinki
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target
