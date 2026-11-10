@@ -27,6 +27,18 @@ class Jasennys(unittest.TestCase):
         for teksti in ("ei rivia", "Tavoite: rahaa", "Tavoite:", "tavoite: aivo", "  Tavoite: aivo", "Tavoite: aivo ja muuta", "x Tavoite: aivo"):
             self.assertIsNone(tavoite.tavoite_tekstista(teksti), teksti)
 
+    def test_kuvausrivi_ennen_tavoiterivia_ei_hylkaa(self):
+        # 10.11.2026: tehtavat 25 ja 27 alkoivat kuvausrivilla "Tavoite: tarkastaja havaitsi ..." ja hylattiin hiljaa.
+        teksti = "# T\nTavoite: tarkastaja havaitsi, etta main() ei kytke arvioijaa.\n\nTavoite: Aivo\n"
+        self.assertEqual(tavoite.tavoite_tekstista(teksti), "aivo")
+        self.assertEqual(tavoite.tavoite_tekstista("Tavoite: rahaa\nTavoite: rahaa taas\n"), None)
+        self.assertEqual(tavoite.tavoite_tekstista("Tavoite: ansainta\nTavoite: Aivo\n"), "ansainta")
+
+    def test_luokittele_kuvausrivi_ensin(self):
+        h = tempfile.mkdtemp()
+        tav, syy = tavoite.luokittele(kirj(h, "2026-11-10-27-a.md", "Tavoite: tarkastajan loydokset:\nTavoite: yll\u00e4pito\n"))
+        self.assertEqual((tav, syy), ("yllapito", ""))
+
     def test_pakollisuus_paivayksen_mukaan(self):
         self.assertFalse(tavoite.pakollinen("2026-11-07-01-vanha.md"))
         self.assertTrue(tavoite.pakollinen("2026-11-08-01-uusi.md"))

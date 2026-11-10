@@ -46,8 +46,12 @@ def normalisoi(arvo):
 
 def tavoite_tekstista(teksti):
     """Ensimmainen `Tavoite:`-rivi, jonka arvo on sallittu. None = puuttuu tai ei kelpaa."""
-    m = TAVOITERIVI_RE.search((teksti or "")[:LUKU_MAX])
-    return normalisoi(m.group(1)) if m else None
+    # Kuvausrivi "Tavoite: <vapaa teksti>" ennen varsinaista rivia ei saa hylata tehtavaa (10.11.: 25 ja 27 seisoivat).
+    for m in TAVOITERIVI_RE.finditer((teksti or "")[:LUKU_MAX]):
+        t = normalisoi(m.group(1))
+        if t:
+            return t
+    return None
 
 
 def tehtavan_tavoite(polku):
