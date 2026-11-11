@@ -27,6 +27,14 @@ class Jasennys(unittest.TestCase):
         for teksti in ("ei rivia", "Tavoite: rahaa", "Tavoite:", "tavoite: aivo", "  Tavoite: aivo", "Tavoite: aivo ja muuta", "x Tavoite: aivo"):
             self.assertIsNone(tavoite.tavoite_tekstista(teksti), teksti)
 
+    def test_sulkuhuomautus_sallitaan_vain_kelpaavan_arvon_perassa(self):
+        # Tehtava 11-04 (11.11.2026): "Tavoite: yll\u00e4pito (laatu)" hylattiin hiljaa 9 tunniksi.
+        for rivi, odotettu in (("yll\u00e4pito (laatu)", "yllapito"), ("portfolio (k\u00e4rkiprojekti)", "portfolio"),
+                               ("Aivo (varjotila).", "aivo"), ("ansainta ()", "ansainta")):
+            self.assertEqual(tavoite.tavoite_tekstista(f"Tavoite: {rivi}\n"), odotettu, rivi)
+        for rivi in ("rahaa (aivo)", "(yllapito)", "yllapito (a) (b)", "aivo ja muuta (x)", "yllapito (laatu) lisaa"):
+            self.assertIsNone(tavoite.tavoite_tekstista(f"Tavoite: {rivi}\n"), rivi)
+
     def test_pakollisuus_paivayksen_mukaan(self):
         self.assertFalse(tavoite.pakollinen("2026-11-07-01-vanha.md"))
         self.assertTrue(tavoite.pakollinen("2026-11-08-01-uusi.md"))

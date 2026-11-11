@@ -30,6 +30,9 @@ LUKU_MAX = 20000
 HYLKAYSLOKI = "tavoitehylkaykset.jsonl"
 PAIVAYS_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})-")
 PR_RE = re.compile(r"github\.com/([\w.-]+/[\w.-]+)/pull/(\d+)")
+# Arvon peraan sallitaan yksi sulkuhuomautus ("yllapito (laatu)"). Itse arvo tarkistetaan silti suljetusta listasta,
+# joten huomautus ei voi tehda kelvottomasta arvosta kelpaavaa. Tehtava 11-04 seisoi 9 h tasta syysta (11.11.2026).
+SULKUHUOMAUTUS_RE = re.compile(r"[ \t]*\([^()]*\)$")
 
 
 def _ascii(s):
@@ -38,7 +41,7 @@ def _ascii(s):
 
 def normalisoi(arvo):
     """Rivin arvo -> yksi TAVOITTEET-arvoista tai None."""
-    a = _ascii(arvo).rstrip(".")
+    a = SULKUHUOMAUTUS_RE.sub("", _ascii(arvo).rstrip(".")).rstrip(".")
     if a in ("portfolio", "to-paikka", "to-paikka/portfolio", "to paikka/portfolio"):
         return PORTFOLIO
     return a if a in (ANSAINTA, AIVO, YLLAPITO) else None
