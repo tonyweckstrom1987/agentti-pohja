@@ -170,3 +170,42 @@ class AivoArvio(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TavoiteVaroitus(unittest.TestCase):
+    """Vika 10.-11.11.2026: tavoiteportin hylkaamat tehtavat seisoivat hiljaa 2,5-4 h. Nyt hylkays nousee viestina kerran."""
+
+    def setUp(self):
+        self.repo = Path(tempfile.mkdtemp()) / "docs"
+        self.teht = self.repo / "claude-jono" / "tehtavat"
+        self.teht.mkdir(parents=True)
+        self.tila = self.repo.parent
+
+    def test_hylatty_nousee_kerran_ja_kelvollinen_ei(self):
+        kirj(self.teht, "2026-11-11-04-kuvausrivi.md", "# T\nTavoite: Tony kysyi jotain\n")
+        kirj(self.teht, "2026-11-11-05-ok.md", "Tavoite: yllapito\n")
+        kirj(self.teht, "2026-11-07-01-vanha.md", "# vanha ilman rivia\n")   # ennen pakollisuutta: ajetaan, ei varoitusta
+        viestit = []
+        self.assertEqual(ajuri.varoita_tavoitteettomista(self.repo, self.tila, viestit.append), ["2026-11-11-04-kuvausrivi.md"])
+        self.assertEqual(ajuri.varoita_tavoitteettomista(self.repo, self.tila, viestit.append), [])
+        self.assertEqual(len(viestit), 1)
+        self.assertIn("2026-11-11-04-kuvausrivi.md", viestit[0])
+        self.assertIn("Miksi:", viestit[0])
+
+    def test_tehty_tehtava_ei_varoita(self):
+        kirj(self.teht, "2026-11-11-04-kuvausrivi.md", "ei rivia\n")
+        (self.repo / "claude-jono" / "tulokset").mkdir()
+        kirj(self.repo / "claude-jono" / "tulokset", "2026-11-11-04-kuvausrivi.md", "VALMIS\n")
+        self.assertEqual(ajuri.varoita_tavoitteettomista(self.repo, self.tila, [].append), [])
+
+    def test_lahetysvirhe_ei_kaada_eika_kirjaa_tilaa(self):
+        kirj(self.teht, "2026-11-11-04-x.md", "ei rivia\n")
+
+        def rikki(_):
+            raise OSError("verkko alhaalla")
+        self.assertEqual(ajuri.varoita_tavoitteettomista(self.repo, self.tila, rikki), [])
+        self.assertEqual(ajuri.varoita_tavoitteettomista(self.repo, self.tila, lambda _: False), [])
+        self.assertEqual(ajuri.varoita_tavoitteettomista(self.repo, self.tila, None), [])
+        self.assertFalse((self.tila / ajuri.TAVOITEVAROITUKSET).exists())
+        viestit = []
+        self.assertEqual(len(ajuri.varoita_tavoitteettomista(self.repo, self.tila, viestit.append)), 1)

@@ -320,13 +320,12 @@ def kelvottomat_tehtavat(repo):
             and not kelvollinen_nimi(p.name) and not (tul / p.name).exists()]
 
 
-def varoita_kelvottomista(repo, tila, laheta):
-    """Lahettaa viestin kerran kustakin kelvottomasta tehtavanimesta (tila: NIMIVAROITUKSET). Palauttaa uudet nimet.
+def _varoita_kerran(tila, tilatiedosto, nimet, teksti, laheta):
+    """Yhteinen runko: viesti kerran kustakin nimesta (tila: tilatiedosto). Palauttaa uudet nimet.
     Ei koskaan kaada jonoa: tilatiedoston virhe tarkoittaa vain, etta varoitus voi toistua."""
-    nimet = kelvottomat_tehtavat(repo)
     if not nimet or not laheta:
         return []
-    polku = Path(tila) / NIMIVAROITUKSET
+    polku = Path(tila) / tilatiedosto
     try:
         vanhat = set(json.loads(polku.read_text()))
     except (OSError, ValueError, TypeError):
@@ -334,13 +333,10 @@ def varoita_kelvottomista(repo, tila, laheta):
     uudet = [n for n in nimet if n not in vanhat]
     if not uudet:
         return []
-    teksti = ("claude-jono OHITTAA tehtavan, nimi ei kelpaa: " + ", ".join(uudet[:5])
-              + ("" if len(uudet) <= 5 else f" (+{len(uudet) - 5})")
-              + "\nSallittu muoto: VVVV-KK-PP-NN-kirjaimet-numerot-viivat.md (a-z, A-Z, 0-9, -). Nimea tiedosto uudelleen.")
     try:
-        lahti = laheta(teksti)
+        lahti = laheta(teksti(uudet))
     except Exception as virhe:  # ilmoituskanavan vika ei saa estaa kelvollisten tehtavien ajoa (tarkastus #265)
-        print(f"varoita_kelvottomista: lahetys epaonnistui ({type(virhe).__name__})", file=sys.stderr)
+        print(f"varoitus: lahetys epaonnistui ({type(virhe).__name__})", file=sys.stderr)
         return []
     if lahti is False:   # laheta_telegram palauttaa False epaonnistuessaan: tilaa ei kirjata, joten varoitus yritetaan uudelleen
         return []
@@ -349,6 +345,33 @@ def varoita_kelvottomista(repo, tila, laheta):
     except OSError:
         pass
     return uudet
+
+
+def _luettelo(nimet):
+    return ", ".join(nimet[:5]) + ("" if len(nimet) <= 5 else f" (+{len(nimet) - 5})")
+
+
+def varoita_kelvottomista(repo, tila, laheta):
+    """Lahettaa viestin kerran kustakin kelvottomasta tehtavanimesta (tila: NIMIVAROITUKSET). Palauttaa uudet nimet."""
+    return _varoita_kerran(tila, NIMIVAROITUKSET, kelvottomat_tehtavat(repo), lambda uudet: (
+        "claude-jono OHITTAA tehtavan, nimi ei kelpaa: " + _luettelo(uudet)
+        + "\nSallittu muoto: VVVV-KK-PP-NN-kirjaimet-numerot-viivat.md (a-z, A-Z, 0-9, -). Nimea tiedosto uudelleen."), laheta)
+
+
+TAVOITEVAROITUKSET = "tavoitevaroitukset.json"
+
+
+def tavoitteettomat_tehtavat(repo):
+    """Odottavat tehtavat, jotka tavoiteportti (A840) hylkaa. Ne jaavat jonoon ajamatta, eika itsesuunnittelu laske niita."""
+    return [p.name for p in odottavat_tehtavat(repo) if tavoite.luokittele(p)[0] is None]
+
+
+def varoita_tavoitteettomista(repo, tila, laheta):
+    """Vika 10.-11.11.2026: tehtavat seisoivat 2,5-4 h, koska tavoiteportti hylkasi ne hiljaa (loki vain isannalla).
+    Lahettaa viestin kerran kustakin hylatysta tehtavasta (tila: TAVOITEVAROITUKSET). Palauttaa uudet nimet."""
+    return _varoita_kerran(tila, TAVOITEVAROITUKSET, tavoitteettomat_tehtavat(repo), lambda uudet: (
+        "claude-jono OHITTAA tehtavan, Tavoite-rivi puuttuu tai ei kelpaa: " + _luettelo(uudet)
+        + "\nLisaa rivi 'Tavoite: portfolio | ansainta | Aivo | yllapito'. Kuvausrivi muotoon 'Miksi: ...'."), laheta)
 
 
 def varaa_seuraava(repo, tila, kaista, nyt=None, vanhenee_s=OLETUS_AIKARAJA_S + VARAUS_MARGINAALI_S, kaistoja=KAISTOJA_MAX, ohita=None):
@@ -1018,6 +1041,7 @@ def aja(repo, tyohak, env=None, suorita=subprocess.run, laheta=None, kaista=1, l
     with git_lukko(tila) as odotus:
         git(repo, "pull", "-q", "--rebase", "origin", "main")
         varoita_kelvottomista(repo, tila, laheta)   # muuten vaarin nimetty tehtava jaa jonoon nakymatta
+        varoita_tavoitteettomista(repo, tila, laheta)   # muuten tavoiteportin hylkaama tehtava jaa jonoon nakymatta
         if env.get("CLAUDEJONO_ITSESUUNNITTELU", "1") == "1" and env.get("CLAUDEJONO_TOISTUVAT") == "1":
             luo_toistuvat(repo, tyohak)   # toistuvat (esim. viikon optimointikierros) vain kun palvelu kytkee ne paalle
         t = varaa_seuraava(repo, tila, kaista, vanhenee_s=vanhenee, kaistoja=kaistojen_maara(env), ohita=ohita)

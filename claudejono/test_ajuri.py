@@ -128,6 +128,18 @@ class KelvotonNimi(Pohja):
         self.assertTrue(any("OHITTAA" in v and "kiire poista" in v for v in viestit), viestit)
 
 
+    def test_aja_varoittaa_tavoitteettomasta_ja_ajaa_kelvollisen(self):
+        """Vika 11.11.2026: tehtavat 03-05 seisoivat 4 h, koska ensimmainen Tavoite-rivi oli kuvaus. Nyt viesti kerran."""
+        self.lisaa_tehtava("2026-11-11-04-kuvausrivi.md", "# T\nTavoite: Tony kysyi jotain\n")
+        self.lisaa_tehtava("2026-11-11-05-ok.md", "Tavoite: yllapito\n")
+
+        def f(kom, **kw):
+            return subprocess.CompletedProcess(kom, 0, json.dumps({"subtype": "success", "result": "r\nTodennettu kaytossa: testi"}), "")
+        viestit = []
+        viesti = ajuri.aja(self.repo, self.tmp, env={}, suorita=f, laheta=viestit.append)
+        self.assertIn("2026-11-11-05-ok.md VALMIS", viesti)
+        self.assertEqual(sum("Tavoite-rivi puuttuu" in v and "2026-11-11-04-kuvausrivi.md" in v for v in viestit), 1, viestit)
+
 class IsotKirjaimet(Pohja):
     """Vika 7.-8.11.2026: KIIRE-tehtavat 33, 13, 39 ja 55 seisoivat 1,5-2,7 h, koska kaava salli vain pienet kirjaimet."""
 
