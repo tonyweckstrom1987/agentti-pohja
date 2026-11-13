@@ -766,7 +766,36 @@ class OmaKayttaja(unittest.TestCase):
         kom, alaenv, cwd = ajuri.lapsen_ajo("k", {"GIT_SSH_COMMAND": "ssh -i x", "A": "1"}, "/opt/agentscope")
         self.assertEqual(kom[0], "claude")
         self.assertEqual(cwd, "/opt/agentscope")
-        self.assertEqual(alaenv, {"A": "1"})
+        self.assertEqual(alaenv, {"A": "1", **ajuri.GIT_TEKIJA_ENV})
+
+    def test_git_tekija_molemmissa_haaroissa_ja_ylikirjoittaa(self):
+        """Vika 13.11.2026: commit kaatui 'empty ident name' -virheeseen."""
+        for env in ({"CLAUDEJONO_KAYTTAJA": "claudejono", "GIT_AUTHOR_NAME": "root"}, {"GIT_AUTHOR_NAME": "root"}):
+            _kom, alaenv, _cwd = ajuri.lapsen_ajo("k", env, "/opt/agentscope")
+            for avain in ("GIT_AUTHOR_NAME", "GIT_COMMITTER_NAME"):
+                self.assertEqual(alaenv[avain], "agenttifirma-bot")
+            for avain in ("GIT_AUTHOR_EMAIL", "GIT_COMMITTER_EMAIL"):
+                self.assertEqual(alaenv[avain], "agenttifirma-bot@users.noreply.github.com")
+
+    def test_commit_onnistuu_ilman_user_name_asetusta(self):
+        """Oikea git tilapaishakemistossa ilman globaaleja asetuksia: ilman muuttujia commit kaatuu, niiden kanssa onnistuu."""
+        import shutil
+        if not shutil.which("git"):
+            self.skipTest("git puuttuu")
+        with tempfile.TemporaryDirectory() as d:
+            perus = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": d, "GIT_CONFIG_GLOBAL": os.devnull,
+                     "GIT_CONFIG_NOSYSTEM": "1", "EMAIL": "", "LANG": "C"}
+            ajo = lambda *a, env: subprocess.run(["git", "-C", d, *a], env=env, capture_output=True, text=True, check=False)
+            ajo("init", "-q", env=perus)
+            ajo("config", "user.useConfigOnly", "true", env=perus)
+            Path(d, "a").write_text("x", encoding="utf-8")
+            ajo("add", "a", env=perus)
+            self.assertNotEqual(ajo("commit", "-qm", "t", env=perus).returncode, 0)
+            _kom, alaenv, _cwd = ajuri.lapsen_ajo("k", {"CLAUDEJONO_KAYTTAJA": "claudejono"}, "/opt/agentscope")
+            lapsi = {**perus, **{k: v for k, v in alaenv.items() if k.startswith("GIT_")}}
+            self.assertEqual(ajo("commit", "-qm", "t", env=lapsi).returncode, 0)
+            self.assertEqual(ajo("log", "-1", "--format=%an <%ae> / %cn", env=perus).stdout.strip(),
+                             "agenttifirma-bot <agenttifirma-bot@users.noreply.github.com> / agenttifirma-bot")
 
 
 if __name__ == "__main__":

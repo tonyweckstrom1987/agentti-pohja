@@ -474,6 +474,14 @@ def kaistan_tyohak(tyohak, kaista=1):
     return Path(tyohak) / "tyo" / (f"k{kaista}" if kaista > 1 else "")
 
 
+# Vika 13.11.2026: tehtavat 13-01, 13-04 ja 13-07 jaivat KESKEN, koska agentin uusissa klooneissa ei ollut git-tekijaa
+# ("empty ident name"). Ajuri antaa tekijan lapsen ymparistossa, joten commit toimii koskematta kenenkaan git-asetuksiin.
+GIT_TEKIJA_NIMI = "agenttifirma-bot"
+GIT_TEKIJA_SAHKOPOSTI = "agenttifirma-bot@users.noreply.github.com"
+GIT_TEKIJA_ENV = {"GIT_AUTHOR_NAME": GIT_TEKIJA_NIMI, "GIT_AUTHOR_EMAIL": GIT_TEKIJA_SAHKOPOSTI,
+                  "GIT_COMMITTER_NAME": GIT_TEKIJA_NIMI, "GIT_COMMITTER_EMAIL": GIT_TEKIJA_SAHKOPOSTI}
+
+
 def lapsen_ajo(kehote, env, tyohak, kaista=1, malli=None, lisaliput=()):
     """(komento, ymparisto, cwd) Claude-lapsiprosessille.
 
@@ -484,12 +492,13 @@ def lapsen_ajo(kehote, env, tyohak, kaista=1, malli=None, lisaliput=()):
     kayttaja = env.get("CLAUDEJONO_KAYTTAJA", "")
     if not kayttaja:
         alaenv = {k: v for k, v in env.items() if not k.startswith(("YOJONO_TELEGRAM_", "CLAUDEJONO_GIT", "CLAUDEJONO_LITELLM", "GIT_SSH"))}
+        alaenv.update(GIT_TEKIJA_ENV)
         return kom, alaenv, str(tyohak if kaista <= 1 else kaistan_tyohak(tyohak, kaista))
     if not re.match(r"^[a-z_][a-z0-9_-]{0,31}$", kayttaja) or kayttaja == "root":
         raise JonoVirhe("CLAUDEJONO_KAYTTAJA ei kelpaa")
     koti = env.get("CLAUDEJONO_KOTI", f"/var/lib/{kayttaja}")
     alaenv = {"PATH": "/usr/local/bin:/usr/bin:/bin", "HOME": koti, "USER": kayttaja, "LOGNAME": kayttaja,
-              "LANG": env.get("LANG", "C.UTF-8")}
+              "LANG": env.get("LANG", "C.UTF-8"), **GIT_TEKIJA_ENV}
     # Absoluuttinen polku: Popen etsii komennon lapsen PATHista, jossa ei ole /usr/sbin:ia (vika 30.10.2026).
     return [RUNUSER, "-u", kayttaja, "--", *kom], alaenv, str(kaistan_tyohak(tyohak, kaista))
 
