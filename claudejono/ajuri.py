@@ -744,6 +744,18 @@ def kirjaa_suunnittelu(tyohak, repo, nyt, tehtavia):
 
 
 RAJA_RE = re.compile(r"usage limit|limit reached|rate.?limit|too many requests|\b429\b|overloaded|quota|hit your limit", re.IGNORECASE)
+# Tilapainen API- tai verkkovirhe, joka ei johdu tehtavasta (13.11.2026: tehtavat 13-14 ja 13-17 kuluivat
+# EPAONNISTUI-tulokseksi virheella "Failed to authenticate. API Error: 403 Attention Required! | Cloudflare").
+# Kasitellaan kuin kayttoraja: tauko ja enintaan varaus.RAJA_YRITYKSIA yritysta, ei uusintasilmukkaa.
+# 401 (vanhentunut kirjautuminen) ei kuulu tahan: se vaatii Tonya, eika odottaminen auta.
+TILAPAINEN_RE = re.compile(r"Attention Required!? \| Cloudflare|API Error: 403\b[^\n]*cloudflare|API Error: 5\d\d\b|API Error: Connection error",
+                           re.IGNORECASE)
+OLETUS_TILAPAINEN_TAUKO_S = 900
+
+
+def tilapainen_virhe(teksti):
+    """True, jos epaonnistunut Claude-ajo kaatui tilapaiseen API- tai verkkovirheeseen (ei kayttorajaan)."""
+    return bool(teksti) and not RAJA_RE.search(teksti) and bool(TILAPAINEN_RE.search(teksti))
 
 
 def mittarit(stdout):
@@ -1140,6 +1152,16 @@ def aja(repo, tyohak, env=None, suorita=subprocess.run, laheta=None, kaista=1, l
             if yritys < varaus.RAJA_YRITYKSIA:
                 kirjaa_kaistaloki(tila, kaista, "tehtava", t.name, False, kesto, teksti, getattr(r, "stdout", "") or "", None, odotus, malli=m.tunniste)
                 return f"claude-jono: {t.name} KAYTTORAJA, kaistat tauolla {tauko // 60} min{leima}"
+        elif m.reitti == "claude" and not ok and tilapainen_virhe(teksti):
+            # Tilapainen API-virhe (esim. Cloudflare 403, 5xx): sama tauko- ja yrityslaskuri kuin kayttorajalla, lyhyempi tauko.
+            tauko, yritys = varaus.kirjaa_raja(tila, kaista, t.name, {
+                **env, "CLAUDEJONO_RAJA_TAUKO_S": env.get("CLAUDEJONO_TILAPAINEN_TAUKO_S", str(OLETUS_TILAPAINEN_TAUKO_S))})
+            if laheta:
+                laheta(f"Claude-API tilapainen virhe: kaistat tauolla {tauko // 60} min ({t.name}, yritys {yritys}/{varaus.RAJA_YRITYKSIA}): "
+                       f"{(teksti or '').strip()[:120]}")
+            if yritys < varaus.RAJA_YRITYKSIA:
+                kirjaa_kaistaloki(tila, kaista, "tehtava", t.name, False, kesto, teksti, getattr(r, "stdout", "") or "", None, odotus, malli=m.tunniste)
+                return f"claude-jono: {t.name} TILAPAINEN API-VIRHE, kaistat tauolla {tauko // 60} min{leima}"
         with git_lukko(tila) as odotus2:
             # Todennusportti koskee Claude-reitin tyota (koodi, PR:t); OpenRouter-rutiini (tiivistelmat, luokittelu) ei tuota todennusrivia.
             tila_nimi = "KESKEN" if ok and m.reitti == "claude" and not on_todennettu(teksti) else ("VALMIS" if ok else "EPAONNISTUI")

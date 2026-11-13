@@ -296,6 +296,50 @@ class AjuriReitit(Pohja):
             self.assertEqual(tulos.exists(), n == varaus.RAJA_YRITYKSIA - 1)
         self.assertIn("EPAONNISTUI", tulos.read_text())
 
+    def test_cloudflare_403_ei_kuluta_tehtavaa_heti(self):
+        # 13.11.2026: tehtavat 13-14 ja 13-17 kirjattiin EPAONNISTUI-tulokseksi tasta virheesta, eika tyota tehty.
+        self.lisaa_tehtava("2026-11-03-01-x.md", "tee")
+        kutsut = []
+
+        def cf(kom, **kw):
+            kutsut.append(1)
+            return subprocess.CompletedProcess(kom, 1, json.dumps({"subtype": "success", "is_error": True,
+                "result": "Failed to authenticate. API Error: 403 Attention Required! | Cloudflare"}), "")
+        viestit = []
+        v = ajuri.aja(self.repo, self.tmp, env=dict(self.ENV), suorita=cf, laheta=viestit.append)
+        self.assertIn("TILAPAINEN API-VIRHE", v)
+        self.assertIn("tauolla 15 min", v)
+        self.assertFalse((self.repo / ajuri.JONO / "tulokset" / "2026-11-03-01-x.md").exists())   # tehtava jaa jonoon
+        self.assertTrue(any("tilapainen virhe" in m and "Cloudflare" in m for m in viestit))
+        v = ajuri.aja(self.repo, self.tmp, env=dict(self.ENV), suorita=cf)
+        self.assertIn("jono odottaa", v)
+        self.assertEqual(len(kutsut), 1)
+        self.assertEqual(ajuri.aktiiviset_varaukset(self.tmp), [])
+
+    def test_toistuva_tilapainen_virhe_kirjataan_lopulta_epaonnistuneeksi(self):
+        self.lisaa_tehtava("2026-11-03-01-x.md", "tee")
+
+        def cf(kom, **kw):
+            return subprocess.CompletedProcess(kom, 1, json.dumps({"subtype": "error", "is_error": True, "result": "API Error: 502 Bad Gateway"}), "")
+        env = {**self.ENV, "CLAUDEJONO_TILAPAINEN_TAUKO_S": "60"}
+        tulos = self.repo / ajuri.JONO / "tulokset" / "2026-11-03-01-x.md"
+        for n in range(varaus.RAJA_YRITYKSIA):
+            (self.tmp / varaus.RAJA_TILA).unlink(missing_ok=True)   # simuloi tauon kulumista
+            ajuri.aja(self.repo, self.tmp, env=dict(env), suorita=cf)
+            self.assertEqual(tulos.exists(), n == varaus.RAJA_YRITYKSIA - 1)
+        self.assertIn("EPAONNISTUI", tulos.read_text())
+
+    def test_tilapainen_virhe_tunnistus(self):
+        self.assertTrue(ajuri.tilapainen_virhe("Failed to authenticate. API Error: 403 Attention Required! | Cloudflare"))
+        self.assertTrue(ajuri.tilapainen_virhe("API Error: 500 Internal server error"))
+        self.assertTrue(ajuri.tilapainen_virhe("API Error: Connection error."))
+        # 401 = kirjautuminen vanhentunut: vaatii Tonya, ei odotusta
+        self.assertFalse(ajuri.tilapainen_virhe("Failed to authenticate. API Error: 401 OAuth token has expired"))
+        self.assertFalse(ajuri.tilapainen_virhe("API Error: 403 forbidden"))
+        self.assertFalse(ajuri.tilapainen_virhe("Claude usage limit reached"))   # kayttoraja kasitellaan omana
+        self.assertFalse(ajuri.tilapainen_virhe("testit kaatuivat: 5 virhetta"))
+        self.assertFalse(ajuri.tilapainen_virhe(""))
+
     def test_suunnittelu_ajetaan_opuksella(self):
         komennot = []
         ajuri.aja(self.repo, self.tmp, env={"CLAUDEJONO_ITSESUUNNITTELU": "1"}, suorita=ajo(komennot, '{"tehtavat": [], "tonylle": ""}'))
