@@ -389,8 +389,8 @@ class Ajo(Pohja):
         self.assertEqual(ajuri.avoimet_tehtavat(self.repo, self.tmp), 4)             # varattu ei ole avoin
 
     def test_suunnittelu_ei_luo_jonossa_tai_tehtya_tehtavaa(self):
-        self.lisaa_tehtava("2026-11-03-01-auto-sama-nimi.md", "# Eri sisalto")
-        self.lisaa_tehtava("2026-11-02-04-vanha-sisalto.md", "# Tehty\n\nTee   tama.")
+        self.lisaa_tehtava("2026-11-03-01-auto-sama-nimi.md", "# Eri sisalto", raaka=True)
+        self.lisaa_tehtava("2026-11-02-04-vanha-sisalto.md", "# Tehty\n\nTee   tama.", raaka=True)
         tul = self.repo / ajuri.JONO / "tulokset"
         tul.mkdir(parents=True)
         (tul / "2026-11-03-01-auto-sama-nimi.md").write_text("tehty")
