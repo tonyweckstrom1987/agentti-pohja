@@ -840,6 +840,45 @@ class TulosPortti(Pohja):
             with self.subTest(arvo=arvo):
                 self.assertFalse(ajuri.on_todennettu(f"raportti\nTodennettu k\u00e4yt\u00f6ss\u00e4: {arvo}\n"))
 
+    def test_oma_kesken_ilmoitus_voittaa_todennusrivin(self):
+        teksti = ("Commit kaatui.\n\n# Raportti\n\n**Tila: KESKEN.** Muutos tehty, PR puuttuu.\n\n"
+                  "Todennettu k\u00e4yt\u00f6ss\u00e4: testit 5/5 l\u00e4pi")
+        viesti, tiedosto = self.aja_tuloksella(teksti)
+        self.assertIn("KESKEN", viesti)
+        self.assertIn("- Tila: KESKEN", tiedosto)
+        self.assertNotIn("- Tila: VALMIS", tiedosto)
+
+    def test_tavallinen_valmis_pysyy_valmiina(self):
+        viesti, tiedosto = self.aja_tuloksella("Tehty.\n\nTodennettu k\u00e4yt\u00f6ss\u00e4: 12/12 l\u00e4pi")
+        self.assertIn("- Tila: VALMIS", tiedosto)
+
+    def test_ilmoittaa_kesken_tunnistus(self):
+        self.assertTrue(ajuri.ilmoittaa_kesken("a\nTila: KESKEN\n"))
+        self.assertTrue(ajuri.ilmoittaa_kesken("a\n**Tila: KESKEN.** loput"))
+        self.assertTrue(ajuri.ilmoittaa_kesken("a\n**Tila:** KESKEN"))
+        self.assertFalse(ajuri.ilmoittaa_kesken("Esimerkki:\n```\nTila: KESKEN\n```\nTila: VALMIS"))
+        self.assertFalse(ajuri.ilmoittaa_kesken("~~~\n**Tila: KESKEN.**\n~~~"))
+        self.assertFalse(ajuri.ilmoittaa_kesken("> Tila: KESKEN"))
+        self.assertFalse(ajuri.ilmoittaa_kesken("Tulos 13-07 sanoi Tila: KESKEN, mutta nyt valmis"))
+        # sisennys: 4+ valilyontia tai sarkain on sisennetty koodilohko, ei ilmoitus
+        self.assertFalse(ajuri.ilmoittaa_kesken("    Tila: KESKEN"))
+        self.assertFalse(ajuri.ilmoittaa_kesken("\tTila: KESKEN"))
+        self.assertFalse(ajuri.ilmoittaa_kesken("    **Tila: KESKEN**"))
+        self.assertTrue(ajuri.ilmoittaa_kesken("   Tila: KESKEN"))
+        self.assertTrue(ajuri.ilmoittaa_kesken("   **Tila: KESKEN**"))
+        # aidat: sulkeva aita on samaa merkkia, eika infotekstillinen rivi sulje lohkoa
+        self.assertFalse(ajuri.ilmoittaa_kesken("```\nx\n```~~\nTila: KESKEN"))
+        self.assertFalse(ajuri.ilmoittaa_kesken("```\nx\n~~~\nTila: KESKEN"))
+        self.assertTrue(ajuri.ilmoittaa_kesken("```\nx\n```\nTila: KESKEN"))
+        self.assertTrue(ajuri.ilmoittaa_kesken("~~~\nx\n~~~~\nTila: KESKEN"))
+        self.assertFalse(ajuri.ilmoittaa_kesken("- Tila: KESKEN (lainaus toisesta tuloksesta)"))
+        self.assertFalse(ajuri.ilmoittaa_kesken("Tila: KESKENERAINEN"))
+        self.assertFalse(ajuri.ilmoittaa_kesken(""))
+
+    def test_lainattu_kesken_koodilohkossa_on_valmis(self):
+        viesti, tiedosto = self.aja_tuloksella("Tehty.\n\n```\nTila: KESKEN\n```\n\nTodennettu k\u00e4yt\u00f6ss\u00e4: 12/12 l\u00e4pi")
+        self.assertIn("- Tila: VALMIS", tiedosto)
+
     def test_oikea_rivi_on_valmis(self):
         viesti, tiedosto = self.aja_tuloksella("Tehty.\n\nTodennettu k\u00e4yt\u00f6ss\u00e4: ajettu oikeaa kohdetta vastaan, 12/12 l\u00e4pi")
         self.assertIn("VALMIS", viesti)

@@ -111,6 +111,17 @@ def on_todennettu(teksti):
     return any(not TODENNETTU_TYHJA_RE.match(m.group(1)) for m in TODENNETTU_RE.finditer(teksti or ""))
 
 
+# Raportti, joka itse ilmoittaa rivin alussa "Tila: KESKEN" (myos lihavoituna), ei ole VALMIS vaikka todennusrivi olisi.
+# Lainaukset (>), sisennetyt rivit ja koodilohkot eivat laukaise.
+KESKEN_ILMOITUS_RE = re.compile(r"^[ ]{0,3}(?:(?:\*\*|__)[ \t]*)?Tila[ \t]*:[ \t]*(?:\*\*|__)?[ \t]*KESKEN\b", re.IGNORECASE | re.MULTILINE)
+KOODILOHKO_RE = re.compile(r"^[ ]{0,3}((?P<merkki>[`~])(?P=merkki){2,}).*?(?:^[ ]{0,3}\1(?P=merkki)*[ \t]*$|\Z)", re.MULTILINE | re.DOTALL)
+
+
+def ilmoittaa_kesken(teksti):
+    """True, jos raportti ilmoittaa itse rivin alussa 'Tila: KESKEN' (koodilohkojen ja lainausten ulkopuolella)."""
+    return bool(KESKEN_ILMOITUS_RE.search(KOODILOHKO_RE.sub("", teksti or "")))
+
+
 class JonoVirhe(RuntimeError):
     pass
 
@@ -1142,7 +1153,7 @@ def aja(repo, tyohak, env=None, suorita=subprocess.run, laheta=None, kaista=1, l
                 return f"claude-jono: {t.name} KAYTTORAJA, kaistat tauolla {tauko // 60} min{leima}"
         with git_lukko(tila) as odotus2:
             # Todennusportti koskee Claude-reitin tyota (koodi, PR:t); OpenRouter-rutiini (tiivistelmat, luokittelu) ei tuota todennusrivia.
-            tila_nimi = "KESKEN" if ok and m.reitti == "claude" and not on_todennettu(teksti) else ("VALMIS" if ok else "EPAONNISTUI")
+            tila_nimi = "KESKEN" if ok and m.reitti == "claude" and (not on_todennettu(teksti) or ilmoittaa_kesken(teksti)) else ("VALMIS" if ok else "EPAONNISTUI")
             ohitetut = []
             docs = poimi_docs_ulos(cwd, repo, env, ohitetut=ohitetut) if m.reitti == "claude" else []
             if ohitetut and tila_nimi == "VALMIS":
