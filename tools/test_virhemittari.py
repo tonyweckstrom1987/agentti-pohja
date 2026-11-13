@@ -31,6 +31,50 @@ class LokiTesti(unittest.TestCase):
                          ["2026-11-01", "2026-11-02", "2026-11-03", "2026-11-04", "2026-11-09"])
         self.assertIn("Saanto: y", m[3][1])
 
+    def test_osion_perassa_luettelomerkinta_on_oma_merkinta(self):
+        loki = ("## 10.11.2026 \u2013 otsikko\n- Mit\u00e4: a\n- Miksi: b\n\n"
+                "- 11.11.2026 klo 6.50 \u2014 uusi (juurisyy 2)\n  - sisennetty alakohta\n"
+                "- 13.11.2026 \u2014 toinen\n")
+        m = vm.lue_loki(loki)
+        self.assertEqual([p.isoformat() for p, _ in m], ["2026-11-10", "2026-11-11", "2026-11-13"])
+        self.assertNotIn("uusi", m[0][1])
+        self.assertIn("sisennetty alakohta", m[1][1])
+        self.assertEqual(vm.luokittele_loki(m[0][1]), "?")
+        self.assertEqual(vm.luokittele_loki(m[1][1]), "2")
+
+    def test_kenttarivit_pysyvat_osion_sisalla(self):
+        m = vm.lue_loki("## 9.11.2026 \u2013 x\n- Mit\u00e4: a\n- Miksi: b\n- S\u00e4\u00e4nt\u00f6: c\n")
+        self.assertEqual(len(m), 1)
+        self.assertIn("S\u00e4\u00e4nt\u00f6: c", m[0][1])
+
+    def test_vanha_muoto_toimii_viela(self):
+        m = vm.lue_loki("- 2026-11-01: a\n- 2026-11-02 klo 10.00: b\n")
+        self.assertEqual([p.isoformat() for p, _ in m], ["2026-11-01", "2026-11-02"])
+
+    def test_luettelorivin_pkvvvv_kulkee_paivamaaramuunnoksen_lapi(self):
+        loki = ("- 3.11.2026 klo 6.50 \u2014 ensimm\u00e4inen\n"
+                "- 12.11.2026 \u2014 kaksinumeroinen p\u00e4iv\u00e4\n"
+                "- 1.12.2026: yksinumeroinen\n")
+        m = vm.lue_loki(loki)
+        self.assertEqual([p.isoformat() for p, _ in m], ["2026-11-03", "2026-11-12", "2026-12-01"])
+        self.assertTrue(m[0][1].startswith("- 3.11.2026"))
+
+    def test_mahdoton_paivamaara_ohitetaan_eika_kaada(self):
+        self.assertIsNone(vm.parse_paiva("31.2.2026"))
+        self.assertIsNone(vm.parse_paiva("2026-02-30"))
+        m = vm.lue_loki("- 31.2.2026 \u2014 virheellinen\n- 12.11.2026 \u2014 ok\n")
+        self.assertEqual([p.isoformat() for p, _ in m], ["2026-11-12"])
+
+    def test_mahdoton_paivamaara_ei_vuoda_runkoa_edelliseen_merkintaan(self):
+        loki = ("- 2026-11-01: ensimm\u00e4inen\n"
+                "- 31.2.2026 \u2014 virheellinen\n  virheellisen runkorivi\n"
+                "## 30.2.2026 \u2013 mahdoton osio\n- Mit\u00e4: x\n"
+                "- 12.11.2026 \u2014 ok\n")
+        m = vm.lue_loki(loki)
+        self.assertEqual([p.isoformat() for p, _ in m], ["2026-11-01", "2026-11-12"])
+        self.assertNotIn("runkorivi", m[0][1])
+        self.assertNotIn("mahdoton", m[1][1])
+
     def test_luokittelematon_ei_arvaa(self):
         self.assertEqual(vm.luokittele_loki("- 2026-11-02: Jokin tuntematon virhe"), "?")
 
