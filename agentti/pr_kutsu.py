@@ -430,8 +430,43 @@ def tarkista_todennus(kuvaus):
         raise PrVirhe("rivin 'Todennettu kaytossa:' arvo on tyhja tai '-' (koodiportti)")
 
 
+PR_NUMERO_RE = re.compile(r"^https://github\.com/[^/]+/[^/]+/pull/([0-9]+)$")
+
+
+def paivita_pr_kuvaus(repo, osoite, otsikko, runko, tunnus, avaa=urllib.request.urlopen):
+    """Paivittaa olemassa olevan PR:n otsikon ja kuvauksen (PATCH). Palauttaa "" onnistuessa, muuten syyn.
+
+    Vika 14.11.2026 (tulos 14-49, mcp-model-router #54): kun haaralle oli jo PR, avaa_pr ilmoitti "(paivitetty)",
+    mutta vain haara paivittyi; uusi kuvaus jai GitHubiin lahettamatta, ja raportti luuli sen menneen perille.
+    """
+    osuma = PR_NUMERO_RE.match(osoite)
+    if not osuma:
+        return "PR:n numero puuttuu osoitteesta"
+    pyynto = urllib.request.Request(
+        f"https://api.github.com/repos/{OMISTAJA}/{repo}/pulls/{osuma.group(1)}",
+        data=json.dumps({"title": otsikko, "body": runko}).encode(), method="PATCH",
+        headers={"Authorization": "Bearer " + tunnus, "Accept": "application/vnd.github+json",
+                 "Content-Type": "application/json", "User-Agent": "yojono-pr-kutsu"})
+    try:
+        with avaa(pyynto, timeout=30) as vastaus:
+            tieto = json.loads(vastaus.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        return "HTTP %s" % e.code
+    except (urllib.error.URLError, ValueError, OSError) as e:
+        return type(e).__name__
+    def sama(a, b):
+        return isinstance(a, str) and a.replace("\r\n", "\n").strip() == b.replace("\r\n", "\n").strip()
+    if not isinstance(tieto, dict) or not sama(tieto.get("body"), runko) or not sama(tieto.get("title"), otsikko):
+        return "GitHubin vastaus ei vastaa lahetettya kuvausta"
+    return ""
+
+
 def avaa_pr(repo, haara, botti, otsikko, kuvaus, tunnus, avaa=urllib.request.urlopen):
-    """Avaa PR forkista alkuperaiseen repoon. Palauttaa PR:n osoitteen."""
+    """Avaa PR forkista alkuperaiseen repoon. Palauttaa PR:n osoitteen.
+
+    Jos haaralle on jo avoin PR, push on paivittanyt sen koodin; otsikko ja kuvaus paivitetaan erikseen PATCHilla.
+    Jos kuvauksen paivitys ei onnistu, paluuarvo kertoo sen (ei virhetta, koska haara on jo paivitetty).
+    """
     runko = {
         "title": "[yojono] " + "".join(c for c in str(otsikko) if c >= " " and c != "\x7f").strip()[:OTSIKKO_MAX],
         "head": f"{botti}:{haara}",
@@ -451,7 +486,10 @@ def avaa_pr(repo, haara, botti, otsikko, kuvaus, tunnus, avaa=urllib.request.url
             # Yleisin syy: haaralle on jo avoin PR. Push on silloin jo paivittanyt sen (vika 31.10.: raportit luulivat epaonnistuneen).
             olemassa = olemassa_oleva_pr(repo, haara, botti, tunnus, avaa=avaa)
             if olemassa:
-                return olemassa + " (paivitetty)"
+                syy = paivita_pr_kuvaus(repo, olemassa, runko["title"], runko["body"], tunnus, avaa=avaa)
+                if syy:
+                    return olemassa + " (haara paivitetty; otsikkoa ja kuvausta EI paivitetty: %s)" % syy
+                return olemassa + " (paivitetty: haara, otsikko ja kuvaus)"
         raise PrVirhe("GitHub hylkasi PR:n (HTTP %s)" % e.code)
     except (urllib.error.URLError, ValueError, OSError) as e:
         raise PrVirhe("PR-pyynto epaonnistui: " + type(e).__name__)

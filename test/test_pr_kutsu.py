@@ -266,14 +266,59 @@ class PrTest(unittest.TestCase):
 class OlemassaOlevaPrTest(unittest.TestCase):
     """Vika 31.10.2026: haaralle oli jo PR, push paivitti sen, mutta raportti luuli epaonnistuneen (HTTP 422)."""
 
-    def test_422_ja_avoin_pr_palauttaa_osoitteen(self):
+    @staticmethod
+    def _avaa(patch, kutsut):
+        """POST -> 422, GET -> avoin PR #7, PATCH -> patch(pyynto)."""
         def avaa(pyynto, timeout):
+            kutsut.append((pyynto.get_method(), pyynto.full_url,
+                           json.loads(pyynto.data.decode()) if pyynto.data else None))
             if pyynto.get_method() == "POST":
                 raise urllib.error.HTTPError(pyynto.full_url, 422, "x", {}, io.BytesIO(b"{}"))
-            self.assertIn("head=b%3Ayo%2Fkoe", pyynto.full_url)
+            if pyynto.get_method() == "PATCH":
+                return patch(pyynto)
             return Vastaus([{"html_url": "https://github.com/o/r/pull/7"}])
-        self.assertEqual(pk.avaa_pr("agentti-pohja", "yo/koe", "b", "o", "k", TUNNUS, avaa=avaa),
-                         "https://github.com/o/r/pull/7 (paivitetty)")
+        return avaa
+
+    def test_422_ja_avoin_pr_palauttaa_osoitteen(self):
+        kutsut = []
+        kaiku = lambda p: Vastaus(json.loads(p.data.decode()))  # GitHub palauttaa tallennetun otsikon ja kuvauksen
+        osoite = pk.avaa_pr("agentti-pohja", "yo/koe", "b", "o", "k", TUNNUS, avaa=self._avaa(kaiku, kutsut))
+        self.assertEqual(osoite, "https://github.com/o/r/pull/7 (paivitetty: haara, otsikko ja kuvaus)")
+        self.assertIn("head=b%3Ayo%2Fkoe", kutsut[1][1])
+
+    def test_422_paivittaa_otsikon_ja_kuvauksen(self):
+        """Vika 14.11.2026 (mcp-model-router #54): '(paivitetty)' ilmoitettiin, mutta kuvaus jai vanhaksi."""
+        kutsut = []
+        kaiku = lambda p: Vastaus(json.loads(p.data.decode()))
+        pk.avaa_pr("agentti-pohja", "yo/koe", "b", "Uusi otsikko", "Uusi kuvaus", TUNNUS,
+                   avaa=self._avaa(kaiku, kutsut))
+        patchit = [k for k in kutsut if k[0] == "PATCH"]
+        self.assertEqual(len(patchit), 1)
+        self.assertEqual(patchit[0][1], "https://api.github.com/repos/tonyweckstrom1987/agentti-pohja/pulls/7")
+        self.assertEqual(patchit[0][2]["title"], "[yojono] Uusi otsikko")
+        self.assertTrue(patchit[0][2]["body"].startswith("Uusi kuvaus"))
+        self.assertIn("Riippumaton tarkastaja katselmoi", patchit[0][2]["body"])
+        self.assertEqual(set(patchit[0][2]), {"title", "body"})  # ei head/base/maintainer_can_modify -muutoksia
+
+    def test_kuvauksen_paivitysvirhe_kerrotaan_eika_vaiteta_paivitetyksi(self):
+        def kielto(p):
+            raise urllib.error.HTTPError(p.full_url, 403, "x", {}, io.BytesIO(b"{}"))
+        for patch, syy in ((kielto, "HTTP 403"),
+                           (lambda p: Vastaus({"title": "[yojono] o", "body": "vanha"}), "ei vastaa")):
+            osoite = pk.avaa_pr("agentti-pohja", "yo/koe", "b", "o", "k", TUNNUS, avaa=self._avaa(patch, []))
+            self.assertTrue(osoite.startswith("https://github.com/o/r/pull/7 (haara paivitetty; "), osoite)
+            self.assertIn("EI paivitetty", osoite)
+            self.assertIn(syy, osoite)
+            self.assertNotIn(TUNNUS, osoite)
+
+    def test_numeroton_osoite_ei_patchaa(self):
+        self.assertIn("numero", pk.paivita_pr_kuvaus("r", "https://github.com/o/r/pulls", "t", "b", TUNNUS,
+                                                     avaa=lambda p, timeout: self.fail("ei pyyntoa")))
+
+    def test_rivinvaihdot_normalisoidaan(self):
+        vastaus = lambda p, timeout: Vastaus({"title": "t", "body": "a\r\nb\n"})
+        self.assertEqual(pk.paivita_pr_kuvaus("r", "https://github.com/o/r/pull/3", "t", "a\nb", TUNNUS,
+                                              avaa=vastaus), "")
 
     def test_422_ilman_avointa_pr_on_virhe(self):
         def avaa(pyynto, timeout):
