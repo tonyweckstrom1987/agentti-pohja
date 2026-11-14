@@ -77,6 +77,7 @@ GIT_LUKKO = "git-lukko"
 VARAUS_LUKKO = "varaus-lukko"
 LUKKO_ODOTUS_S = 600
 VARAUS_MARGINAALI_S = 15 * 60
+JONO_MAX_AVOIMIA = 50    # itsesuunnittelu ei lisaa tehtavia, kun avoimia (ei tulosta) on tama tai enemman (koodi on laki)
 AVOIMIA_PER_KAISTA = 2   # suunnittelu kaynnistyy, kun varaamattomia avoimia tehtavia < 2 x kaistat
 KAISTALOKI = "kaistaloki.jsonl"
 KEHOTE = Path(__file__).resolve().parent / "kehote.md"
@@ -120,15 +121,9 @@ def kelvollinen_nimi(nimi):
 
 
 def seuraava_tehtava(repo):
-    """Vanhin (nimen mukaan) kelvollinen tehtava, jolla ei ole tulosta. None jos jono on tyhja."""
-    teht = Path(repo) / JONO / "tehtavat"
-    tul = Path(repo) / JONO / "tulokset"
-    if not teht.is_dir():
-        return None
-    for p in sorted(teht.iterdir()):
-        if p.is_file() and kelvollinen_nimi(p.name) and not (tul / p.name).exists():
-            return p
-    return None
+    """Ensimmainen kelvollinen tehtava, jolla ei ole tulosta (prioriteetti ensin, sitten nimi). None jos jono on tyhja."""
+    odottavat = odottavat_tehtavat(repo)
+    return odottavat[0] if odottavat else None
 
 
 def kaistojen_maara(env):
@@ -296,13 +291,51 @@ def tehtavan_kaista(polku, kaistoja=KAISTOJA_MAX):
     return n if 1 <= n <= min(kaistoja, KAISTOJA_MAX) else None
 
 
+PRIORITEETTI_RE = re.compile(r"^[ \t#*_>-]*PRIORITEETTI[ \t]+(\d{1,3})\b", re.MULTILINE)
+
+
+AJURIN_TEHTAVAVIESTIT = ("claude-jono: itsesuunnittelu", "claude-jono: toistuva tehtava")   # ajurin omat julkaise()-viestit tehtavatiedostoille
+
+
+def ajurin_kirjoittama(polku):
+    """Onko ajuri (itsesuunnittelu tai toistuva tehtava) kirjoittanut tiedoston? Kirjoittaja luetaan gitista: tiedoston lisanneen
+    commitin viesti on ajurin oma. Tiedoston nimi ei ratkaise. Gitin virhe tulkitaan ajurin tiedostoksi (turvallinen suunta:
+    prioriteettia ei huomioida). Git-historiaton (ei commitoitu) tiedosto ei ole ajurin."""
+    p = Path(polku)
+    try:
+        r = subprocess.run(["git", "-C", str(p.parent), "log", "--diff-filter=A", "--format=%s", "-1", "--", p.name],
+                           capture_output=True, text=True, check=False, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return True
+    if r.returncode != 0:
+        return True
+    return r.stdout.strip().startswith(AJURIN_TEHTAVAVIESTIT)
+
+
+def tehtavan_prioriteetti(polku):
+    """Tonyn tai pilvi-Clauden nimeama `PRIORITEETTI n` -otsikko (pienempi ensin). Ei otsikkoa = jonon loppuun (None).
+    Ajurin kirjoittamat tiedostot (itsesuunnittelu, toistuvat) eivat voi nostaa itseaan jonon karkeen: kirjoittaja
+    tarkistetaan gitista, ja `-auto-` nimessa on lisasuoja. Git kysytaan vain, jos tiedostossa on prioriteettirivi."""
+    try:
+        with open(polku, "rb") as f:
+            teksti = f.read(KAISTARIVI_LUKU_MAX).decode("utf-8", "replace")
+    except OSError:
+        return None
+    m = PRIORITEETTI_RE.search(teksti)
+    if not m or "-auto-" in Path(polku).name or ajurin_kirjoittama(polku):
+        return None
+    return int(m.group(1))
+
+
 def odottavat_tehtavat(repo):
-    """Kaikki kelvolliset tehtavat ilman tulosta nimen mukaisessa jarjestyksessa."""
+    """Kaikki kelvolliset tehtavat ilman tulosta: ensin PRIORITEETTI n (pienin ensin), sitten muut; tasatilanteessa nimen mukaan."""
     teht = Path(repo) / JONO / "tehtavat"
     tul = Path(repo) / JONO / "tulokset"
     if not teht.is_dir():
         return []
-    return [p for p in sorted(teht.iterdir()) if p.is_file() and kelvollinen_nimi(p.name) and not (tul / p.name).exists()]
+    avoimet = [p for p in sorted(teht.iterdir()) if p.is_file() and kelvollinen_nimi(p.name) and not (tul / p.name).exists()]
+    avaimet = {p: tehtavan_prioriteetti(p) for p in avoimet}
+    return sorted(avoimet, key=lambda p: (avaimet[p] is None, avaimet[p] or 0, p.name))
 
 
 NIMIVAROITUKSET = "nimivaroitukset.json"
@@ -761,7 +794,7 @@ def mittarit(stdout):
     return ulos
 
 
-def kirjaa_kaistaloki(tila, kaista, laji, nimi, ok, kesto_s, teksti="", stdout="", pushattu=None, lukko_odotus_s=0.0, nyt=None, malli=""):
+def kirjaa_kaistaloki(tila, kaista, laji, nimi, ok, kesto_s, teksti="", stdout="", pushattu=None, lukko_odotus_s=0.0, nyt=None, malli="", viesti=""):
     """Yksi JSON-rivi per ajo (kaistakoe, doc 71 / 2026-11-03). Rajaan osuminen on arvaus: tekstista haetaan tunnetut ilmaukset.
     Kirjausvirhe ei saa kaataa ajoa."""
     nyt = nyt or datetime.now().astimezone()
@@ -770,6 +803,8 @@ def kirjaa_kaistaloki(tila, kaista, laji, nimi, ok, kesto_s, teksti="", stdout="
             "lukko_odotus_s": round(lukko_odotus_s, 2), **mittarit(stdout)}
     if malli:
         rivi["malli"] = malli
+    if viesti:
+        rivi["viesti"] = viesti[:200]   # esim. itsesuunnittelun ohitus (jonon enimmaiskoko)
     if pushattu is not None:
         rivi["push"] = bool(pushattu)
     try:
@@ -902,7 +937,10 @@ def suunnittele(repo, tyohak, env, suorita, laheta=None, nyt=None, kaista=1):
     pysaytys = silmukka.pysaytetty(tyohak)
     if pysaytys:
         return f"itsesuunnittelu pysaytetty (laatuotos): {pysaytys}"
-    tilaa = min(AUTO_PER_AJO, AUTO_MAX_PAIVA - auto_tanaan(repo, pvm))
+    avoimia = len(odottavat_tehtavat(repo))
+    if avoimia >= JONO_MAX_AVOIMIA:
+        return f"jono taynna (itsesuunnittelu ohitettu: avoimia tehtavia {avoimia} >= {JONO_MAX_AVOIMIA})"
+    tilaa = min(AUTO_PER_AJO, AUTO_MAX_PAIVA - auto_tanaan(repo, pvm), JONO_MAX_AVOIMIA - avoimia)
     if tilaa <= 0:
         return "jono tyhja (itsesuunnittelun paivaraja taynna)"
     if suunnittelu_tauolla(tyohak, repo, nyt, int(env.get("CLAUDEJONO_SUUNNITTELU_TAUKO_S", SUUNNITTELU_TAUKO_S))):
@@ -958,7 +996,7 @@ def suunnittele(repo, tyohak, env, suorita, laheta=None, nyt=None, kaista=1):
         kirjaa_suunnittelu(tyohak, repo, nyt, len([p for p in polut if p.name != TONYLLE]))
         if not polut:
             return "jono tyhja (ei uusia tehtavia)"
-        julkaise(repo, polut, f"claude-jono: itsesuunnittelu {len([p for p in polut if p.name != TONYLLE])} tehtavaa")
+        julkaise(repo, polut, f"{AJURIN_TEHTAVAVIESTIT[0]} {len([p for p in polut if p.name != TONYLLE])} tehtavaa")
     viesti = "claude-jono: itsesuunnittelu -> " + ", ".join(p.name for p in polut)
     if laheta:
         laheta(viesti)
@@ -986,7 +1024,7 @@ def luo_toistuvat(repo, tyohak, nyt=None):
                      encoding="utf-8")
         polut.append(p)
     if polut:
-        julkaise(repo, polut, "claude-jono: toistuva tehtava " + ", ".join(p.name for p in polut))
+        julkaise(repo, polut, AJURIN_TEHTAVAVIESTIT[1] + " " + ", ".join(p.name for p in polut))
     return polut
 
 
@@ -1117,7 +1155,7 @@ def aja(repo, tyohak, env=None, suorita=subprocess.run, laheta=None, kaista=1, l
             viesti = suunnittele(repo, tyohak, env, suorita, laheta, kaista=kaista)
         finally:
             vapauta(tila, SUUNNITTELU_VARAUS, kaista)
-        kirjaa_kaistaloki(tila, kaista, "suunnittelu", "", True, time.monotonic() - alku, lukko_odotus_s=odotus,
+        kirjaa_kaistaloki(tila, kaista, "suunnittelu", "", True, time.monotonic() - alku, lukko_odotus_s=odotus, viesti=viesti,
                           malli=mallit.suunnittelun_malli().tunniste)
         return viesti
     taydennys = ""   # taydennys hoidetaan ennakoivalla suunnittelulla (#175): vapaa kaista suunnittelee, kun avoimia < 2 x kaistat

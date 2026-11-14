@@ -427,6 +427,135 @@ class Itsesuunnittelu(Pohja):
         self.assertEqual(len(kutsut), 1)
 
 
+class JononEnimmaiskoko(Itsesuunnittelu):
+    def tayta(self, n):
+        teht = self.repo / ajuri.JONO / "tehtavat"
+        teht.mkdir(parents=True, exist_ok=True)
+        for i in range(n):
+            (teht / f"2026-10-29-{i + 1:02d}-vanha{i}.md").write_text(f"# vanha {i}\n")
+        git(self.repo, "add", "-A"); git(self.repo, "commit", "-q", "-m", "t"); git(self.repo, "push", "-q", "origin", "main")
+
+    VASTAUS = json.dumps({"tehtavat": [{"nimi": "uusi-a", "sisalto": "# A\nTavoite: yllapito"}, {"nimi": "uusi-b", "sisalto": "# B\nTavoite: yllapito"}], "tonylle": ""})
+
+    def test_49_avointa_lisaa_vain_yhden(self):
+        self.tayta(49)
+        kutsut = []
+        ajuri.suunnittele(self.repo, self.tmp, {}, self.malli(self.VASTAUS, kutsut), nyt=self.nyt())
+        self.assertEqual(len(kutsut), 1)
+        self.assertEqual(len(ajuri.odottavat_tehtavat(self.repo)), ajuri.JONO_MAX_AVOIMIA)
+        auto = [p for p in self.origin_tiedostot() if "-auto-uusi" in p]
+        self.assertEqual(len(auto), 1)
+
+    def test_50_avointa_ohittaa_eika_kutsu_mallia(self):
+        self.tayta(50)
+        kutsut = []
+        v = ajuri.suunnittele(self.repo, self.tmp, {}, self.malli(self.VASTAUS, kutsut), nyt=self.nyt())
+        self.assertEqual(kutsut, [])
+        self.assertIn("ohitettu", v)
+        self.assertTrue(v.startswith("jono taynna"), v)
+        self.assertFalse(v.startswith("jono tyhja"), v)   # kaistalokin ja seurannan lukijat tulkitsevat "jono tyhja" tyhjaksi jonoksi
+        self.assertEqual([p for p in self.origin_tiedostot() if "-auto-" in p], [])
+
+    def test_tulos_vapauttaa_tilaa(self):
+        self.tayta(50)
+        kutsut = []
+        v = ajuri.suunnittele(self.repo, self.tmp, {}, self.malli(self.VASTAUS, kutsut), nyt=self.nyt())
+        self.assertEqual(kutsut, [])
+        self.assertTrue(v.startswith("jono taynna"), v)
+        (self.repo / ajuri.JONO / "tulokset").mkdir()
+        (self.repo / ajuri.JONO / "tulokset" / "2026-10-29-01-vanha0.md").write_text("ok")
+        self.assertEqual(len(ajuri.odottavat_tehtavat(self.repo)), 49)
+        ajuri.suunnittele(self.repo, self.tmp, {}, self.malli(self.VASTAUS, kutsut), nyt=self.nyt())   # tulos vapautti yhden paikan: suunnittelu jatkuu
+        self.assertEqual(len(kutsut), 1)
+        self.assertEqual(len([p for p in self.origin_tiedostot() if "-auto-uusi" in p]), 1)
+
+    def test_kaistaloki_kirjaa_ohituksen(self):
+        ajuri.kirjaa_kaistaloki(self.tmp, 1, "suunnittelu", "", True, 0.1, viesti="itsesuunnittelu ohitettu: x")
+        rivi = json.loads((self.tmp / ajuri.KAISTALOKI).read_text().splitlines()[-1])
+        self.assertEqual(rivi["viesti"], "itsesuunnittelu ohitettu: x")
+
+
+class Prioriteetti(Pohja):
+    def nimet(self):
+        return [p.name for p in ajuri.odottavat_tehtavat(self.repo)]
+
+    def test_prioriteettirivi_jarjestaa_ensin(self):
+        self.lisaa_tehtava("2026-10-30-01-a.md", "# A\n")
+        self.lisaa_tehtava("2026-10-30-02-b.md", "# PRIORITEETTI 2\n\nb")
+        self.lisaa_tehtava("2026-10-30-03-c.md", "PRIORITEETTI 1\nc")
+        self.lisaa_tehtava("2026-10-30-04-d.md", "# D\n")
+        self.assertEqual(self.nimet(), ["2026-10-30-03-c.md", "2026-10-30-02-b.md", "2026-10-30-01-a.md", "2026-10-30-04-d.md"])
+        self.assertEqual(ajuri.seuraava_tehtava(self.repo).name, "2026-10-30-03-c.md")
+
+    def test_sama_prioriteetti_nimen_mukaan(self):
+        self.lisaa_tehtava("2026-10-30-02-b.md", "PRIORITEETTI 1")
+        self.lisaa_tehtava("2026-10-30-01-a.md", "PRIORITEETTI 1")
+        self.assertEqual(self.nimet(), ["2026-10-30-01-a.md", "2026-10-30-02-b.md"])
+
+    def test_auto_nimi_ei_nosta_itseaan(self):
+        self.lisaa_tehtava("2026-10-30-01-a.md", "tavallinen")
+        self.lisaa_tehtava("2026-10-30-02-auto-x.md", "PRIORITEETTI 1")
+        self.assertEqual(self.nimet(), ["2026-10-30-01-a.md", "2026-10-30-02-auto-x.md"])
+
+    def lisaa_ajurina(self, nimi, teksti):
+        p = self.repo / ajuri.JONO / "tehtavat" / nimi
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(teksti)
+        self.commitoi(p, "claude-jono: itsesuunnittelu 1 tehtavaa")
+        return p
+
+    def commitoi(self, p, viesti):
+        # julkaise() hyvaksyy vain -auto- nimet, joten commit tehdaan suoraan ajurin viestilla: testattava on kirjoittajan luku gitista
+        git(self.repo, "add", "-A")
+        git(self.repo, "commit", "-q", "-m", viesti)
+        git(self.repo, "push", "-q", "origin", "main")
+
+    def test_ajurin_kirjoittama_ei_nosta_itseaan_vaikka_nimessa_ei_ole_auto(self):
+        # Ajuri ei nykyisin nimea muuten kuin -auto-, mutta suoja ei saa nojata nimeen: kirjoittaja luetaan gitista.
+        self.lisaa_tehtava("2026-10-30-01-a.md", "tavallinen")
+        self.lisaa_ajurina("2026-10-30-02-b.md", "PRIORITEETTI 1")
+        self.assertEqual(self.nimet(), ["2026-10-30-01-a.md", "2026-10-30-02-b.md"])
+
+    def test_toistuvan_kirjoittama_ei_nosta_itseaan(self):
+        self.lisaa_tehtava("2026-10-30-01-a.md", "tavallinen")
+        p = self.repo / ajuri.JONO / "tehtavat" / "2026-10-30-02-t.md"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text("PRIORITEETTI 1")
+        self.commitoi(p, "claude-jono: toistuva tehtava 2026-10-30-02-t.md")
+        self.assertEqual(self.nimet(), ["2026-10-30-01-a.md", "2026-10-30-02-t.md"])
+
+    def test_oikea_itsesuunnittelu_tunnistetaan_ajurin_kirjoittamaksi(self):
+        vastaus = json.dumps({"tehtavat": [{"nimi": "uusi", "sisalto": "# A\nTavoite: yllapito\nPRIORITEETTI 1"}], "tonylle": ""})
+        f = lambda kom, **kw: subprocess.CompletedProcess(kom, 0, json.dumps({"subtype": "success", "result": vastaus}), "")
+        from datetime import datetime, timezone
+        ajuri.suunnittele(self.repo, self.tmp, {}, f, nyt=datetime(2026, 10, 30, 12, 0, tzinfo=timezone.utc))
+        p = next((self.repo / ajuri.JONO / "tehtavat").glob("*-auto-uusi.md"))
+        self.assertTrue(ajuri.ajurin_kirjoittama(p))
+        self.assertIsNone(ajuri.tehtavan_prioriteetti(p))
+
+    def test_tonyn_kirjoittama_nostaa_vaikka_toinen_tiedosto_on_ajurin(self):
+        self.lisaa_ajurina("2026-10-30-01-a.md", "PRIORITEETTI 1")
+        self.lisaa_tehtava("2026-10-30-02-b.md", "PRIORITEETTI 2")
+        self.assertEqual(self.nimet(), ["2026-10-30-02-b.md", "2026-10-30-01-a.md"])
+
+    def test_commitoimaton_tiedosto_ilman_auto_nimea_lasketaan_tonyn_tiedostoksi(self):
+        self.lisaa_tehtava("2026-10-30-01-a.md", "tavallinen")
+        p = self.repo / ajuri.JONO / "tehtavat" / "2026-10-30-02-b.md"
+        p.write_text("PRIORITEETTI 1")
+        self.assertEqual(ajuri.tehtavan_prioriteetti(p), 1)
+
+    def test_gitin_virhe_ei_nosta(self):
+        p = self.tmp / "ei-gitia" / "2026-10-30-01-a.md"
+        p.parent.mkdir()
+        p.write_text("PRIORITEETTI 1")
+        self.assertIsNone(ajuri.tehtavan_prioriteetti(p))   # ei git-repo: kirjoittajaa ei voi todeta, prioriteettia ei huomioida
+
+    def test_rivi_keskella_tekstia_ei_laske(self):
+        self.lisaa_tehtava("2026-10-30-01-a.md", "tavallinen")
+        self.lisaa_tehtava("2026-10-30-02-b.md", "mainitaan: kayta PRIORITEETTI 1 -otsikkoa")
+        self.assertEqual(self.nimet(), ["2026-10-30-01-a.md", "2026-10-30-02-b.md"])
+
+
 class TulosKatkaisu(Pohja):
     def test_ylipitka_raportti_merkitaan_katkaistuksi(self):
         p = ajuri.kirjoita_tulos(self.repo, "2026-10-30-01-a.md", True, "\u00e4" * ajuri.TULOS_MAX_TAVUA)
