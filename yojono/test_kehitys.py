@@ -241,6 +241,22 @@ class Ajo(Pohja):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("vihrea, 1 testia", self.raportti("testit"))
 
+    def test_agentti_ajetaan_ilman_pythonpathia(self):
+        # Havainto 8.11.: agentin oma unittest-ajo latasi ajurin test-paketin PYTHONPATH:n kautta (repon test/ ilman __init__.py)
+        vaara = Path(self.tmp.name) / "vaara"
+        kirjoita(vaara / "test" / "__init__.py", "")
+        kirjoita(vaara / "test" / "test_automerge.py", "import unittest\nclass V(unittest.TestCase):\n    def test_v(self):\n        self.fail()\n")
+        kirjoita(self.lahde / REPO / "test" / "test_automerge.py", "import unittest\nclass R(unittest.TestCase):\n    def test_r(self):\n        pass\n")
+        (self.lahde / REPO / "test" / "__init__.py").unlink()
+        git(self.lahde / REPO, "add", "-A")
+        git(self.lahde / REPO, "commit", "-q", "-m", "ilman init")
+        self.agentti_skripti('printf "%s" "${PYTHONPATH-eiasetettu}" > "$0.pp"; python3 -B -m unittest discover -s test -p "test_*.py" > "$0.ut" 2>&1; echo "$@" > "$0.args"; echo x > test/liite.txt')
+        self.pr_kutsu()
+        self.aja(REPO, "1.00", "testit", PYTHONPATH=str(vaara))  # paluukoodia ei tarkisteta: ilman __init__.py discover loytaa 0 testia
+        self.assertEqual(Path(str(self.agentti) + ".pp").read_text(), "eiasetettu")
+        self.assertIn("OK", Path(str(self.agentti) + ".ut").read_text())  # ohjeen mukainen komento lataa repon oman kopion
+        self.assertIn("discover -s test", Path(str(self.agentti) + ".args").read_text())  # kehote neuvoo komennon
+
     def test_vihrea_testilisays_avaa_pr(self):
         self.agentti_skripti('printf "import unittest\\nclass B(unittest.TestCase):\\n    def test_b(self):\\n        self.assertEqual(1, 1)\\n" > test/test_b.py')
         self.pr_kutsu()
