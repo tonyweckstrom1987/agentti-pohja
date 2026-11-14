@@ -50,6 +50,18 @@ def tavoite_tekstista(teksti):
     return normalisoi(m.group(1)) if m else None
 
 
+def hylkaysperuste(teksti):
+    """Syy, jos tavoiteportti hylkaa tekstin (rivi ja sallitut arvot); "" jos kelpaa. Ensimmainen `Tavoite:`-rivi ratkaisee."""
+    m = TAVOITERIVI_RE.search((teksti or "")[:LUKU_MAX])
+    if m and normalisoi(m.group(1)):
+        return ""
+    sallitut = "portfolio, ansainta, Aivo, yllapito"
+    if not m:
+        return f"Tavoite-rivi puuttuu (rivi muotoa `Tavoite: <arvo>`; sallitut: {sallitut})"
+    rivinro = (teksti or "")[:m.start()].count("\n") + 1
+    return f"Ensimmainen Tavoite-rivi (rivi {rivinro}) ei kelpaa: arvo ei ole sallittu (sallitut: {sallitut})"
+
+
 def tehtavan_tavoite(polku):
     try:
         with open(polku, "rb") as f:
@@ -70,7 +82,12 @@ def luokittele(polku):
     if t:
         return t, ""
     if pakollinen(Path(polku).name):
-        return None, "Tavoite-rivi puuttuu tai ei kelpaa (sallitut: portfolio, ansainta, Aivo, yllapito)"
+        try:
+            with open(polku, "rb") as f:
+                teksti = f.read(LUKU_MAX).decode("utf-8", "replace")
+        except OSError:
+            teksti = ""
+        return None, hylkaysperuste(teksti) or "Tavoite-rivi puuttuu tai ei kelpaa"
     return YLLAPITO, ""
 
 
@@ -90,12 +107,13 @@ def kaistan_jarjestys(kaista, kaistoja, aivo_odottaa):
 def valitse(odottavat, kaista, kaistoja, ohitettu=None):
     """odottavat = [(polku, kiinnitetty_kaista)] vanhin ensin. Palauttaa jarjestetyn listan polkuja, jotka kaista saa ottaa:
     ensin kaistalle kiinnitetyt (`Kaista: N` ylittaa osuudet, ja on Tonyn nimenomainen paatos), sitten tavoiteosuuden mukaan.
-    `ohitettu(polku, peruste)` kutsutaan tehtavalle, jota ei aloiteta (puuttuva tavoite)."""
+    `ohitettu(polku, peruste)` kutsutaan tehtavalle, jota ei aloiteta (puuttuva tavoite), mutta vain jos tehtava kuuluu talle
+    kaistalle (vapaa tai kiinnitetty juuri tahan): toiselle kaistalle kiinnitetyn hylkayksen kirjaa sen oma kaista."""
     luokat = []
     for p, pin in odottavat:
         tav, peruste = luokittele(p)
         if tav is None:
-            if ohitettu:
+            if ohitettu and (pin is None or pin == kaista):
                 ohitettu(p, peruste)
             continue
         luokat.append((p, pin, tav))
