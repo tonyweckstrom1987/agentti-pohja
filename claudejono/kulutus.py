@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo
 TZ = ZoneInfo("Europe/Helsinki")
 KULUTUS = "kulutus.jsonl"
 LAATU = "laatu.jsonl"
+STDOUT_MAX = 4_000_000       # jasennetaan enintaan taman verran stdoutin LOPPUPAAATA (loppuolio on viimeinen rivi)
 MIN_OTOS = 10                # alle taman ajomaaran virheprosenttia ei verrata
 MERKITTAVA_ERO_PROS = 15     # halvan mallin virheprosentti vahintaan nain monta prosenttiyksikkoa korkeampi -> ehdotus
 
@@ -22,14 +23,51 @@ def _luku(d, avain):
     return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
 
 
-def claude_luvut(stdout):
-    """{tokenit_in, tokenit_out, cache_luku, cache_kirjoitus, usd, api_ms, malli_todellinen} Clauden JSON-tulosteesta. Lukukelvoton -> {}."""
+def _rajaa(stdout):
+    """(teksti, katkaistu). Liian pitka stdout jasennetaan vain lopusta; katkaistun alun osittainen rivi pudotetaan."""
+    if len(stdout) <= STDOUT_MAX:
+        return stdout, False
+    loppu = stdout[-STDOUT_MAX:]
+    return loppu.partition("\n")[2], True
+
+
+def _tulosolio_syy(stdout):
+    """(olio, syy). syy on None kun olio loytyi; muuten tyhja | ei_tulosta | liian_suuri (vakiosanasto, ei tulosteen sisaltoa)."""
+    if not isinstance(stdout, str) or not stdout.strip():
+        return None, "tyhja"
     try:
-        d = json.loads(stdout)
+        d = json.loads(stdout)          # vanha yksittainen JSON-olio jasennetaan kokonaisena kuten ennen (ei rajaa)
     except (ValueError, TypeError):
-        return {}
-    if not isinstance(d, dict):
-        return {}
+        d = None
+    if isinstance(d, dict) and d.get("type", "result") == "result":
+        return d, None
+    if d is not None and not isinstance(d, dict):
+        return None, "ei_tulosta"
+    teksti, katkaistu = _rajaa(stdout)  # rajaus vain rivipohjaiseen etsintaan (stream-json)
+    syy = "liian_suuri" if katkaistu else "ei_tulosta"
+    loppu = None
+    for rivi in teksti.splitlines():
+        try:
+            o = json.loads(rivi)
+        except ValueError:
+            continue
+        if isinstance(o, dict) and o.get("type") == "result":
+            loppu = o
+    return (loppu, None) if loppu is not None else (None, syy)
+
+
+def tulosolio(stdout):
+    """Clauden loppuolio (type=result) tulosteesta: joko yksi JSON-olio (--output-format json) tai JSON-rivit
+    (--output-format stream-json, viimeinen result-rivi). Muu tai lukukelvoton -> None. Jasennys rajataan STDOUT_MAX:iin."""
+    return _tulosolio_syy(stdout)[0]
+
+
+def claude_luvut(stdout):
+    """{tokenit_in, tokenit_out, cache_luku, cache_kirjoitus, usd, api_ms, malli_todellinen} Clauden JSON-tulosteesta. Lukukelvoton -> {"jasennysvirhe": syy}, jotta
+    kirjaus nayttaa virheen eika luvut nollaudu hiljaa (syy: tyhja | ei_tulosta | liian_suuri)."""
+    d, syy = _tulosolio_syy(stdout)
+    if d is None:
+        return {"jasennysvirhe": syy}
     u = d.get("usage") if isinstance(d.get("usage"), dict) else {}
     ulos = {}
     for avain, nimi in (("input_tokens", "tokenit_in"), ("output_tokens", "tokenit_out"),
@@ -88,9 +126,10 @@ def malleittain(rivit):
     """{malli: {ajoja, epaonnistui, usd, tokenit_in, tokenit_out, cache}} (usd = Clauden API-arvo tai LiteLLM:n kustannus)."""
     ulos = {}
     for r in rivit:
-        m = ulos.setdefault(str(r.get("malli", "?")), {"ajoja": 0, "epaonnistui": 0, "usd": 0.0, "tokenit_in": 0, "tokenit_out": 0, "cache": 0})
+        m = ulos.setdefault(str(r.get("malli", "?")), {"ajoja": 0, "epaonnistui": 0, "usd": 0.0, "tokenit_in": 0, "tokenit_out": 0, "cache": 0, "jasennysvirheita": 0})
         m["ajoja"] += 1
         m["epaonnistui"] += 0 if r.get("ok") else 1
+        m["jasennysvirheita"] += 1 if r.get("jasennysvirhe") else 0
         m["usd"] += float(r.get("usd") or 0)
         m["tokenit_in"] += int(r.get("tokenit_in") or 0)
         m["tokenit_out"] += int(r.get("tokenit_out") or 0)
@@ -108,6 +147,8 @@ def _osa(nimi, m):
     teksti = f"{nimi} {m['ajoja']} ajoa"
     if m["usd"]:
         teksti += f" {m['usd']:.2f} USD"
+    if m.get("jasennysvirheita"):
+        teksti += f" ({m['jasennysvirheita']} ajon luvut puuttuvat: jasennysvirhe)"
     return teksti
 
 
