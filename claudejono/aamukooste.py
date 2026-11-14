@@ -203,7 +203,7 @@ def keraa(repo, perus, nyt, hae=None, yksikot=None, ero=None):
     tulokset = lue_tulokset(repo, alku, nyt)
     opit = []
     for t in tulokset:
-        if t["tila"] == "VALMIS":
+        if t["tila"] in ("TEHTY", "VALMIS"):   # TEHTY = agentin oma tila (A836); VALMIS vanhoissa tuloksissa
             opit += [o for o in ajuri.suodata_opit(ajuri.poimi_uusi_oppi(t["teksti"]))[0] if not TYHJA_OPPI_RE.match(o)]
     prt = []
     for t in tulokset:
@@ -261,7 +261,7 @@ def _lyhenna(teksti, raja=RIVI_MAX):
 
 def rivit(t):
     """Enint\u00e4\u00e4n 10 rivi\u00e4, p\u00e4\u00e4t\u00f6kset ensin: P\u00e4\u00e4t\u00f6kset, Tehty, Kesken, S\u00e4\u00e4nn\u00f6t, Opittu, H\u00e4lytykset, Kulut."""
-    nimet = {"VALMIS": 0, "KESKEN": 0, "EPAONNISTUI": 0, "HYLATTY": 0}
+    nimet = {"TEHTY": 0, "VALMIS": 0, "KESKEN": 0, "EPAONNISTUI": 0, "HYLATTY": 0}
     for r in t["tulokset"]:
         if r["tila"] in nimet:
             nimet[r["tila"]] += 1
@@ -299,7 +299,7 @@ def rivit(t):
         paatos_osat.append(f"{len(avoimet)} avointa kohtaa tonylle.md:ss\u00e4 (muistutus p\u00e4ivitt\u00e4in): " + "; ".join(f"{a.day}.{a.month}. {o}".strip() for a, o in avoimet[:2]))
     paatokset = "P\u00e4\u00e4t\u00f6kset sinulle: " + ", ".join(paatos_osat) + "."
 
-    osat = [f"{len(t['tulokset'])} jonotulosta ({nimet['VALMIS']} valmis, {nimet['EPAONNISTUI']} ep\u00e4onnistui, {nimet['HYLATTY']} hyl\u00e4tty)"]
+    osat = [f"{len(t['tulokset'])} jonotulosta ({nimet['TEHTY']} tehty, {str(nimet['VALMIS']) + ' valmis, ' if nimet['VALMIS'] else ''}{nimet['EPAONNISTUI']} ep\u00e4onnistui, {nimet['HYLATTY']} hyl\u00e4tty)"]
     if t["uudet_prt"]:
         nayta = ", ".join(t["uudet_prt"][:4]) + (f" (+{len(t['uudet_prt']) - 4})" if len(t["uudet_prt"]) > 4 else "")
         osat.append("PR:t " + nayta)

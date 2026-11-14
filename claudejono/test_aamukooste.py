@@ -37,7 +37,7 @@ class Pohja(unittest.TestCase):
 class Kooste(Pohja):
     def setUp(self):
         super().setUp()
-        self.kirjoita("tulokset/2026-11-02-01-a.md", tulos("a", "VALMIS", "2026-11-02T20:00+02:00",
+        self.kirjoita("tulokset/2026-11-02-01-a.md", tulos("a", "TEHTY", "2026-11-02T20:00+02:00",
                       "PR https://github.com/tonyweckstrom1987/agentti-pohja/pull/7\n\n## Uusi oppi\nX ei onnistu, kayta Y.\n"))
         self.kirjoita("tulokset/2026-11-02-02-b.md", tulos("b", "EPAONNISTUI", "2026-11-03T02:00+02:00", "aikakatkaisu"))
         self.kirjoita("tulokset/2026-10-30-01-vanha.md", tulos("vanha", "VALMIS", "2026-10-30T10:00+02:00",
@@ -98,7 +98,7 @@ class Kooste(Pohja):
         rivit = aamukooste.rivit(self.keraa())
         self.assertIn("1 PR:", rivit[0])
         self.assertNotIn("avointa kohtaa", rivit[0])   # fixturen otsikot eiv\u00e4t ole p\u00e4\u00e4t\u00f6spyynt\u00f6j\u00e4
-        self.assertIn("2 jonotulosta (1 valmis, 1 ep", rivit[1])
+        self.assertIn("2 jonotulosta (1 tehty, 1 ep", rivit[1])
         self.assertIn("agentti-pohja#7", rivit[1])
         self.assertIn("ei mit\u00e4\u00e4n", rivit[2])
         self.assertIn("ei.", rivit[3])
@@ -142,6 +142,16 @@ class Kooste(Pohja):
             with mock.patch("sys.stdout"):
                 self.assertEqual(aamukooste.main(["--laheta"]), 0)
         self.assertIs(m.call_args.kwargs.get("pakota"), True)
+
+
+class TehtyJaVanhaValmis(Pohja):
+    def test_tehty_ja_vanha_valmis_lasketaan_erikseen_ja_opit_poimitaan_molemmista(self):
+        oppi = "## Uusi oppi\nX ei onnistu, kayta Y.\n"
+        self.kirjoita("tulokset/2026-11-03-01-a.md", tulos("a", "TEHTY", "2026-11-03T01:00+02:00", oppi))
+        self.kirjoita("tulokset/2026-11-03-02-b.md", tulos("b", "VALMIS", "2026-11-03T02:00+02:00", oppi.replace("Y", "Z")))
+        t = aamukooste.keraa(self.repo, self.yj, NYT, lambda url: [], lambda: [])
+        self.assertEqual(len(t["opit"]), 2)
+        self.assertIn("(1 tehty, 1 valmis", [r for r in aamukooste.rivit(t) if "jonotulosta" in r][0])
 
 
 class KayttoonottoEro(Pohja):
@@ -399,7 +409,7 @@ class Viikkoehdotus(Pohja):
 
     def test_tehtava_jolla_on_tulos_ei_ehdokas(self):
         self.tehtava("2026-11-03-01-a", "hyoty 5, varmuus 4, vaiva 4 h")
-        self.kirjoita("tulokset/2026-11-03-01-a.md", tulos("a", "VALMIS", "2026-11-03T01:00+02:00"))
+        self.kirjoita("tulokset/2026-11-03-01-a.md", tulos("a", "TEHTY", "2026-11-03T01:00+02:00"))
         self.assertEqual(viikkoehdotus.ehdokkaat(self.repo, NYT), [])
 
     def test_uusinta_epaonnistuneesta(self):

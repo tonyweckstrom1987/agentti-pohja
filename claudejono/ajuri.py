@@ -100,7 +100,11 @@ OPIT_KIELTOLISTA = re.compile(
 OPIT_JULKAISU_SALLITTU = False
 
 
-# Tulosportti (virheiden ehkaisy): raportti ilman "Todennettu kaytossa: miten" -rivia ei ole VALMIS vaan KESKEN.
+# Agentin oma tila on TEHTY, ei VALMIS (Tonyn paatos A836, 7.11.2026). VALMIS annetaan vasta, kun riippumaton tarkastaja on vahvistanut tyon
+# (A513-A516); tarkastaja-askel tulee tehtavassa 05-40. Tasta kohdasta tarkastaja vaihtaa tilan TEHTY -> VALMIS: tulostiedoston
+# rivi "- Tila:" (kirjoita_tulos) ja tila_nimi (aja). Ajuri itse ei koskaan kirjoita VALMIS.
+TILA_TEHTY = "TEHTY"
+# Tulosportti (virheiden ehkaisy): raportti ilman "Todennettu kaytossa: miten" -rivia ei ole TEHTY vaan KESKEN.
 TODENNETTU_RE = re.compile(r"^[ \t>*_-]*Todennettu k(?:\u00e4|a)yt(?:\u00f6|o)ss(?:\u00e4|a)[ \t]*:(?:\*\*|__)?[ \t]*(\S.*)$",
                            re.IGNORECASE | re.MULTILINE)
 TODENNETTU_TYHJA_RE = re.compile(r"^[\s\-\u2013\u2014.:*_]*(?:tbd|todo|n/?a|ei mit(?:\u00e4|a)(?:\u00e4|a)n|ei ole)?[\s\-\u2013\u2014.:*_]*$", re.IGNORECASE)
@@ -529,7 +533,7 @@ def kirjoita_tulos(repo, nimi, ok, teksti, nyt=None, tila=None, malli=None):
     if len(tavut) > TULOS_MAX_TAVUA:   # 1.11.: M02-lahde katkesi kesken sanan ilman merkintaa
         runko += (f"\n\n[AJURI: raportti katkaistu {TULOS_MAX_TAVUA} tavuun, alkuperainen {len(tavut)} tavua. "
                   "Loppu puuttuu tasta tiedostosta.]")
-    polku.write_text(f"# Tulos: {nimi}\n\n- Tila: {tila or ('VALMIS' if ok else 'EPAONNISTUI')}\n- Aika: {nyt.isoformat(timespec='minutes')}\n{('- Malli: ' + malli + chr(10)) if malli else ''}\n{runko}\n",
+    polku.write_text(f"# Tulos: {nimi}\n\n- Tila: {tila or (TILA_TEHTY if ok else 'EPAONNISTUI')}\n- Aika: {nyt.isoformat(timespec='minutes')}\n{('- Malli: ' + malli + chr(10)) if malli else ''}\n{runko}\n",
                      encoding="utf-8")
     return polku
 
@@ -1154,14 +1158,14 @@ def aja(repo, tyohak, env=None, suorita=subprocess.run, laheta=None, kaista=1, l
                 return f"claude-jono: {t.name} KAYTTORAJA, kaistat tauolla {tauko // 60} min{leima}"
         with git_lukko(tila) as odotus2:
             # Todennusportti koskee Claude-reitin tyota (koodi, PR:t); OpenRouter-rutiini (tiivistelmat, luokittelu) ei tuota todennusrivia.
-            tila_nimi = "KESKEN" if ok and m.reitti == "claude" and not on_todennettu(teksti) else ("VALMIS" if ok else "EPAONNISTUI")
+            tila_nimi = "KESKEN" if ok and m.reitti == "claude" and not on_todennettu(teksti) else (TILA_TEHTY if ok else "EPAONNISTUI")
             ohitetut = []
             docs = poimi_docs_ulos(cwd, repo, env, ohitetut=ohitetut) if m.reitti == "claude" else []
-            if ohitetut and tila_nimi == "VALMIS":
+            if ohitetut and tila_nimi == TILA_TEHTY:
                 tila_nimi = "KESKEN"   # osa tyosta jai docs-repon ulkopuolelle; ei vaaraa valmista
             polku = kirjoita_tulos(repo, t.name, ok, docs_ohitus_huom(ohitetut) + teksti, tila=tila_nimi, malli=m.tunniste)
             pushattu = julkaise(repo, [polku] + docs)
-            if tila_nimi == "VALMIS" and m.reitti == "claude":
+            if tila_nimi == TILA_TEHTY and m.reitti == "claude":
                 uudet, _ = suodata_opit(poimi_uusi_oppi(teksti))
                 if uudet:
                     julkaise_opit(repo, paivita_opit(lue_opit(repo), uudet))

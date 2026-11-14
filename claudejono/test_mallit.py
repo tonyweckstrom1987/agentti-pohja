@@ -208,8 +208,8 @@ class AjuriReitit(Pohja):
         self.lisaa_tehtava("2026-11-03-02-y.md", "tee")
         komennot = []
         suorita = ajo(komennot, usage={"input_tokens": 3, "output_tokens": 4}, total_cost_usd=0.5)
-        self.assertEqual(ajuri.aja(self.repo, self.tmp, env=dict(self.ENV), suorita=suorita), "claude-jono: 2026-11-03-01-x.md VALMIS")
-        self.assertEqual(ajuri.aja(self.repo, self.tmp, env=dict(self.ENV), suorita=suorita), "claude-jono: 2026-11-03-02-y.md VALMIS")
+        self.assertEqual(ajuri.aja(self.repo, self.tmp, env=dict(self.ENV), suorita=suorita), "claude-jono: 2026-11-03-01-x.md TEHTY")
+        self.assertEqual(ajuri.aja(self.repo, self.tmp, env=dict(self.ENV), suorita=suorita), "claude-jono: 2026-11-03-02-y.md TEHTY")
         self.assertEqual([k[k.index("--model") + 1] for k in komennot], ["opus", "sonnet"])
         rivit = kulutus.lue(self.tmp)
         self.assertEqual([(r["malli"], r["tehtava"], r["tokenit_in"], r["usd"]) for r in rivit],
@@ -226,7 +226,7 @@ class AjuriReitit(Pohja):
         def ei_saa(*a, **kw):
             raise AssertionError("claudea ei pida kutsua")
         v = ajuri.aja(self.repo, self.tmp, env=dict(self.ENV), suorita=ei_saa, litellm=litellm)
-        self.assertEqual(v, "claude-jono: 2026-11-03-01-x.md VALMIS")
+        self.assertEqual(v, "claude-jono: 2026-11-03-01-x.md TEHTY")
         self.assertEqual(kutsut, ["deepseek-flash"])
         r = kulutus.lue(self.tmp)[0]
         self.assertEqual((r["malli"], r["tokenit_out"], r["usd"]), ("openrouter:deepseek-flash", 9, 0.0004))
@@ -239,7 +239,7 @@ class AjuriReitit(Pohja):
         self.lisaa_tehtava("2026-11-03-02-y.md", "tee")
         komennot = []
         v = ajuri.aja(self.repo, self.tmp, env=dict(self.ENV), suorita=ajo(komennot))
-        self.assertEqual(v, "claude-jono: 2026-11-03-02-y.md VALMIS")
+        self.assertEqual(v, "claude-jono: 2026-11-03-02-y.md TEHTY")
         v = ajuri.aja(self.repo, self.tmp, env=dict(self.ENV), suorita=ajo(komennot))
         self.assertTrue(v.startswith("jono odottaa"), v)
         self.assertFalse((self.repo / ajuri.JONO / "tulokset" / "2026-11-03-01-x.md").exists())
@@ -257,7 +257,7 @@ class AjuriReitit(Pohja):
         komennot = []
         v = ajuri.aja(self.repo, self.tmp, env=dict(self.ENV), suorita=ajo(komennot),
                       litellm=lambda a, t, e: (True, "luokiteltu\nTodennettu k\u00e4yt\u00f6ss\u00e4: testiajo", {}))
-        self.assertEqual(v, "claude-jono: 2026-11-03-02-y.md VALMIS")
+        self.assertEqual(v, "claude-jono: 2026-11-03-02-y.md TEHTY")
         self.assertEqual(komennot, [])
         v = ajuri.aja(self.repo, self.tmp, env=dict(self.ENV), suorita=ajo(komennot))
         self.assertIn("jono odottaa", v)
