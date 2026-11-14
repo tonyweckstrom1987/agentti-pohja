@@ -920,6 +920,15 @@ class DocsOhitusNakyviin(Pohja):
         self.assertFalse((self.repo / "claude-jono/tyokalut/seuranta.py").exists())
         self.assertLess(tulos.index("## Huom: docs-ulos/"), tulos.index("Tehty."))   # alussa, ei katkea
 
+    def test_vaillinainen_virheloki_hylataan_ja_syy_nakyy_ajon_viestissa(self):
+        """Virheopit (#237): hylkays kulkee aja()-funktion kautta; syy ajon viestiin eika kopioida docs-repoon."""
+        viesti, _ = self.aja_docs({"claude-jono/virheloki.md": "## 8.11.2026 \u2013 x\n- Mit\u00e4: vain tama\n",
+                                   "claude-jono/muistiot/m.md": "muistio\n"})
+        self.assertIn("virheloki hyl\u00e4tty", viesti)
+        self.assertIn("Juurisyy", viesti)
+        self.assertTrue((self.repo / "claude-jono/muistiot/m.md").exists())
+        self.assertFalse((self.repo / "claude-jono/virheloki.md").exists())
+
     def test_kaikki_sallittu_pysyy_valmiina(self):
         viesti, tulos = self.aja_docs({"claude-jono/muistiot/m.md": "muistio\n"})
         self.assertIn("- Tila: VALMIS", tulos)

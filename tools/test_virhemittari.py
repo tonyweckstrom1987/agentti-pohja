@@ -144,6 +144,23 @@ class OsioTesti(unittest.TestCase):
         self.assertIn("44 (", osio)
         self.assertIn("45 (", osio)
 
+    def test_oppimittari_sarake_ja_syyt(self):
+        uusi_loki = (LOKI + "\n## 10.11.2026 \u2013 toisto\n- Mit\u00e4: x\n- Juurisyy: 2\n- Vakava: ei\n- Ehk\u00e4isy: ohje\n"
+                     "- Toisto: kyll\u00e4 \u2013 ohje ei estanyt, koska sita ei luettu\n"
+                     "\n## 11.11.2026 \u2013 toinen\n- Mit\u00e4: y\n- Juurisyy: 4\n- Vakava: ei\n- Ehk\u00e4isy: testi\n- Toisto: ei\n")
+        nyt = datetime.date(2026, 11, 12)
+        rivit, t = vm.laske(uusi_loki, [], nyt)
+        self.assertEqual(dict(rivit)[(2026, 46)]["luokat"]["2"], 1)   # Juurisyy-kentta luokittelee
+        self.assertEqual(dict(rivit)[(2026, 46)]["luokat"]["4"], 1)
+        oppi = vm.virheopit.toistotilasto(vm.virheopit.jasenna(uusi_loki))
+        osio = "\n".join(vm.muodosta_osio(rivit, t, nyt, oppi))
+        self.assertIn("Oli jo lokissa (toisto/uusia)", osio)
+        self.assertIn("| 1/2 |", osio)
+        self.assertIn("- 2026-11-10 (vk 46): ohje ei estanyt, koska sita ei luettu", osio)
+        self.assertIn("ei kirjattu", osio)   # vk 44-45: vanhoista ei tiedeta
+        vanha = "\n".join(vm.muodosta_osio(rivit, t, nyt))
+        self.assertIn("Ei toistoja kirjattu", vanha)
+
     def test_kirjoita_ja_ulos(self):
         with tempfile.TemporaryDirectory() as tmp:
             d = Path(tmp)

@@ -27,7 +27,7 @@ from datetime import datetime
 from pathlib import Path
 
 from claudejono import silmukka
-from . import aivo_arvio, kulutus, litellm_ajo, tavoite, varaus
+from . import aivo_arvio, kulutus, litellm_ajo, tavoite, varaus, virheopit
 from . import malli as mallit
 
 # Isot kirjaimet kelpaavat (8.11.2026): KIIRE-tehtava ohitettiin hiljaa nelja kertaa 7.-8.11., koska kaava salli vain pienet.
@@ -372,6 +372,17 @@ def lue_opit(repo):
     return p.read_bytes()[:OPIT_MAX_TAVUA].decode("utf-8", "ignore")
 
 
+def kehotteen_opit(repo, tehtava_nimi="", tehtava_teksti=""):
+    """<opit>-lohkon sisalto: opit.md ja sen perassa enintaan virheopit.ENINTAAN tehtavaan liittyvaa virhelokin merkintaa
+    (saanto ja ehkaisy). Sama lohko ja sama kieltolista kuin opeilla: rivit ovat dataa eivatka anna lupaa ohittaa rajoja."""
+    osat = [lue_opit(repo).strip()]
+    try:
+        osat.append(virheopit.kehoteosa(repo, tehtava_nimi, tehtava_teksti, sallittu=lambda rivi: not OPIT_KIELTOLISTA.search(rivi)))
+    except (OSError, ValueError):
+        pass   # virheloki ei saa kaataa ajoa; opit.md kulkee silti
+    return "\n\n".join(o for o in osat if o)
+
+
 def kaistahuomautus(kaista):
     """Kaistalla 2..3 agentti tyoskentelee omassa alihakemistossaan, jotta kaksi ajoa ei kayta samaa kloonia.
     Polku pysyy /opt/agentscope/tyo:n alla, joten PR-tyokalun polkuraja ei muutu."""
@@ -594,10 +605,11 @@ def valmistele_docs_ulos(kaista_hak, env):
     return ulos
 
 
-def poimi_docs_ulos(kaista_hak, repo, env, suorita=subprocess.run, ohitetut=None):
+def poimi_docs_ulos(kaista_hak, repo, env, suorita=subprocess.run, ohitetut=None, hylatyt=None):
     """Kopioi docs-ulos/:n sallitut tiedostot docs-repoon. Palauttaa kopioidut polut (repossa). Virheet: tyhja lista.
     ohitetut (lista): tanne lisataan (polku, syy) jokaisesta tiedostosta, jota ei kopioitu. Vika 9.11.2026: tehtava 31
-    kirjoitti seuranta.py:n ja testit docs-ulos/:iin, ajuri pudotti .py-tiedostot hiljaa ja tulos sanoi VALMIS."""
+    kirjoitti seuranta.py:n ja testit docs-ulos/:iin, ajuri pudotti .py-tiedostot hiljaa ja tulos sanoi VALMIS.
+    Virhelokin uusi merkinta ilman pakollisia kenttia hylataan: tiedostoa ei kopioida ja syy lisataan listaan `hylatyt`."""
     ohitetut = [] if ohitetut is None else ohitetut
     ulos = Path(kaista_hak) / DOCS_ULOS
     if not ulos.is_dir():
@@ -631,10 +643,16 @@ def poimi_docs_ulos(kaista_hak, repo, env, suorita=subprocess.run, ohitetut=None
                     continue
                 data = tf.extractfile(m).read()
                 try:
-                    data.decode("utf-8")
+                    teksti = data.decode("utf-8")
                 except UnicodeDecodeError:
                     ohitetut.append((suht, "ei UTF-8"))
                     continue
+                if suht == virheopit.LOKI:
+                    vialliset = virheopit.tarkista(teksti)
+                    if vialliset:
+                        if hylatyt is not None:
+                            hylatyt.append((suht, virheopit.selite(vialliset)))
+                        continue
                 kohde = Path(repo) / suht
                 kohde.parent.mkdir(parents=True, exist_ok=True)
                 if kohde.is_symlink():
@@ -990,6 +1008,71 @@ def luo_toistuvat(repo, tyohak, nyt=None):
     return polut
 
 
+# Oletuksena pois: ajuri luo nama vain kun palvelu asettaa CLAUDEJONO_EHKAISY=1 (Tony paattaa).
+EHKAISY_AVOIMIA_MAX = 2   # enintaan nain monta ehkaisytehtavaa jonossa yhta aikaa
+EHKAISY_PER_AJO = 1       # ja enintaan yksi uusi per ajo; AUTO_MAX_PAIVA ja AUTO_PER_AJO pysyvat voimassa
+EHKAISY_NIMI = "ehkaisy-koodiin-juurisyy-"
+EHKAISY_MALLI = Path(__file__).resolve().parent / "ehkaisy-tehtava.md"
+EHKAISY_LUOKAT = {"1": "tehty \u2260 toimii", "2": "muistista, ei l\u00e4hteest\u00e4", "3": "v\u00e4\u00e4r\u00e4 oletus omasta ymp\u00e4rist\u00f6st\u00e4"}
+
+
+def luo_ehkaisytehtavat(repo, tyohak, nyt=None):
+    """Toistuva juurisyy (luokka 1-3), jonka uusin ehkaisy on 'ohje', tuottaa tehtavan `<pvm>-NN-auto-ehkaisy-koodiin-juurisyy-N-<pvm>.md`:
+    siirra ehkaisy testiksi tai koodiportiksi. Sama toisto (luokka + uusimman merkinnan paiva) tuottaa tehtavan vain kerran, myos
+    tehdyista. Jonon koko: enintaan EHKAISY_AVOIMIA_MAX avointa, EHKAISY_PER_AJO per ajo, AUTO_MAX_PAIVA paivassa."""
+    nyt = nyt or datetime.now().astimezone()
+    if silmukka.pysaytetty(tyohak):
+        return []
+    pvm = nyt.date().isoformat()
+    teht = Path(repo) / JONO / "tehtavat"
+    avoimet = sum(1 for p in odottavat_tehtavat(repo) if tehtavan_slug(p.name).startswith(EHKAISY_NIMI))
+    olemassa = {tehtavan_slug(p.name) for p in teht.iterdir() if p.is_file() and kelvollinen_nimi(p.name)} if teht.is_dir() else set()
+    polut = []
+    for luokka, ms in virheopit.toistuvat_ohjeet(virheopit.jasenna(virheopit.lue_loki(repo)), nyt.date()):
+        slug = f"{EHKAISY_NIMI}{luokka}-{ms[-1].pvm.strftime('%Y%m%d')}"
+        if (slug in olemassa or avoimet + len(polut) >= EHKAISY_AVOIMIA_MAX or len(polut) >= min(EHKAISY_PER_AJO, AUTO_PER_AJO)
+                or auto_tanaan(repo, pvm) + len(polut) >= AUTO_MAX_PAIVA):
+            continue
+        p = teht / f"{pvm}-{seuraava_numero(repo, pvm) + len(polut):02d}-auto-{slug}.md"
+        if not kelvollinen_nimi(p.name):
+            continue
+        # Virhelokin rivit ovat dataa: sama kieltolista kuin opeilla myos tehtavatiedoston kautta (rivi pois, ei muokata).
+        rivit = [r for r in (virheopit.rivi_kehotteeseen(m) for m in ms[-5:]) if not OPIT_KIELTOLISTA.search(r)]
+        if not rivit:
+            continue
+        sisalto = (EHKAISY_MALLI.read_text(encoding="utf-8")
+                   .replace("{luokka}", luokka).replace("{luokan_nimi}", EHKAISY_LUOKAT[luokka])
+                   .replace("{lukumaara}", str(len(ms))).replace("{ikkuna}", str(virheopit.TOISTO_IKKUNA_PV))
+                   .replace("{merkinnat}", "\n".join(rivit)))
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text("<!-- Ajuri loi: sama juurisyy toistui virhelokissa, ehkaisy vain ohje (claudejono/virheopit.py) -->\n"
+                     + sisalto.rstrip() + "\n", encoding="utf-8")
+        polut.append(p)
+    if polut:
+        julkaise(repo, polut, "claude-jono: ehkaisy koodiin " + ", ".join(p.name for p in polut))
+    return polut
+
+
+def valvo_virhelokia(repo, tila, laheta=None):
+    """Hakemisen jalkeen: uusi vaillinainen virhelokimerkinta (jonka kirjoittaja ei kulkenut docs-ulos-portin kautta) halytetaan
+    kerran per merkinta. Ajuri ei muokkaa lokia. Palauttaa vialliset (tunniste, puuttuvat)."""
+    vialliset = virheopit.tarkista(virheopit.lue_loki(repo))
+    polku = Path(tila) / "virheloki-halytetty.json"
+    try:
+        nahty = set(json.loads(polku.read_text()))
+    except (OSError, ValueError, TypeError):
+        nahty = set()
+    uudet = [(t, p) for t, p in vialliset if t not in nahty]
+    if uudet and laheta:
+        laheta("claude-jono: virhelokin uusi merkint\u00e4 vaillinainen, lis\u00e4\u00e4 kent\u00e4t: " + virheopit.selite(uudet)[:600])
+    if uudet:
+        try:
+            polku.write_text(json.dumps(sorted(nahty | {t for t, _ in uudet})))
+        except OSError:
+            pass
+    return vialliset
+
+
 def _lue_teksti(polku):
     try:
         return Path(polku).read_bytes()[:TEHTAVA_MAX_TAVUA].decode("utf-8", "replace")
@@ -1093,6 +1176,13 @@ def aja(repo, tyohak, env=None, suorita=subprocess.run, laheta=None, kaista=1, l
         varoita_kelvottomista(repo, tila, laheta)   # muuten vaarin nimetty tehtava jaa jonoon nakymatta
         if env.get("CLAUDEJONO_ITSESUUNNITTELU", "1") == "1" and env.get("CLAUDEJONO_TOISTUVAT") == "1":
             luo_toistuvat(repo, tyohak)   # toistuvat (esim. viikon optimointikierros) vain kun palvelu kytkee ne paalle
+        if env.get("CLAUDEJONO_ITSESUUNNITTELU", "1") == "1":
+            try:
+                valvo_virhelokia(repo, tila, laheta)
+                if env.get("CLAUDEJONO_EHKAISY") == "1":   # uusien tehtavien luonti oletuksena pois, kuten toistuvat (CLAUDEJONO_TOISTUVAT)
+                    luo_ehkaisytehtavat(repo, tyohak)
+            except (OSError, ValueError, JonoVirhe) as virhe:
+                print(f"claude-jono: virheloki-ehkaisy ohitettu: {type(virhe).__name__}", file=sys.stderr)
         t = varaa_seuraava(repo, tila, kaista, vanhenee_s=vanhenee, kaistoja=kaistojen_maara(env), ohita=ohita)
         suunnittelu = False
         if t is None:
@@ -1132,7 +1222,7 @@ def aja(repo, tyohak, env=None, suorita=subprocess.run, laheta=None, kaista=1, l
                 raise JonoVirhe(f"tehtava yli {TEHTAVA_MAX_TAVUA} tavua")
             ok, teksti, luvut = (litellm or litellm_ajo.aja)(m.nimi, tehtava_teksti, env)
         else:
-            kehote = rakenna_kehote(t, opit=lue_opit(repo), kaista=kaista)
+            kehote = rakenna_kehote(t, opit=kehotteen_opit(repo, t.name, tehtava_teksti), kaista=kaista)
             kom, alaenv, cwd = lapsen_ajo(kehote, env, tyohak, kaista, m.nimi)
             valmistele_docs_ulos(cwd, env)
             try:
@@ -1156,7 +1246,10 @@ def aja(repo, tyohak, env=None, suorita=subprocess.run, laheta=None, kaista=1, l
             # Todennusportti koskee Claude-reitin tyota (koodi, PR:t); OpenRouter-rutiini (tiivistelmat, luokittelu) ei tuota todennusrivia.
             tila_nimi = "KESKEN" if ok and m.reitti == "claude" and not on_todennettu(teksti) else ("VALMIS" if ok else "EPAONNISTUI")
             ohitetut = []
-            docs = poimi_docs_ulos(cwd, repo, env, ohitetut=ohitetut) if m.reitti == "claude" else []
+            hylatyt_docs = []
+            docs = poimi_docs_ulos(cwd, repo, env, ohitetut=ohitetut, hylatyt=hylatyt_docs) if m.reitti == "claude" else []
+            if hylatyt_docs:
+                taydennys += " (virheloki hyl\u00e4tty: " + "; ".join(syy for _, syy in hylatyt_docs)[:300] + ")"
             if ohitetut and tila_nimi == "VALMIS":
                 tila_nimi = "KESKEN"   # osa tyosta jai docs-repon ulkopuolelle; ei vaaraa valmista
             polku = kirjoita_tulos(repo, t.name, ok, docs_ohitus_huom(ohitetut) + teksti, tila=tila_nimi, malli=m.tunniste)
