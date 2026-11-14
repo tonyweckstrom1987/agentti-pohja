@@ -883,6 +883,17 @@ class TulosPortti(Pohja):
             with self.subTest(arvo=arvo):
                 self.assertFalse(ajuri.on_todennettu(f"raportti\nTodennettu k\u00e4yt\u00f6ss\u00e4: {arvo}\n"))
 
+    def test_kehotteen_esimerkki_kelpaa_ja_otsikko_ei(self):
+        # 4.11.2026: 3/7 KESKEN-raportista kirjoitti rivin otsikkona; kehotteen esimerkin pitaa lapaista portti.
+        import re
+        kehote = ajuri.KEHOTE.read_text(encoding="utf-8")
+        esim = re.search(r"Esimerkki: `(Todennettu k\u00e4yt\u00f6ss\u00e4:[^`]+)`", kehote)
+        self.assertIsNotNone(esim)
+        self.assertTrue(ajuri.on_todennettu(esim.group(1)))
+        for otsikko in ("### Todennettu k\u00e4yt\u00f6ss\u00e4\nAjoin testit", "## Todennettu k\u00e4yt\u00f6ss\u00e4: miten\n- ajoin"):
+            with self.subTest(otsikko=otsikko):
+                self.assertFalse(ajuri.on_todennettu(otsikko))
+
     def test_oikea_rivi_on_valmis(self):
         viesti, tiedosto = self.aja_tuloksella("Tehty.\n\nTodennettu k\u00e4yt\u00f6ss\u00e4: ajettu oikeaa kohdetta vastaan, 12/12 l\u00e4pi")
         self.assertIn("VALMIS", viesti)
