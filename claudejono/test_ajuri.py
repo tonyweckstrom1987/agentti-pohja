@@ -10,7 +10,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from claudejono import ajuri
+from claudejono import ajuri, prraja
 
 
 def git(hak, *a):
@@ -21,6 +21,10 @@ class Pohja(unittest.TestCase):
     """Oikea git-repo: paikallinen bare-origin + klooni, jotta pull/push testataan aidosti."""
 
     def setUp(self):
+        # suunnittele() kutsuu prraja.hae_taynna():a, joka muuten hakisi GitHubista (hidas, verkosta riippuva testi).
+        paikka = mock.patch.object(prraja, "hae_taynna", return_value=set())
+        paikka.start()
+        self.addCleanup(paikka.stop)
         self.tmp = Path(tempfile.mkdtemp())
         self.origin = self.tmp / "origin.git"
         subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(self.origin)], check=True)
