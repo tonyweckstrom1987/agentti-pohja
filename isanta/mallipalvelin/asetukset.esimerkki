@@ -1,0 +1,9 @@
+# Kopioi nimella asetukset.env (ei versionhallintaan) ja tayta omat arvot.
+# Tiedostossa ei ole salaisuuksia eika osoitteita: Ollama kuuntelee aina vain osoitteessa 127.0.0.1.
+# Ollaman versio ja sen tarkistussumma ovat Ollaman julkaisusivulta.
+OLLAMA_VERSIO=
+# Portti: sama kuin Aivon yksityisen tilan oletus (aivo/yksityinen.py, OLETUS_MALLI_URL).
+OLLAMA_PORTTI=8081
+# Ollama-palvelun muistiraja megatavuina (8B-malli vie noin 6,5 Gt, ks. mallit.json).
+# Rajan pitaa olla pienempi kuin kontin muisti, jotta Aivon keskustelupalvelulle jaa tilaa.
+OLLAMA_MUISTI_MB=7424

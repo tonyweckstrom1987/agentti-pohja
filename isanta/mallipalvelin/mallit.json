@@ -1,0 +1,8 @@
+{
+  "_huomio": "Ehdokkaat ovat Ollama-tunnisteita. Tunnisteiden olemassaoloa, kokoa ja suomen tukea EI ole todennettu (ei verkkoa tehtavahetkella): tarkista ollama.com/library ennen latausta.",
+  "mallit": [
+    {"tunniste": "qwen3:8b", "luokka": "8B", "muistiarvio_gt": 6.5},
+    {"tunniste": "llama3.1:8b", "luokka": "8B", "muistiarvio_gt": 6.0},
+    {"tunniste": "gemma3:4b", "luokka": "4B", "muistiarvio_gt": 4.0}
+  ]
+}
