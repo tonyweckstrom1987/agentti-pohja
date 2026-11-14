@@ -4,7 +4,7 @@ import subprocess
 import tempfile
 import time
 import unittest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from claudejono import ajuri, kulutus, litellm_ajo, malli, varaus
@@ -198,6 +198,91 @@ class TononVaraus(unittest.TestCase):
         self.assertEqual(varaus.raja_tauolla(self.tila, 1500.0), 3100)
         self.assertEqual(varaus.raja_tauolla(self.tila, 5000.0), 0)
         self.assertEqual(varaus.kirjaa_raja(self.tila, 1, "t.md", {"CLAUDEJONO_RAJA_TAUKO_S": "x"}, 1.0)[1], 2)
+
+
+class ViikonVaihto(unittest.TestCase):
+    """Tonyn viikkoraja nollautuu lauantaina 21.59 (Helsinki), ei maanantaina."""
+    def test_la_2158_on_viela_vanhaa_viikkoa_ja_la_2200_uutta(self):
+        vanha = datetime(2026, 10, 31, 21, 58, tzinfo=TZ)
+        uusi = datetime(2026, 10, 31, 22, 0, tzinfo=TZ)
+        self.assertEqual(kulutus.viikon_alku(vanha), datetime(2026, 10, 24, 21, 59, tzinfo=TZ))
+        self.assertEqual(kulutus.viikon_alku(uusi), datetime(2026, 10, 31, 21, 59, tzinfo=TZ))
+        self.assertEqual(kulutus.viikon_alku(datetime(2026, 10, 31, 21, 59, tzinfo=TZ)), datetime(2026, 10, 31, 21, 59, tzinfo=TZ))
+
+    def test_maanantai_ei_vaihda_viikkoa(self):
+        ma = datetime(2026, 11, 2, 0, 5, tzinfo=TZ)
+        self.assertEqual(kulutus.viikon_alku(ma), datetime(2026, 10, 31, 21, 59, tzinfo=TZ))
+        self.assertEqual(kulutus.seuraava_vaihto(ma), datetime(2026, 11, 7, 21, 59, tzinfo=TZ))
+
+    def test_vaihto_asetuksesta_ja_virheellinen_asetus_antaa_oletuksen(self):
+        env = {"CLAUDEJONO_VIIKKO_VAIHTUU": "ma 00:00"}
+        self.assertEqual(kulutus.viikon_alku(datetime(2026, 11, 4, 12, 0, tzinfo=TZ), env), datetime(2026, 11, 2, 0, 0, tzinfo=TZ))
+        for huono in ("", "x", "la 25:00", "la 21:99", "lauantai 21:59"):
+            self.assertEqual(kulutus.viikon_vaihto({"CLAUDEJONO_VIIKKO_VAIHTUU": huono}), (5, 21, 59), huono)
+        self.assertEqual(kulutus.viikon_vaihto({"CLAUDEJONO_VIIKKO_VAIHTUU": "LA 21.59"}), (5, 21, 59))
+
+    def test_aika_muunnetaan_helsingin_aikaan(self):
+        utc = datetime(2026, 10, 31, 20, 0, tzinfo=timezone.utc)   # 22.00 Helsingissa (EET, kesaaika loppui 25.10.)
+        self.assertEqual(kulutus.viikon_alku(utc), datetime(2026, 10, 31, 21, 59, tzinfo=TZ))
+
+    def test_kulutus_la_2158_kuuluu_vanhalle_viikolle(self):
+        tila = Path(tempfile.mkdtemp())
+        kulutus.kirjaa(tila, "sonnet", "t", 1, "tehtava", True, 1.0, {"usd": 5.0}, datetime(2026, 10, 31, 21, 58, tzinfo=TZ))
+        kulutus.kirjaa(tila, "sonnet", "t", 1, "tehtava", True, 1.0, {"usd": 2.0}, datetime(2026, 10, 31, 22, 0, tzinfo=TZ))
+        nyt = datetime(2026, 11, 2, 9, 0, tzinfo=TZ)
+        self.assertIn("2.00 USD", kulutus.kulutusrivi(tila, nyt).split("Viikko:")[1])
+        self.assertNotIn("7.00", kulutus.kulutusrivi(tila, nyt))
+
+    def test_ilmoitukset_eri_viikoilta_ei_verrata_la_rajan_yli(self):
+        tila = Path(tempfile.mkdtemp())
+        # 37 % (vanha viikko, la 21.58) ja 5 % (uusi viikko, la 22.00): jos viikko vaihtuisi maanantaina, tama olisi ennen "samaa viikkoa"
+        varaus.kirjaa_kalibrointi(tila, 90, datetime(2026, 10, 31, 21, 58, tzinfo=TZ))
+        varaus.kirjaa_kalibrointi(tila, 5, datetime(2026, 10, 31, 22, 0, tzinfo=TZ))
+        kulutus.kirjaa(tila, "sonnet", "t", 1, "tehtava", True, 1.0, {"usd": 50.0}, datetime(2026, 10, 31, 21, 59, 30, tzinfo=TZ))
+        a = varaus.arvio(tila, {}, datetime(2026, 11, 2, 9, 0, tzinfo=TZ))
+        self.assertEqual(a["tila"], "ei_kalibroitu")   # ei paria samalta viikolta, vanhan viikon 90 % ei pysayta uutta viikkoa
+
+
+class KayttorajaViikonVaihtoon(unittest.TestCase):
+    def setUp(self):
+        self.tila = Path(tempfile.mkdtemp())
+
+    def test_viikkorajavirheen_tauko_kestaa_viikon_vaihtoon(self):
+        nyt = datetime(2026, 11, 3, 16, 11, tzinfo=TZ)
+        tauko, n = varaus.kirjaa_raja(self.tila, 1, "t.md", {}, nyt.timestamp(), viikkoraja=True)
+        self.assertEqual(n, 1)
+        self.assertEqual(tauko, int((datetime(2026, 11, 7, 21, 59, tzinfo=TZ) - nyt).total_seconds()))
+        self.assertGreater(varaus.raja_tauolla(self.tila, nyt.timestamp() + 3 * 86400), 0)          # sunnuntaina yha tauolla
+        self.assertEqual(varaus.raja_tauolla(self.tila, datetime(2026, 11, 7, 22, 0, tzinfo=TZ).timestamp()), 0)   # vaihdon jalkeen vapaa
+
+    def test_ohimeneva_virhe_pysyy_tunnin_taukona(self):
+        tauko, _ = varaus.kirjaa_raja(self.tila, 1, "t.md", {}, 1000.0)
+        self.assertEqual(tauko, 3600)
+        self.assertTrue(varaus.on_viikkoraja("Claude usage limit reached"))
+        self.assertFalse(varaus.on_viikkoraja("API overloaded 529"))
+
+    def test_claude_estetty_viikkorajan_tauon_aikana_ja_rivi_aamukoosteeseen(self):
+        nyt = datetime(2026, 11, 3, 16, 11, tzinfo=TZ)
+        varaus.kirjaa_raja(self.tila, 1, "t.md", {}, nyt.timestamp(), viikkoraja=True)
+        self.assertIn("kayttorajavirhe", varaus.claude_estetty(self.tila, {}, 1, nyt, nyt.timestamp() + 86400))
+        rivi, _ = varaus.aamukooste_osa(self.tila, {}, nyt)
+        self.assertIn("k\u00e4ytt\u00f6raja t\u00e4ynn\u00e4", rivi)
+        self.assertIn("07.11. klo 21.59", rivi)
+
+    def test_jarru_arvio_ylittaa_rajan_pysayttaa_uudella_viikkoalulla(self):
+        # Kalibrointi 3.11. klo 16.11: 37 %, ja uusi viikko alkoi la 31.10. 21.59
+        varaus.kirjaa_kalibrointi(self.tila, 0, datetime(2026, 10, 31, 22, 0, tzinfo=TZ))
+        varaus.kirjaa_kalibrointi(self.tila, 37, datetime(2026, 11, 3, 16, 11, tzinfo=TZ))
+        kulutus.kirjaa(self.tila, "sonnet", "t", 1, "tehtava", True, 1.0, {"usd": 37.0}, datetime(2026, 11, 1, 12, 0, tzinfo=TZ))
+        kulutus.kirjaa(self.tila, "sonnet", "t", 1, "tehtava", True, 1.0, {"usd": 30.0}, datetime(2026, 11, 3, 17, 0, tzinfo=TZ))
+        a = varaus.arvio(self.tila, {}, datetime(2026, 11, 3, 18, 0, tzinfo=TZ))   # 1 %/USD * 67 USD = 67 % >= 60 %
+        self.assertEqual((a["tila"], a["agentit_pros"], a["kaistoja"]), ("pysayta", 67.0, 0))
+
+    def test_kalibrointi_voidaan_kirjata_menneelle_ajalle(self):
+        self.assertEqual(varaus.main(["kalibroi", "37", "--aika", "2026-11-03T16:11", "--tila", str(self.tila)]), 0)
+        r = kulutus.lue(self.tila, tiedosto=varaus.KALIBROINTI)[0]
+        self.assertEqual((r["pros"], r["aika"]), (37.0, "2026-11-03T16:11:00+02:00"))
+        self.assertEqual(varaus.main(["kalibroi", "37", "--aika", "huono", "--tila", str(self.tila)]), 2)
 
 
 class AjuriReitit(Pohja):

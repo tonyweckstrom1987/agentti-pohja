@@ -921,7 +921,7 @@ def suunnittele(repo, tyohak, env, suorita, laheta=None, nyt=None, kaista=1):
         kulutus.kirjaa(Path(repo).parent, sm.tunniste, "", kaista, "suunnittelu", ok, time.monotonic() - alku_s,
                        kulutus.claude_luvut(getattr(r, "stdout", "") or ""), nyt)
         if not ok and RAJA_RE.search(teksti or ""):
-            varaus.kirjaa_raja(Path(repo).parent, kaista, "_suunnittelu", env)
+            varaus.kirjaa_raja(Path(repo).parent, kaista, "_suunnittelu", env, viikkoraja=varaus.on_viikkoraja(teksti))
             return "jono tyhja (suunnittelu: kayttorajavirhe, Claude-kaistat tauolla)"
     except subprocess.TimeoutExpired:
         kirjaa_suunnittelu(tyohak, repo, nyt, 0)
@@ -1146,12 +1146,12 @@ def aja(repo, tyohak, env=None, suorita=subprocess.run, laheta=None, kaista=1, l
         kulutus.kirjaa(tila, m.tunniste, t.name, kaista, "tehtava", ok, kesto, luvut)
         if m.reitti == "claude" and not ok and RAJA_RE.search(teksti or ""):
             # Kayttorajavirhe: kaikki Claude-kaistat tauolle, tehtava jaa jonoon (ei tulosta) enintaan RAJA_YRITYKSIA kertaa. Ei uusintasilmukkaa.
-            tauko, yritys = varaus.kirjaa_raja(tila, kaista, t.name, env)
+            tauko, yritys = varaus.kirjaa_raja(tila, kaista, t.name, env, viikkoraja=varaus.on_viikkoraja(teksti))
             if laheta:
-                laheta(f"Claude-kayttoraja: kaistat tauolla {tauko // 60} min ({t.name}, yritys {yritys}/{varaus.RAJA_YRITYKSIA})")
+                laheta(f"Claude-kayttoraja: kaistat tauolla {varaus.kesto_teksti(tauko)} ({t.name}, yritys {yritys}/{varaus.RAJA_YRITYKSIA})")
             if yritys < varaus.RAJA_YRITYKSIA:
                 kirjaa_kaistaloki(tila, kaista, "tehtava", t.name, False, kesto, teksti, getattr(r, "stdout", "") or "", None, odotus, malli=m.tunniste)
-                return f"claude-jono: {t.name} KAYTTORAJA, kaistat tauolla {tauko // 60} min{leima}"
+                return f"claude-jono: {t.name} KAYTTORAJA, kaistat tauolla {varaus.kesto_teksti(tauko)}{leima}"
         with git_lukko(tila) as odotus2:
             # Todennusportti koskee Claude-reitin tyota (koodi, PR:t); OpenRouter-rutiini (tiivistelmat, luokittelu) ei tuota todennusrivia.
             tila_nimi = "KESKEN" if ok and m.reitti == "claude" and not on_todennettu(teksti) else ("VALMIS" if ok else "EPAONNISTUI")
