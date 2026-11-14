@@ -1,0 +1,3 @@
+# Kauppadatan vienti (CT119 -> CT115), isannan root. Asennus: katso isanta/KAUPPA-VIENTI.md.
+# Tonyn paatos 9.11.2026 (A915): aika 10.47 (kopio tuotannon paivaajon jalkeen; ei osu lauantain klo 10.00 -ajoon).
+47 10 * * * root sh /usr/local/sbin/kauppa-vienti.sh >>/var/log/kauppa-vienti.log 2>&1
