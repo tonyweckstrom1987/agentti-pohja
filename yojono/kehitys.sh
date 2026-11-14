@@ -189,16 +189,24 @@ else
     if [ -n "$VAARAT" ]; then
       SYY="muutos aiheen ($AIHE) ulkopuolella:$VAARAT : PR:aa ei avattu"
     elif testaa > "$TMP/testit.log" 2>&1; then
-      # Python-repoissa "Ran N tests" on pakollinen: nolla testia tai puuttuva rivi ei ole vihrea (npm-repoissa lukumaaraa ei lueta).
-      LKM=$(grep -Eo '^Ran [0-9]+ tests?' "$TMP/testit.log" | tail -n 1 | grep -Eo '[0-9]+' || true)
-      if [ ! -f package.json ] && [ "${LKM:-0}" -eq 0 ]; then
+      # Maara luetaan varivapaasta lokista: Python "Ran N tests", node:test "# pass N", vitest "Tests N passed".
+      # Nolla testia on punainen kaikissa repoissa. Tuntematon npm-muoto jaa vihreaksi (npm test voi ajaa mitaa tahansa).
+      sed 's/\x1b\[[0-9;]*[A-Za-z]//g' "$TMP/testit.log" > "$TMP/testit.puhdas"
+      LKM=$(grep -Eo '^Ran [0-9]+ tests?' "$TMP/testit.puhdas" | tail -n 1 | grep -Eo '[0-9]+' || true)
+      if [ -z "$LKM" ] && [ -f package.json ]; then
+        LKM=$(grep -Eo '^ *Tests +[0-9]+ passed' "$TMP/testit.puhdas" | tail -n 1 | grep -Eo '[0-9]+' || true)
+        [ -n "$LKM" ] || LKM=$(grep -Eo '^# pass [0-9]+' "$TMP/testit.puhdas" | tail -n 1 | grep -Eo '[0-9]+' || true)
+      fi
+      if [ -f package.json ] && [ -z "$LKM" ]; then
+        TESTIT="vihrea (maara ei tiedossa: $(tail -n 3 "$TMP/testit.puhdas" | tr '\n' ' ' | cut -c1-120))"
+      elif [ "${LKM:-0}" -eq 0 ]; then
         TESTIT="punainen (ei testeja kloonista)"
         SYY="ei testeja kloonista: PR:aa ei avattu"
       else
-        TESTIT="vihrea${LKM:+, $LKM testia} ($(tail -n 3 "$TMP/testit.log" | tr '\n' ' ' | cut -c1-120))"
+        TESTIT="vihrea, $LKM testia ($(tail -n 3 "$TMP/testit.puhdas" | tr '\n' ' ' | cut -c1-120))"
       fi
     else
-      TESTIT="punainen ($(tail -n 3 "$TMP/testit.log" | tr '\n' ' ' | cut -c1-120))"
+      TESTIT="punainen ($(sed 's/\x1b\[[0-9;]*[A-Za-z]//g' "$TMP/testit.log" | tail -n 3 | tr '\n' ' ' | cut -c1-120))"
       SYY="testit punaisella agentin muutosten jalkeen: PR:aa ei avattu"
     fi
   fi
