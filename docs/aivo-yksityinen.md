@@ -62,7 +62,7 @@ Ota ensin snapshot, jos asennat konttiin. Käyttäjänimet ovat ehdotus.
    sudo install -d -m 700 -o aivo-yksityinen -g aivo-yksityinen /var/lib/aivo-yksityinen/{chat,muisti,ehdotukset,malli}
    ```
 
-2. **Työkalutilan käyttäjä.** Claude-kirjautuminen kuuluu `aivo-tyokalu`-käyttäjälle (`sudo -u aivo-tyokalu -H claude`). Chat-palvelu kutsuu sitä komennolla `sudo -n -u aivo-tyokalu -- claude …`, kun ympäristömuuttuja `AIVO_TYOKALU_KAYTTAJA=aivo-tyokalu` on asetettu. Tämä vaatii sudoers-rivin, joka sallii juuri tämän yhden komennon ja vain palvelun käyttäjälle. Sudoers on oikeusmuutos, joten Tony kirjoittaa sen itse (`sudo visudo -f /etc/sudoers.d/aivo-tyokalu`).
+2. **Työkalutilan käyttäjä.** Claude-kirjautuminen kuuluu `aivo-tyokalu`-käyttäjälle (`sudo -u aivo-tyokalu -H claude`). Chat-palvelu kutsuu sitä komennolla `sudo -n -u aivo-tyokalu -- claude …`, kun ympäristömuuttuja `AIVO_TYOKALU_KAYTTAJA=aivo-tyokalu` on asetettu. Tämä vaatii sudoers-rivin (esimerkki ja huomio `NoNewPrivileges=true`:sta tiedostossa `aivo-chat.md`), joka sallii juuri tämän yhden komennon ja vain palvelun käyttäjälle. Sudoers on oikeusmuutos, joten Tony kirjoittaa sen itse (`sudo visudo -f /etc/sudoers.d/aivo-tyokalu`).
 
 3. **Mallipalvelin** (`/etc/systemd/system/aivo-malli.service`). Rivit `IPAddressDeny=any` ja `IPAddressAllow=127.0.0.0/8` estävät mallipalvelinta puhumasta mihinkään loopbackin ulkopuolelle:
 
@@ -103,6 +103,10 @@ Gitea on jo suljettu (rekisteröinti pois, kirjautuminen vaaditaan, käyttäjät
 3. Tony hyväksyy ajamalla `… hyvaksy TUNNUS` päätteessä ja kirjoittamalla tarkalleen `kyllä XXXXXXXX` (sha:n 8 ensimmäistä merkkiä). Vahvistus on sidottu juuri nähtyyn sisältöön: jos ehdotuksen teksti muuttuu, tiiviste ei täsmää. Ilman päätettä komento ei hyväksy mitään.
 4. Ennen mitään muutosta tarkistetaan kaikki `origin`in push-osoitteet (`git remote get-url --push --all`): jokaisen isännän on oltava sallittujen listalla. Sen jälkeen tiedosto kirjoitetaan ja commitoidaan. Jos commit epäonnistuu (esim. git-identiteetti puuttuu), tiedosto palautetaan, ehdotus säilyy ja komento ilmoittaa virheen. Ehdotus poistetaan vasta onnistuneen commitin jälkeen. Push nimeää kohteen (`git push origin HEAD:refs/heads/<haara>`), joten `remote.pushDefault` ja `branch.*.pushRemote` eivät ohjaa sitä muualle. Pushin epäonnistuminen ei peru commitia; tulos on `push-epaonnistui`.
 5. Ehdotuksen ero tulostetaan terminaaliin puhdistettuna: ohjaus- ja muotoilumerkit (esim. ESC, CR) näkyvät `\\x1b`-tyylisinä merkintöinä, jotta ne eivät voi piilottaa sisältöä ennen hyväksyntää. Jos ydinohjeita ei mahdu kehotteen ylärajaan, kehotteeseen tulee näkyvä huomautus pois jääneistä tiedostoista.
+
+## Päätösten kirjaus
+
+Yksityisen tilan päätös kirjataan vain yksityiseen muistiin (tiedosto 0600) eikä koskaan commitoida tai pushata, vaikka muisti olisi git-repossa. Työkalutilan päätös julkaistaan kirjaston `origin`iin vain, jos sen palvelin on `AIVO_SALLITUT_ETAISANNAT`-listalla; julkaisun epäonnistuessa päätöstiedosto palautetaan ennalleen. Selain saa Tonyn viestin paikan palvelimelta, joten päätöspainike kirjaa aina juuri sen viestin.
 
 ## Rajat ja avoimet asiat
 
