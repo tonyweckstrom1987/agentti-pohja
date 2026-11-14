@@ -41,6 +41,33 @@ class Tarkistin(unittest.TestCase):
             tulos = silmukka.tarkista_tehtava(teht(lause))
             self.assertEqual(tulos[0], "sunnuntai", luokka)
 
+    def test_tilaa_ostamisen_merkityksessa_on_raha(self):
+        for lause in ("Tilaa palvelu Hetznerilt\u00e4.", "Tilaa lis\u00e4\u00e4 laskentaa.", "Tilaa tuote verkkokaupasta.", "Tilaus uudesta palvelusta.",
+                      "Tilataan kuukausilisenssi."):
+            self.assertEqual(silmukka.tarkista_tehtava(teht(lause)), ("sunnuntai", "raha"), lause)
+
+    def test_tilaa_tilan_merkityksessa_ei_ole_raha(self):
+        """Tonyn p\u00e4\u00e4t\u00f6s 8.11.2026 (A889): 'yksityist\u00e4 tilaa' ym. ei saa ohjautua rahaluokkaan (tonylle.md 7.11. klo 2.57 ja 3.17)."""
+        for lause in ("T\u00e4m\u00e4 antaa yksityist\u00e4 tilaa ajureille.", "J\u00e4t\u00e4 tilaa kasvulle.", "Levyll\u00e4 on vapaata tilaa.",
+                      "Lokit viev\u00e4t tilaa.", "Tarvitaan enemm\u00e4n tilaa varten.", "Anna agentille lis\u00e4\u00e4 tilaa."):
+            tulos = silmukka.tarkista_tehtava(teht(lause))
+            self.assertNotEqual(tulos, ("sunnuntai", "raha"), lause)
+
+    def test_tilaa_ostokasky_ei_livahda_tilaksi(self):
+        """Tarkastajan hylk\u00e4ys 0eb7ca5: elatiivi tai -ta/-t\u00e4-verbi ennen 'tilaa'-k\u00e4sky\u00e4 ei saa tehd\u00e4 siit\u00e4 tilaa; ep\u00e4selv\u00e4 on raha."""
+        for lause in ("Hetznerist\u00e4 tilaa palvelin.", "Verkkokaupasta tilaa lisenssi.", "Muista tilaa uusi VPS.", "Varmista ja tilaa domain.",
+                      "Agentti saa tilaa palvelun.", "Agentti antaa tilaa palvelun.", "Varaa ja tilaa lisenssi.",
+                      "Tilaa kehitysymp\u00e4rist\u00f6.", "Tilaa kasvupalvelu."):
+            self.assertEqual(silmukka.tarkista_tehtava(teht(lause)), ("sunnuntai", "raha"), lause)
+
+    def test_raha_tunnistin_palauttaa_totuusarvon(self):
+        self.assertIs(silmukka.LUOKAT["raha"].search("Osta palvelin."), True)
+        self.assertIs(silmukka.LUOKAT["raha"].search("Lokit viev\u00e4t tilaa."), False)
+
+    def test_tilaa_kieltosanat_ennallaan(self):
+        self.assertEqual(silmukka.tarkista_tehtava(teht("Osta lis\u00e4\u00e4 tilaa."))[1], "raha")   # osta laukaisee edelleen
+        self.assertEqual(silmukka.tarkista_tehtava(teht("Tee LinkedIn-postaus."))[1], "julkaisu")
+
     def test_kompassin_kiellot_menevat_sunnuntaille(self):
         """Triagen (3.11.) lapaisseet esimerkit: kukin pysaytetaan omaan luokkaansa."""
         tapaukset = [

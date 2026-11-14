@@ -33,11 +33,37 @@ SUUNTA_RE = re.compile(r"^[ \t]*Suunta:[ \t]*(jatkoa|uusi)\b", re.IGNORECASE | r
 _A = "[a\u00e4]"
 _O = "[o\u00f6]"
 MUUTA = r"(?:lis" + _A + r"|muuta|muokkaa|vaihda|aseta|nosta|laske|kasvata|poista|laajenna|my" + _O + r"nn" + _A + r"|anna|asenna|luo|ota k" + _A + r"ytt" + _O + _O + r"n|s" + _A + _A + r"d" + _A + r")\w*"
+_RAHA_RE = re.compile(r"\b(?:osta(?! ja pid)|ostaa|ostetaan|maksa|maksaa|maksetaan|tilataan|tilaus|tilauksen|hanki|hankitaan|sijoita|sijoitetaan)\b",
+                      re.IGNORECASE)
+_TILAA_RE = re.compile(r"\btilaa\b", re.IGNORECASE)
+_SANA_ENNEN_RE = re.compile(r"(\w+)\W+$")
+_SANA_JALKEEN_RE = re.compile(r"^\W*(\w+)")
+# "tilaa" on seka kasky (tilata) etta osanto (tila). Osanto tunnistetaan vain suljetusta sanalistasta: edeltava sana
+# (yksityista, vapaata, paljon ...) tai seuraava sana (kasvulle ...). Sanat tasmaavat kokonaisina, ei paatteen tai alun perusteella.
+# Kaikki muu "tilaa" on raha: parempi ohjata Tonylle liikaa. Verbit kuten saa, antaa ja varaa voivat edeltaa ostokaskya, joten ne eivat ole listalla.
+_TILA_EDELTAJA = {"yksityist\u00e4", "yksityista", "vapaata", "lis\u00e4\u00e4", "lisaa", "enemm\u00e4n", "enemman", "paljon", "v\u00e4h\u00e4n", "vahan",
+                  "tarpeeksi", "riitt\u00e4v\u00e4sti", "riittavasti", "tarvitsee", "tarvitaan", "tarvitsemme", "vie", "viev\u00e4t", "veisi", "vaatii"}
+_TILA_SEURAAJA = {"kasvulle", "kasvua", "riitt\u00e4\u00e4", "riittaa", "puuttuu", "vapautuu", "levyll\u00e4", "levylla", "muistissa", "liikkua"}
+
+
+def _tilaa_on_osto(lause, m):
+    ed = _SANA_ENNEN_RE.search(lause[:m.start()])
+    if ed and ed.group(1).lower() in _TILA_EDELTAJA:
+        return False
+    jalk = _SANA_JALKEEN_RE.search(lause[m.end():])
+    return not (jalk and jalk.group(1).lower() in _TILA_SEURAAJA)
+
+
+class RahaRe:
+    """Raha-luokan tunnistin: tavalliset ostosanat ja \"tilaa\" vain ostamisen merkityksessa. search palauttaa totuusarvon (ei Match-oliota)."""
+    def search(self, lause):
+        return bool(_RAHA_RE.search(lause) or any(_tilaa_on_osto(lause, m) for m in _TILAA_RE.finditer(lause)))
+
+
 LUOKAT = {
     "julkaisu": re.compile(r"\bjulkaise\b|\bjulkaisen\b|\bjulkaisemme\b|\bjulkaistaan\b|npm publish|gh release|\bpostaa\b|merkitse julkaistuksi",
                            re.IGNORECASE),
-    "raha": re.compile(r"\b(?:osta(?! ja pid)|ostaa|ostetaan|maksa|maksaa|maksetaan|tilaa|tilataan|hanki|hankitaan|sijoita|sijoitetaan)\b",
-                       re.IGNORECASE),
+    "raha": RahaRe(),
     "oikeudet": re.compile(r"\bsudoers|\bvisudo|\bchmod|\bchown|\bsetfacl|\bdeploy.?key"
                            r"|" + MUUTA + r"\s+(?:\w+\s+){0,3}(?:oikeu\w*|permission\w*)", re.IGNORECASE),
     "kulukatto": re.compile(r"\bauto_max|\bauto_per|" + MUUTA + r"\s+(?:\w+\s+){0,3}(?:kulukat\w*|\w*katto\w*|\w*katot|\w*katon|budjet\w*"
