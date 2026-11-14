@@ -1,0 +1,11 @@
+# Kopioi: /etc/systemd/system/aivo-garmin.timer. Kerran paivassa klo 6.00 Suomen aikaa (ennen aamukoostetta 6.30).
+[Unit]
+Description=Aivo: Garmin-haku klo 6.00
+
+[Timer]
+OnCalendar=*-*-* 06:00:00 Europe/Helsinki
+Persistent=true
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target

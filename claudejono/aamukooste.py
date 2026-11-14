@@ -195,9 +195,10 @@ def kayttoonotto_ero_rivi(pohja=OLETUS_POHJA, yojono_ajuri=OLETUS_YOJONO_AJURI, 
         + "; p\u00e4ivit\u00e4 komennolla paivita-ajurit.sh"
 
 
-def keraa(repo, perus, nyt, hae=None, yksikot=None, ero=None):
+def keraa(repo, perus, nyt, hae=None, yksikot=None, ero=None, garmin_tila=None):
     """Kokoaa kooste-aineiston. `hae` = GitHub-haku (testeissa tekaistu), `yksikot` = failed-yksikoiden lahde,
-    `ero` = kayttoonoton eron lahde (kutsuttava, palauttaa tekstin tai None; oletuksena ei hae mitaan)."""
+    `ero` = kayttoonoton eron lahde (kutsuttava, palauttaa tekstin tai None; oletuksena ei hae mitaan),
+    `garmin_tila` = isannalta tuotu Aivon Garmin-tilatiedosto (vain tila ja rivimaarat, ei terveysarvoja)."""
     from agentti import aamupaketti
     alku = nyt - timedelta(hours=IKKUNA_H)
     tulokset = lue_tulokset(repo, alku, nyt)
@@ -250,7 +251,14 @@ def keraa(repo, perus, nyt, hae=None, yksikot=None, ero=None):
         ero_teksti = ero() if ero else None
     except Exception:
         ero_teksti = None
-    return {"nyt": nyt, "aivo_valmis": aivo_valmis, "tarkastaja_virheet": tarkastaja_virheet, "kaistat": kaistat, "kulutus": kulutus_teksti, "varaus": varaus_rivi, "varaus_kysymys": varaus_kysymys, "tulokset": tulokset, "uudet_prt": prt, "opit": opit, "tonylle": tonylle_uudet(repo, alku), "paatokset": avoimet_paatokset(repo, nyt), "saannot": tonylle_uudet(repo, alku, SAANTOPAIVITYKSET),
+    garmin_tarvitaan = garmin_halytys = None
+    try:   # Aivon Garmin-haku isannalla: puuttuva tilatiedosto = ei kaytossa, ei rivia
+        from aivo import garmin
+        garmin_tarvitaan, garmin_halytys = garmin.aamukooste_osa(
+            garmin_tila or os.environ.get("AIVO_GARMIN_TILA", garmin.OLETUS_TILA_CT115), nyt)
+    except Exception:
+        pass
+    return {"nyt": nyt, "garmin_tarvitaan": garmin_tarvitaan, "garmin_halytys": garmin_halytys, "aivo_valmis": aivo_valmis, "tarkastaja_virheet": tarkastaja_virheet, "kaistat": kaistat, "kulutus": kulutus_teksti, "varaus": varaus_rivi, "varaus_kysymys": varaus_kysymys, "tulokset": tulokset, "uudet_prt": prt, "opit": opit, "tonylle": tonylle_uudet(repo, alku), "paatokset": avoimet_paatokset(repo, nyt), "saannot": tonylle_uudet(repo, alku, SAANTOPAIVITYKSET),
             "pr": pr_ryhmat, "pr_virheita": virheet, "yojono": yojono_tila(perus, nyt),
             "yksikot": (yksikot or rikkinaiset_yksikot)(), "vaiteportti": vaiteportti.puutteet(repo), "ero": ero_teksti}
 
@@ -293,6 +301,8 @@ def rivit(t):
     # kalibrointipyynt\u00f6 ennen vapaamittaisia otsikoita: _lyhenna leikkaa rivin lopusta, joten pyynt\u00f6 ei saa j\u00e4\u00e4d otsikoiden taakse
     if t.get("varaus_kysymys"):
         paatos_osat.append(t["varaus_kysymys"])
+    if t.get("garmin_tarvitaan"):
+        paatos_osat.append(t["garmin_tarvitaan"])
     if t.get("ero"):   # ajurit jaljessa mainista
         paatos_osat.append(t["ero"])
     if avoimet:
@@ -326,6 +336,8 @@ def rivit(t):
         halytykset.append("failed: " + ", ".join(t["yksikot"][:3]) + (f" (+{len(t['yksikot']) - 3})" if len(t["yksikot"]) > 3 else ""))
     if t.get("vaiteportti"):
         halytykset.append("v\u00e4iteportti: " + ", ".join(t["vaiteportti"][:3]) + " valmis ilman .tarkastus.md-tiedostoa")
+    if t.get("garmin_halytys"):
+        halytykset.append(t["garmin_halytys"])
     if t.get("tarkastaja_virheet"):
         tv = t["tarkastaja_virheet"]
         kohde = tv[-1].get("haara") or tv[-1].get("pr") or tv[-1].get("repo") or "?"
