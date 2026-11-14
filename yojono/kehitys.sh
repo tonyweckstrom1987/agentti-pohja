@@ -162,6 +162,7 @@ except Exception:
 SYY=""
 PR=""
 TESTIT="ei ajettu"
+TODENNUS=""
 MUUTOKSET=$(git status --porcelain --untracked-files=all)
 
 if [ -n "$OHITETTU" ]; then
@@ -196,6 +197,10 @@ else
         SYY="ei testeja kloonista: PR:aa ei avattu"
       else
         TESTIT="vihrea${LKM:+, $LKM testia} ($(tail -n 3 "$TMP/testit.log" | tr '\n' ' ' | cut -c1-120))"
+        # Koodiportti (pr_kutsu tarkista_todennus) vaatii kuvaukseen rivin "Todennettu kaytossa: miten". Rivi muodostetaan vain
+        # tassa haarassa, jossa testit oikeasti ajettiin ja menivat lapi (SYY on tyhja); luvut tulevat ajon omasta lokista.
+        if [ -f package.json ]; then TESTIKOMENTO="npm test"; else TESTIKOMENTO="python3 -m unittest discover"; fi
+        TODENNUS="Todennettu kaytossa: $TESTIKOMENTO kloonissa${LKM:+, $LKM testia}, rc=0"
       fi
     else
       TESTIT="punainen ($(tail -n 3 "$TMP/testit.log" | tr '\n' ' ' | cut -c1-120))"
@@ -224,6 +229,7 @@ if [ -z "$SYY" ]; then
     echo "Yojonon automaattinen kehitystehtava: $AIHE ($PVM)."
     echo "Testit: vihrea. Automerge yhdistaa itse, kun CI on vihrea ja muutos on sallituilla poluilla; muuten se jaa ihmisen katselmoitavaksi."
     git diff --stat HEAD~1 | tail -n 15
+    if [ -n "$TODENNUS" ]; then echo; echo "$TODENNUS"; fi
   } > "$TMP/kuvaus.txt"
   if [ -n "$KUIVA" ]; then
     if ( cd "$AJURI" && python3 -B -m agentti.pr_kutsu tarkista "$REPO" "$TMP/klooni" "$HAARA" ) > "$TMP/tarkista.log" 2>&1; then

@@ -204,6 +204,43 @@ class Ajo(Pohja):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("vihrea, 2 testia", self.raportti("testit"))
 
+    def _pr_kutsu_tallentaa_kuvauksen(self):
+        """pr_kutsu-tynkka, joka tallentaa kuvaustiedoston sisallon (argv[5]) tarkistettavaksi ajon jalkeen."""
+        kirjoita(self.ajuri / "agentti" / "__init__.py", "")
+        kirjoita(self.ajuri / "agentti" / "pr_kutsu.py",
+                 "import shutil, sys\nopen(sys.argv[0] + '.kutsut', 'a').write(' '.join(sys.argv[1:]) + '\\n')\n"
+                 "shutil.copy(sys.argv[6], sys.argv[0] + '.kuvaus')\nprint('https://github.com/x/y/pull/7')\n")
+
+    def _oikea_tarkista_todennus(self):
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+        self.addCleanup(sys.path.remove, str(Path(__file__).resolve().parent.parent))
+        from agentti.pr_kutsu import PrVirhe, tarkista_todennus
+        return PrVirhe, tarkista_todennus
+
+    def test_vihrean_ajon_kuvaus_lapaisee_pr_kutsun_todennusportin(self):
+        self.agentti_skripti('printf "import unittest\\nclass B(unittest.TestCase):\\n    def test_b(self):\\n        self.assertEqual(1, 1)\\n" > test/test_b.py')
+        self._pr_kutsu_tallentaa_kuvauksen()
+        r = self.aja(REPO, "1.00", "testit")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        kuvaus = (self.ajuri / "agentti" / "pr_kutsu.py.kuvaus").read_text()
+        self.assertIn("Todennettu kaytossa: ", kuvaus)
+        self.assertIn("2 testia, rc=0", kuvaus)
+        _, tarkista_todennus = self._oikea_tarkista_todennus()
+        tarkista_todennus(kuvaus)  # ei saa nostaa PrVirhetta
+
+    def test_punaisen_ajon_kuvausta_ei_muodosteta(self):
+        self.agentti_skripti('printf "import unittest\\nclass B(unittest.TestCase):\\n    def test_b(self):\\n        self.fail()\\n" > test/test_b.py')
+        self._pr_kutsu_tallentaa_kuvauksen()
+        self.assertEqual(self.aja(REPO, "1.00", "testit").returncode, 1)
+        self.assertEqual(self.kutsut(), "")
+        self.assertFalse((self.ajuri / "agentti" / "pr_kutsu.py.kuvaus").exists())
+
+    def test_vanha_kuvaus_ilman_todennusriviton_hylataan_koodiportissa(self):
+        PrVirhe, tarkista_todennus = self._oikea_tarkista_todennus()
+        vanha = "Yojonon automaattinen kehitystehtava: testit (2026-11-11).\nTesti: vihrea.\n 1 file changed\n"
+        with self.assertRaises(PrVirhe):
+            tarkista_todennus(vanha)
+
     def test_nolla_testia_kloonista_ei_ole_vihrea(self):
         # repossa ei ole yhtaan testia; agentin lisaama liite ei ole testi
         self._lahde_muutos("rm", "-q", "-r", "test", "-f")
