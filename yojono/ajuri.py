@@ -250,6 +250,49 @@ def luokittele_virhe(loppu, paivittyi, md_on, meta):
     return "tuntematon"
 
 
+# Mallikartta (Tonyn paatokset A860, 8.11.2026): rutiinityo halvimmalle riittavalle mallille, vahvempi vain eskalointina.
+# (tyyppi, aihe) -> (halpa malli, vahvempi malli eskalointiin). Muut tyypit ajavat skriptinsa oletusmallilla (sonnet) ilman eskalointia.
+# Perustelu (mittaus 1.-7.11.): tarkkailu ajettiin jo haikulla; readme-ajot (3/3 onnistui) ja riippuvuudet ovat rutiinia. testit EI siirry:
+# 4/10 ajoa paatyi virheeseen jo sonnetilla, joten halvempi malli huonontaisi laatua. Aliakset ovat LiteLLM-aliaksia, joita yojonon avain jo kayttaa.
+# Tehtavan oma `malli`-kentta voittaa kartan eika eskaloidu (Tonyn nimenomainen valinta).
+MALLIKARTTA = {
+    ("tarkkailu", None): ("haiku", "sonnet"),
+    ("kehitys", "readme"): ("haiku", "sonnet"),
+    ("kehitys", "riippuvuudet"): ("haiku", "sonnet"),
+}
+# Vain malliin liittyvat viat eskaloidaan. Ei budjetti_loppui (kalliimpi malli kuluttaisi budjetin vielakin nopeammin), ei aikakatkaisua
+# eika PR-kutsun/forkin vikoja (eivat riipu mallista).
+ESKALOI_KOODIT = ("raportti_tyhja", "raporttia_ei_syntynyt", "malli_virhe", "testit_punaiset")
+
+
+def mallikartan_valinta(t):
+    """(malli, eskalointimalli) tehtavalle. Ei karttaa tai tehtavalla oma malli -> (oma tai None, None)."""
+    if t.get("malli"):
+        return t["malli"], None
+    return MALLIKARTTA.get((t.get("tyyppi"), t.get("aihe") if t.get("tyyppi") == "kehitys" else None), (None, None))
+
+
+def suorita_eskaloiden(suorita, t, pvm, perus, skripti, katto, kulu_nyt, kuukausi_jaljella=None):
+    """Ajaa tehtavan kartan halvalla mallilla. Jos ajo epaonnistuu mallista johtuvaan syyhyn (ESKALOI_KOODIT), yrittaa kerran vahvemmalla,
+    mutta vain jos paivakatto (ja kuukausikatto) riittaa uuteen varaukseen. Palauttaa (Tulos, kaytetty tehtava-dict). Kulut summataan,
+    joten katto ja kirjanpito nakevat molemmat ajot; katot eivat muutu."""
+    halpa, vahva = mallikartan_valinta(t)
+    t1 = {**t, "malli": halpa} if halpa and not t.get("malli") else t
+    tulos = suorita(t1, pvm, perus, skripti)
+    if not vahva or tulos.ok or tulos.koodi not in ESKALOI_KOODIT:
+        return tulos, t1
+    varaus = varattava(t["budjetti"])
+    if katto - (kulu_nyt + tulos.kulu) < varaus or (kuukausi_jaljella is not None and kuukausi_jaljella - tulos.kulu < varaus):
+        return tulos, t1          # ei varaa: ei eskaloida, ensimmainen tulos kirjataan
+    if t.get("tyyppi") == "kehitys" and pr_kutsu.paikkoja_jaljella() <= 0:
+        return tulos, t1
+    t2 = {**t, "malli": vahva}
+    tulos2 = suorita(t2, pvm, perus, skripti)
+    yhteensa = Tulos(tulos2.ok, round(tulos.kulu + tulos2.kulu, 4), tulos2.raportti,
+                     tulos2.viesti if tulos2.ok else f"{tulos2.viesti} (eskaloitu {halpa} -> {vahva})", tulos2.koodi)
+    return yhteensa, t2
+
+
 def suorita_katselmointi(tehtava, pvm, perus, skripti, aikaraja=TEHTAVA_AIKARAJA_S):
     """Kutsuu tyypin skriptia <repo> <budjetti> (katselmointi: katselmoi.sh; ideointi: ideoi.sh). Kulu luetaan raportin JSON:sta (myos epaonnistuneesta ajosta).
     Jos ajo alkoi mutta kulua ei saada selville (aikakatkaisu, lukukelvoton JSON), laskutetaan koko budjetti: katto ei saa alittua arvauksella."""
@@ -531,7 +574,8 @@ def aja(perus, skripti, laheta=print, suorita=suorita_katselmointi, nyt=time.mon
                     ohitukset.append((t["id"], fork_koodi))
                     kirjaa_ohitus(t, fork_koodi, pvm)
                     continue
-            tulos = suorita(t, pvm, perus, skripti_tyypille(skripti, t["tyyppi"]))
+            kk_jaljella = None if kuukausikatto is None else kuukausikatto - kuukauden_kulu(tila, pvm)
+            tulos, t = suorita_eskaloiden(suorita, t, pvm, perus, skripti_tyypille(skripti, t["tyyppi"]), katto, kulu_nyt, kk_jaljella)
             ajetut.append(t["id"])
             tila["kulut"][pvm] = round(kulu_nyt + tulos.kulu, 4)
             vanha = tila["tehtavat"].get(t["id"], {})

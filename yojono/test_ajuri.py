@@ -707,6 +707,106 @@ class ToistuvaJumiTesti(Pohja):
         self.assertEqual(kutsut, [])
 
 
+class MallikarttaTesti(Pohja):
+    """A860: rutiinityo halvalle mallille, eskalointi vain mallivioista ja vain katon sisalla."""
+
+    def kehitys(self, aihe, **kw):
+        return {**t("a", repo="agentti-pohja"), "tyyppi": "kehitys", "aihe": aihe, **kw}
+
+    def test_kartta_valitsee_halvan_mallin_rutiinille(self):
+        self.assertEqual(ajuri.mallikartan_valinta(self.kehitys("readme")), ("haiku", "sonnet"))
+        self.assertEqual(ajuri.mallikartan_valinta(self.kehitys("riippuvuudet")), ("haiku", "sonnet"))
+        self.assertEqual(ajuri.mallikartan_valinta({"tyyppi": "tarkkailu", "teema": "infra"}), ("haiku", "sonnet"))
+
+    def test_vaativat_tyypit_pysyvat_oletuksella(self):
+        for x in (self.kehitys("testit"), self.kehitys("ominaisuus", teema="x"), t("k"), {"tyyppi": "ideointi"}):
+            self.assertEqual(ajuri.mallikartan_valinta(x), (None, None), x)
+
+    def test_tehtavan_oma_malli_voittaa_eika_eskaloidu(self):
+        self.assertEqual(ajuri.mallikartan_valinta(self.kehitys("readme", malli="deepseek-pro")), ("deepseek-pro", None))
+
+    def test_valitaan_halpa_malli_ajolle(self):
+        nahdyt = []
+
+        def suorita(tehtava, *a):
+            nahdyt.append(tehtava.get("malli"))
+            return ajuri.Tulos(True, 0.2, str(self.perus / "r.md"), "ok")
+
+        self.kirjoita_jono(jono([self.kehitys("readme")]))
+        self.aja(suorita)
+        self.assertEqual(nahdyt, ["haiku"])
+
+    def test_oletustyyppi_ajetaan_ilman_mallikenttaa(self):
+        nahdyt = []
+        self.kirjoita_jono(jono([self.kehitys("testit")]))
+        self.aja(lambda tehtava, *a: nahdyt.append(tehtava.get("malli")) or ajuri.Tulos(True, 0.2, "r", "ok"))
+        self.assertEqual(nahdyt, [None])
+
+    def aja_epaonnistuen(self, koodi, katto=3.0, aihe="readme"):
+        nahdyt = []
+
+        def suorita(tehtava, *a):
+            nahdyt.append(tehtava.get("malli"))
+            if tehtava.get("malli") == "haiku":
+                return ajuri.Tulos(False, 0.2, "", "x", koodi)
+            return ajuri.Tulos(True, 0.5, "r.md", "ok")
+
+        (self.perus / "tila.json").unlink(missing_ok=True)     # alitestit jakavat hakemiston
+        self.kirjoita_jono(jono([self.kehitys(aihe)], katto=katto))
+        with mock.patch.object(ajuri.pr_kutsu, "paikkoja_jaljella", return_value=5):
+            self.aja(suorita)
+        return nahdyt
+
+    def test_malliviasta_eskaloidaan_kerran_ja_kulut_summataan(self):
+        for koodi in ajuri.ESKALOI_KOODIT:
+            with self.subTest(koodi=koodi):
+                self.assertEqual(self.aja_epaonnistuen(koodi), ["haiku", "sonnet"])
+
+    def test_kulut_ja_tila_nakevat_molemmat_ajot(self):
+        self.aja_epaonnistuen("raportti_tyhja")
+        tila = self.tila()
+        self.assertAlmostEqual(tila["kulut"][PVM], 0.7)
+        self.assertEqual(tila["tehtavat"]["a"]["tila"], "valmis")
+
+    def test_ei_eskalointia_budjetin_loppuessa_tai_muusta_viasta(self):
+        for koodi in ("budjetti_loppui", "aikakatkaisu", "pr_kutsu_epaonnistui", "tuntematon"):
+            with self.subTest(koodi=koodi):
+                self.assertEqual(self.aja_epaonnistuen(koodi), ["haiku"])
+
+    def test_ei_eskalointia_jos_paivakatto_ei_riita(self):
+        # varaus = 1.0 x 1.3; katto 1.5, ensimmainen ajo maksoi 0.2 -> jaljella 1.3 < 1.3 ei, joten katto 1.4
+        self.assertEqual(self.aja_epaonnistuen("raportti_tyhja", katto=1.4), ["haiku"])
+
+    def test_ei_eskalointia_jos_pr_paikkoja_ei_jaljella(self):
+        nahdyt = []
+
+        def suorita(tehtava, *a):
+            nahdyt.append(tehtava.get("malli"))
+            return ajuri.Tulos(False, 0.2, "", "x", "raportti_tyhja")
+
+        self.kirjoita_jono(jono([self.kehitys("readme")]))
+        with mock.patch.object(ajuri.pr_kutsu, "paikkoja_jaljella", side_effect=[1, 0]):
+            self.aja(suorita)
+        self.assertEqual(nahdyt, ["haiku"])
+
+    def test_vahvempi_ei_eskaloidu_enaa(self):
+        nahdyt = []
+
+        def suorita(tehtava, *a):
+            nahdyt.append(tehtava.get("malli"))
+            return ajuri.Tulos(False, 0.1, "", "x", "raportti_tyhja")
+
+        self.kirjoita_jono(jono([self.kehitys("readme")]))
+        with mock.patch.object(ajuri.pr_kutsu, "paikkoja_jaljella", return_value=5):
+            self.aja(suorita)
+        self.assertEqual(nahdyt, ["haiku", "sonnet"])
+        self.assertEqual(self.tila()["tehtavat"]["a"]["yrityksia"], 1)
+
+    def test_kartan_aliakset_hyvaksytaan_malli_saannolla(self):
+        for halpa, vahva in ajuri.MALLIKARTTA.values():
+            self.assertTrue(ajuri.MALLI_RE.match(halpa) and ajuri.MALLI_RE.match(vahva))
+
+
 class OpitTesti(Pohja):
     """Oppiva silmukka: opit.md paivittyy enintaan kerran ~vuorokaudessa, virhe ei kaada ajoa."""
 
