@@ -55,6 +55,46 @@ VIRHESYY_MAX = 200
 OHITUS_SYITA_MAX = 20
 OHITUS_SYY_MAX = 200
 PAATOKSET = {"HYVAKSY": "HYVAKSYTTY", "HYLKAA": "HYLATTY", "RAJATTU": "RAJATTU", "EN_TIEDA": "EN_TIEDA"}
+# Tonyn paatos A918 (9.11.2026, korvaa A846:n laajuuden): vain kaksi luokkaa, ja KOODI todentaa ne tiedostolistasta.
+# Luokat kiristys ja paatos:A<nro> poistettu: kiristysta ei voi todentaa koodilla, eika agentin kirjoittamaan paatostiedostoon
+# voi luottaa. Ne jaavat Tonyn ryhmakyllille.
+LUOKAT = ("dokumentti", "testi")
+# Dokumentti = vain sallittujen polkujen .md-tiedostot (sallittujen lista, ei estolista): docs/-hakemisto (mika tahansa syvyys),
+# juuren README*.md ja juuren CHANGELOG.md. Kirjainkoko ratkaisee. Muut .md-tiedostot (MEMORY.md, SKILL.md, AGENTS.md, CLAUDE.md,
+# kehotteet, .claude/, claudejono/) eivat ole dokumentteja, koska agentit tai mallit lukevat ne ohjeina.
+DOKUMENTTI_SALLITUT_RE = re.compile(r"\A(docs/(?:[A-Za-z0-9._-]+/)*[A-Za-z0-9._-]+\.md|README[A-Za-z0-9._-]*\.md|CHANGELOG\.md)\Z")
+# Toinen lukko sallitun hakemiston sisalle (docs/ voi sisaltaa ohjetiedoston): nama nimet eivat koskaan ole dokumentteja.
+DOKUMENTTI_POIS_RE = re.compile(r"kehote|prompt|memory|skill|(^|/)claude[^/]*\.md\Z|(^|/)\.claude/|(^|/)agents?[^/]*\.md\Z|\.\.",
+                                re.IGNORECASE)
+TESTI_RE = re.compile(r"(^|/)test_[A-Za-z0-9_]+\.py\Z|(^|/)tests/(?:[^/]+/)*[^/]+\.py\Z")
+# Testiluokka ei kata testia, joka voi tuhota tai kaynnistaa jotain (A918, tarkennus): poisto, prosessit, verkko, dynaaminen
+# koodi. Fail closed: osuma -> ei luokkaa (ja mallin ehdottama testi-luokka -> RAJATTU). Tutkitaan muutetut ja kontekstirivit.
+TESTI_VAARAT_RE = re.compile(
+    r"\b(rmtree|unlink|rmdir|removedirs|rename|renames|truncate|system|popen|Popen|subprocess|shutil|socket|urllib|requests|httpx|"
+    r"aiohttp|ctypes|importlib|import_module|getattr|setattr|globals|vars|__import__|__builtins__|eval|exec|compile|fork|forkpty|"
+    r"kill|killpg|chmod|chown|execv\w*|spawn\w*|startfile)\b|\.remove\s*\(|\bos\s*\.\s*replace\b|\bfrom\s+os\s+import|"
+    r"\bimport\s+os\s+as\b", re.IGNORECASE)
+# Luokka ei koskaan kata naita (A918): koodi tarkistaa tiedostolistan ja diffin, ei luota mallin sanaan eika kehotteeseen.
+# Polut: automergen ja pr_kutsun rajatut (mm. tools/automerge.py, .github/, oikeudet, kulukatot, salaisuudet) seka
+# tarkastajan oma koodi ja kehote (muutos ei voi kelpuuttaa itse itseaan) ja riippuvuudet.
+LUOKKA_EI_POLUT_RE = re.compile(r"(^|/)\.github(/|\Z)|(^|/)automerge|(^|/)claudejono/tarkastaja|(^|/)isanta(/|\Z)"
+                                r"|(^|/)(requirements[^/]*\.txt|pyproject\.toml|setup\.(py|cfg)|package(-lock)?\.json|Pipfile[^/]*)\Z",
+                                re.IGNORECASE)
+# Diffin muutetut rivit (+/-): aiheet, joista paatos on aina Tonyn. Fail closed: osuma -> RAJATTU, myos vaaralla osumalla.
+# Sanaraja kirjaimina (ei \b), jotta MAX_EUROA ja GITHUB_TOKEN osuvat: alaviiva erottaa sanat.
+_ALKU, _LOPPU = r"(?<![A-Za-z])", r"(?![A-Za-z])"
+LUOKKA_EI_AIHEET = (
+    ("raha", re.compile(_ALKU + r"(raha|euro|eur" + _LOPPU + r"|usd" + _LOPPU + r"|kaupp|kaupan|salkku|saldo|budjet|maksu|hinta|"
+                        r"price|balance|wallet|order|trade|trading|binance|kraken|coinbase|stripe|paypal)|\u20ac|\$\s?\d",
+                        re.IGNORECASE)),
+    ("salaisuudet", re.compile(r"token|secret|salaisu|salasana|password|passwd|api_?key|private_?key|credential|"
+                               r"\.env" + _LOPPU + r"|holvi|authorization|bearer|ghp_|github_pat_|" + _ALKU + r"sk-", re.IGNORECASE)),
+    ("root", re.compile(_ALKU + r"(sudo|root" + _LOPPU + r"|su\s+-)|runuser|setuid|seteuid|setgid|chmod|chown|pkexec|/etc/",
+                        re.IGNORECASE)),
+    ("verkkoyhteys", re.compile(r"https?://|urllib|" + _ALKU + r"(requests" + _LOPPU + r"|socket|curl" + _LOPPU + r"|wget" + _LOPPU
+                                + r"|ssh" + _LOPPU + r"|nc\s|fetch\()|httpx|aiohttp|urlopen|http\.client|smtplib|ftplib|paramiko|"
+                                r"websocket", re.IGNORECASE)),
+)
 KAYTTAJA_RE = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
@@ -152,26 +192,109 @@ def _siivoa(teksti, maksimi):
 
 def tulkitse(stdout, koodi):
     """(paatos, perustelu, loydokset, luvut). Kaikki epaselva -> EN_TIEDA (fail closed)."""
+    return tulkitse_luokalla(stdout, koodi)[:4]
+
+
+def tulkitse_luokalla(stdout, koodi):
+    """(paatos, perustelu, loydokset, luvut, luokka). luokka on mallin ehdottama merkkijono tai None (ei viela tarkistettu)."""
     luvut = kulutus.claude_luvut(stdout or "")
     try:
         d = json.loads(stdout)
     except (ValueError, TypeError):
-        return "EN_TIEDA", "tarkastajan tuloste ei ollut luettavissa (koodi %s)" % koodi, [], luvut
+        return "EN_TIEDA", "tarkastajan tuloste ei ollut luettavissa (koodi %s)" % koodi, [], luvut, None
     teksti = d.get("result") if isinstance(d, dict) and isinstance(d.get("result"), str) else ""
     if koodi != 0 or not isinstance(d, dict) or d.get("is_error") is True or d.get("subtype", "success") != "success":
-        return "EN_TIEDA", "tarkastusajo epaonnistui (%s)" % _siivoa(d.get("subtype") if isinstance(d, dict) else "", 60), [], luvut
+        return "EN_TIEDA", "tarkastusajo epaonnistui (%s)" % _siivoa(d.get("subtype") if isinstance(d, dict) else "", 60), [], luvut, None
     m = re.search(r"\{.*\}", teksti, re.S)
     try:
         v = json.loads(m.group(0)) if m else None
     except ValueError:
         v = None
     if not isinstance(v, dict) or v.get("paatos") not in PAATOKSET:
-        return "EN_TIEDA", "tarkastajan vastaus ei ollut sovitussa muodossa", [], luvut
+        return "EN_TIEDA", "tarkastajan vastaus ei ollut sovitussa muodossa", [], luvut, None
     loydokset = [_siivoa(x, LOYDOS_MAX) for x in (v.get("loydokset") or []) if isinstance(x, str) and x.strip()][:LOYDOKSIA_MAX]
-    return PAATOKSET[v["paatos"]], _siivoa(v.get("perustelu"), PERUSTELU_MAX), loydokset, luvut
+    luokka = v.get("luokka") if isinstance(v.get("luokka"), str) else None
+    return PAATOKSET[v["paatos"]], _siivoa(v.get("perustelu"), PERUSTELU_MAX), loydokset, luvut, luokka
 
 
-def kommentti(paatos, sha, perustelu, loydokset, malli):
+def _nimet(tiedostot):
+    return [n for t in tiedostot or [] for n in (t.get("filename"), t.get("previous_filename")) if n]
+
+
+def _muutetut_rivit(patch):
+    return [r[1:] for r in (patch or "").splitlines() if r[:1] in "+-" and not r.startswith(("+++", "---"))]
+
+
+def _patchin_rivit(patch):
+    """Muutetut ja kontekstirivit (ei hunk-otsikoita, ei tiedostootsikoita)."""
+    return [r[1:] for r in (patch or "").splitlines() if r[:1] in "+- " and not r.startswith(("+++", "---"))]
+
+
+def testin_vaarat(tiedostot):
+    """Syyt, joiden vuoksi testitiedosto ei kelpaa testiluokkaan (tuhoava tai prosesseja/verkkoa kayttava operaatio)."""
+    syyt = []
+    for t in tiedostot or []:
+        patch = t.get("patch")
+        if isinstance(patch, str):
+            m = TESTI_VAARAT_RE.search("\n".join(_patchin_rivit(patch)))
+            if m:
+                syyt.append("testissa vaarallinen operaatio %s (%s)" % (_siivoa(m.group(0), 30), t.get("filename")))
+    return syyt
+
+
+def luokan_esteet(tiedostot, repo=""):
+    """Syyt, joiden vuoksi mikaan luokka ei kelpaa (tyhja = ei esteita). Paatetaan tiedostolistasta ja diffista."""
+    esteet = []
+    for n in _nimet(tiedostot):
+        if LUOKKA_EI_POLUT_RE.search(n) or automerge.rajattu(repo, n) or pr_kutsu.suojattu(n):
+            esteet.append("rajattu polku %s" % n)
+    for t in tiedostot or []:
+        patch = t.get("patch")
+        if not isinstance(patch, str):
+            if int(t.get("changes") or 0) > 0:                 # GitHub jattaa patchin pois isoista ja binaaritiedostoista
+                esteet.append("diff puuttuu: %s" % t.get("filename"))
+            continue
+        rivit = "\n".join(_muutetut_rivit(patch))
+        for aihe, re_ in LUOKKA_EI_AIHEET:
+            if re_.search(rivit):
+                esteet.append("%s (%s)" % (aihe, t.get("filename")))
+    return esteet
+
+
+def koodiluokka(tiedostot, repo=""):
+    """'dokumentti', 'testi' tai None. Paatetaan pelkastaan tiedostolistasta ja diffista (koodi, ei malli):
+    dokumentti = kaikki tiedostot ovat sallittujen polkujen .md-tiedostoja (DOKUMENTTI_SALLITUT_RE); testi = kaikki ovat testitiedostoja (test_*.py tai
+    tests/-hakemiston .py) eika niissa ole tuhoavia operaatioita (testin_vaarat()); kummassakaan ei saa olla rajattua polkua eika luokan_esteet()-osumaa. Sekamuutos -> None."""
+    nimet = _nimet(tiedostot)
+    if not nimet or luokan_esteet(tiedostot, repo):
+        return None
+    if all(DOKUMENTTI_SALLITUT_RE.match(n) and not DOKUMENTTI_POIS_RE.search(n) for n in nimet):
+        return "dokumentti"
+    if all(TESTI_RE.search(n) for n in nimet) and not testin_vaarat(tiedostot):
+        return "testi"
+    return None
+
+
+def tarkista_luokka(paatos, luokka, tiedostot, repo=""):
+    """(paatos, luokka, syy). Luokan saa vain, kun malli ehdottaa sita JA koodi (koodiluokka) todentaa saman luokan.
+    Malli voi vain kiristaa: null -> ei luokkaa (paatos ennallaan); "RAJATTU" tai luokka, jota koodi ei todenna -> RAJATTU.
+    Vain HYVAKSYTTY voi saada luokan."""
+    if paatos != "HYVAKSYTTY":
+        return paatos, None, ""
+    if luokka is None:
+        return paatos, None, ""
+    if luokka == "RAJATTU":
+        return "RAJATTU", None, "malli ehdotti luokaksi RAJATTU"
+    if luokka not in LUOKAT:
+        return "RAJATTU", None, "tuntematon luokka"
+    if koodiluokka(tiedostot, repo) == luokka:
+        return paatos, luokka, ""
+    esteet = luokan_esteet(tiedostot, repo) + (testin_vaarat(tiedostot) if luokka == "testi" else [])
+    syy = ", ".join(esteet[:4]) if esteet else "tiedostot eivat ole pelkkia %s-tiedostoja" % luokka
+    return "RAJATTU", None, "luokka %s ei sovi: %s" % (_siivoa(luokka, 40), _siivoa(syy, 200))
+
+
+def kommentti(paatos, sha, perustelu, loydokset, malli, luokka=None):
     otsikko = {"HYVAKSYTTY": "hyv\u00e4ksytty: automerge saa yhdist\u00e4\u00e4, kun CI on vihre\u00e4",
                "HYLATTY": "hyl\u00e4tty: korjattava ennen yhdist\u00e4mist\u00e4",
                "RAJATTU": "rajattu: Tony p\u00e4\u00e4tt\u00e4\u00e4",
@@ -181,6 +304,8 @@ def kommentti(paatos, sha, perustelu, loydokset, malli):
         rivit += [perustelu, ""]
     if loydokset:
         rivit += ["L\u00f6yd\u00f6kset:"] + ["- " + l.replace("\n", " ") for l in loydokset] + [""]
+    if luokka and paatos == "HYVAKSYTTY" and luokka in LUOKAT:
+        rivit += ["Luokka: `%s`" % luokka, "", "<!-- riippumaton-tarkastus-luokka v1 sha=%s luokka=%s -->" % (sha, luokka)]
     rivit.append("<!-- riippumaton-tarkastus v1 sha=%s paatos=%s -->" % (sha, paatos))
     return "\n".join(rivit)
 
@@ -208,21 +333,24 @@ def tarkastus_komento(env):
     return kom, alaenv, koti, malli
 
 
-def tarkasta_pr(repo, nro, d, tunnus, env, suorita=subprocess.run, avaa=urllib.request.urlopen):
-    """Palauttaa (paatos, perustelu, loydokset, luvut, malli). Ei kirjoita mitaan."""
+def tarkasta_pr(repo, nro, d, tunnus, env, suorita=subprocess.run, avaa=urllib.request.urlopen, tiedostot=None):
+    """Palauttaa (paatos, perustelu, loydokset, luvut, malli, luokka). Ei kirjoita mitaan."""
     kom, alaenv, koti, malli = tarkastus_komento(env)
     diff = _pyynto("%s/repos/%s/%s/pulls/%s" % (API, OMISTAJA, repo, nro), tunnus, accept="application/vnd.github.diff", avaa=avaa)
     if len(diff) > DIFF_MAX:
-        return "EN_TIEDA", "diff on yli %d tavua, joten sita ei tarkastettu kokonaan" % DIFF_MAX, [], {}, malli
+        return "EN_TIEDA", "diff on yli %d tavua, joten sita ei tarkastettu kokonaan" % DIFF_MAX, [], {}, malli, None
     kehote = rakenna_kehote(repo, nro, d, diff.decode("utf-8", "replace"))
     try:
         r = suorita(kom, input=kehote, cwd=koti, env=alaenv, capture_output=True, text=True, timeout=AIKARAJA_S, check=False)
     except subprocess.TimeoutExpired:
-        return "EN_TIEDA", "tarkastus aikakatkaistiin", [], {}, malli
+        return "EN_TIEDA", "tarkastus aikakatkaistiin", [], {}, malli, None
     except OSError as e:
         raise TarkastajaVirhe("tarkastajaa ei voitu kaynnistaa: " + type(e).__name__)
-    paatos, perustelu, loydokset, luvut = tulkitse(r.stdout, r.returncode)
-    return paatos, perustelu, loydokset, luvut, malli
+    paatos, perustelu, loydokset, luvut, luokka = tulkitse_luokalla(r.stdout, r.returncode)
+    paatos, luokka, syy = tarkista_luokka(paatos, luokka, tiedostot, repo)
+    if syy:
+        perustelu = _siivoa("Luokkatarkistus: %s. %s" % (syy, perustelu), PERUSTELU_MAX)
+    return paatos, perustelu, loydokset, luvut, malli, luokka
 
 
 # PR-avaaja (Tonyn paatos 4.11.2026): pilvi-Claude ei voi avata PR:ia, joten isanta avaa botin tunnuksella PR:n jokaiselle
@@ -347,14 +475,18 @@ def kierros(env, tunnus, nyt=None, suorita=subprocess.run, avaa=urllib.request.u
                     tehty.append({"repo": repo, "pr": nro, "tulos": "tarkastettaisiin", "sha": pr["head_sha"][:12]})
                     continue
                 alku = time.monotonic()
-                paatos, perustelu, loydokset, luvut, malli = tarkasta_pr(repo, nro, d, tunnus, env, suorita=suorita, avaa=avaa)
+                paatos, perustelu, loydokset, luvut, malli, luokka = tarkasta_pr(repo, nro, d, tunnus, env, suorita=suorita, avaa=avaa,
+                                                                                tiedostot=tiedostot)
                 tila["maara"] += 1
                 tila["per_pr"][avain] = tila["per_pr"].get(avain, 0) + 1
                 kirjoita_tila(tilapolku, tila)
                 kulutus.kirjaa(tila_hak, malli, avain, 0, "tarkastus", paatos != "EN_TIEDA", time.monotonic() - alku, luvut)
                 _pyynto("%s/repos/%s/%s/issues/%s/comments" % (API, OMISTAJA, repo, nro), tunnus,
-                        data={"body": kommentti(paatos, pr["head_sha"], perustelu, loydokset, malli)}, avaa=avaa)
-                tehty.append({"repo": repo, "pr": nro, "tulos": paatos, "sha": pr["head_sha"][:12]})
+                        data={"body": kommentti(paatos, pr["head_sha"], perustelu, loydokset, malli, luokka)}, avaa=avaa)
+                rivi = {"repo": repo, "pr": nro, "tulos": paatos, "sha": pr["head_sha"][:12]}
+                if luokka:
+                    rivi["luokka"] = luokka
+                tehty.append(rivi)
             except TarkastajaVirhe as e:
                 tehty.append({"repo": repo, "pr": nro, "tulos": "virhe", "syy": str(e)})
     tila["per_pr"] = {k: v for k, v in tila["per_pr"].items() if k in auki or not auki}
