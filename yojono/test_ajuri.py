@@ -1555,6 +1555,14 @@ class PeilausTarkkaTesti(Pohja):
 
 
 class MainTarkkaTesti(Pohja):
+    def setUp(self):
+        super().setUp()
+        # aja(laheta=print) sitoo alkuperaisen printin maaritysaikana, joten mock.patch("builtins.print") ei esta yhteenvetoa
+        # vuotamasta stdoutiin. Ilman tata testiajon stdout sisalsi yojonon rivit eika yhteenvetoa (tulos 2026-11-05-50).
+        patcher = mock.patch.object(sys, "stdout", io.StringIO())
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def env(self):
         return mock.patch.dict(os.environ, {"YOJONO_PERUS": str(self.perus)})
 
@@ -1588,3 +1596,22 @@ class MainTarkkaTesti(Pohja):
             p.assert_not_called()
             self.assertEqual(ajuri.main(["ajo"]), 0)
             p.assert_called_once_with(str(self.perus))
+
+
+class TuontiEiAjaJonoaTesti(unittest.TestCase):
+    """Moduulien tuonti ei saa kaynnistaa jonoa eika tulostaa mitaan (testien haku tuo moduuleja)."""
+    def _tuo(self, moduuli):
+        with tempfile.TemporaryDirectory() as tmp:
+            env = {**os.environ, "YOJONO_PERUS": tmp}
+            env.pop("YOJONO_LOKI", None)
+            r = subprocess.run([sys.executable, "-c", f"import {moduuli}"], cwd=Path(__file__).resolve().parent.parent,
+                               env=env, capture_output=True, text=True, timeout=60)
+            self.assertEqual(os.listdir(tmp), [], "tuonti loi jonon tiloja")
+        self.assertEqual((r.returncode, r.stdout, r.stderr), (0, "", ""))
+
+    def test_ajurin_tuonti_on_hiljainen(self):
+        self._tuo("yojono.ajuri")
+
+    def test_paamoduulin_tuonti_ei_kaynnista_jonoa(self):
+        self._tuo("yojono.__main__")
+
