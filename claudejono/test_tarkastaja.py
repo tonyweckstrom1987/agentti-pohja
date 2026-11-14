@@ -133,6 +133,109 @@ class KomentoTesti(unittest.TestCase):
                 tk.tarkastus_komento(env)
 
 
+def pieni(nimi="docs/ohje.md", muutos=10, patch="@@\n+teksti"):
+    return {"filename": nimi, "status": "modified", "changes": muutos, "patch": patch}
+
+
+class MallinValintaTesti(unittest.TestCase):
+    """A861: sonnet pieniin ei-rajattuihin PR:iin, opus rajattuihin, isoihin ja epavarmoihin."""
+
+    def malli(self, tiedostot, repo="agentti-pohja", diff=""):
+        return tk.valitse_malli(repo, tiedostot, diff)[0]
+
+    def test_dokumentit_ja_testit_pienina_saavat_sonnetin(self):
+        for nimi in ("docs/ohje.md", "README.md", "claudejono/test_laatu.py", "yojono/test_ajuri.py", "src/laske.py"):
+            with self.subTest(nimi=nimi):
+                self.assertEqual(self.malli([pieni(nimi)]), "sonnet")
+
+    def test_rajatut_polut_saavat_opuksen(self):
+        for nimi in (".github/workflows/ci.yml", "tools/automerge.py", "tools/mutantit.py", "agentti/pr_kutsu.py", "claudejono/tarkastaja.py",
+                     "claudejono/malli.py", "yojono/ajuri.py", "claudejono/varaus.py", "sudoers.claudejono", "config.py", "src/api_key.py",
+                     "nftables.conf", "systemd/x.service", "../ulos", "/etc/passwd", "claudejono/systemd/a.mall"):
+            with self.subTest(nimi=nimi):
+                self.assertEqual(self.malli([pieni("docs/a.md"), pieni(nimi)]), "opus")
+
+    def test_uudelleennimetyn_tiedoston_vanha_nimi_huomioidaan(self):
+        self.assertEqual(self.malli([dict(pieni("docs/uusi.md"), previous_filename="tools/automerge.py")]), "opus")
+
+    def test_raha_ja_rajatut_repot_saavat_opuksen(self):
+        self.assertEqual(self.malli([pieni("README.md")], repo="kauppatiimi"), "opus")
+        self.assertEqual(self.malli([pieni("README.md")], repo="agenttifirma-docs"), "opus")
+
+    def test_rivirajan_kohdalla(self):
+        self.assertEqual(self.malli([pieni("a.md", muutos=300)]), "sonnet")
+        self.assertEqual(self.malli([pieni("a.md", muutos=301)]), "opus")
+        self.assertEqual(self.malli([pieni("a.md", muutos=150), pieni("b.md", muutos=151)]), "opus")
+
+    def test_epavarma_tapaus_on_opus(self):
+        for tiedostot in (None, [], "x", [None], [pieni("a.md", muutos="paljon")], [pieni("a.md", patch=None)], [{"changes": 3, "patch": "x"}]):
+            with self.subTest(tiedostot=tiedostot):
+                self.assertEqual(self.malli(tiedostot), "opus")
+
+    def test_binaari_ilman_rivimuutosta_ei_estaa_mutta_katkaistu_diff_estaa(self):
+        self.assertEqual(self.malli([pieni("a.md"), {"filename": "kuva.png", "changes": 0, "patch": None}]), "sonnet")
+
+    def test_salaisuuteen_viittaava_lisatty_rivi_antaa_opuksen(self):
+        self.assertEqual(self.malli([pieni()], diff="+++ b/x\n+API_KEY = 'x'\n"), "opus")
+        self.assertEqual(self.malli([pieni()], diff="+++ b/x\n-token = 1\n+hei\n"), "sonnet")   # poistettu rivi ei laukaise
+
+    def test_salaisuuden_nakoinen_jono_ilman_avainsanaa_antaa_opuksen(self):
+        for rivi in ("+x = 'ghp_abcdefghijklmnop1234'", "+AKIAIOSFODNN7EXAMPLE", "+v = 'a1b2c3d4e5f6a7b8c9d0e1f2a3b4'", "+eyJhbGciOiJIUzI1NiJ9abc",
+                     "+k = 'sk-abcdefghijkl'", "+h = 'dGVzdDEyMzQ1Njc4OTBhYmNkZWZnaA=='"):
+            with self.subTest(rivi=rivi):
+                self.assertEqual(self.malli([pieni()], diff="+++ b/x\n" + rivi + "\n"), "opus")
+        for rivi in ("+nimi = 'pitka_snake_case_funktion_nimi_ilman_numeroita'", "+polku = 'docs/muutokset/aamupaketti-hakuvirhe2.md'",
+                     "+Tama on tavallinen lause numero 5 ja pitka.", "-ghp_abcdefghijklmnop1234"):
+            with self.subTest(rivi=rivi):
+                self.assertEqual(self.malli([pieni()], diff="+++ b/x\n" + rivi + "\n"), "sonnet")
+
+    def test_oletus_on_opus_ilman_asetusta_ja_palvelumallissa(self):
+        d = tempfile.TemporaryDirectory()
+        self.addCleanup(d.cleanup)
+        api = Feikki([pr_olio()], [pieni()], [])
+        ajot = []
+        tk.kierros(dict(ENV, CLAUDEJONO_TILA=d.name), "t", avaa=api,
+                   suorita=lambda kom, **kw: ajot.append(kom) or SimpleNamespace(returncode=0, stdout=claude_ulos('{"paatos": "HYVAKSY"}'), stderr=""))
+        self.assertEqual(ajot[0][ajot[0].index("--model") + 1], "opus")
+        mall = (Path(tk.__file__).parent / "systemd" / "claude-tarkastaja.service.mall").read_text()
+        self.assertIn("Environment=CLAUDEJONO_TARKASTAJA_MALLI=opus\n", mall)
+
+    def test_komento_kayttaa_valittua_mallia_ja_pakotus_voittaa(self):
+        auto = dict(ENV, CLAUDEJONO_TARKASTAJA_MALLI="auto")
+        self.assertEqual(tk.tarkastus_komento(ENV, "sonnet")[3], "opus")             # oletus on opus: valinta ei ole kaytossa ilman asetusta
+        self.assertEqual(tk.tarkastus_komento(auto, "sonnet")[3], "sonnet")
+        self.assertEqual(tk.tarkastus_komento(auto)[3], "opus")                      # ei valintaa -> opus
+        self.assertEqual(tk.tarkastus_komento(auto, "haiku")[3], "opus")             # tuntematon valinta -> opus
+        self.assertEqual(tk.tarkastus_komento(dict(ENV, CLAUDEJONO_TARKASTAJA_MALLI="opus"), "sonnet")[3], "opus")
+        kom = tk.tarkastus_komento(auto, "sonnet")[0]
+        self.assertEqual(kom[kom.index("--model") + 1], "sonnet")
+        self.assertEqual(kom[kom.index("--tools") + 1], "")                           # tyokalut pysyvat pois
+
+    def test_pienen_prn_kierros_kirjaa_sonnetin_kulutukseen_ja_kommenttiin(self):
+        d = tempfile.TemporaryDirectory()
+        self.addCleanup(d.cleanup)
+        api = Feikki([pr_olio()], [pieni()], [])
+        ajot = []
+
+        def suorita(kom, **kw):
+            ajot.append(kom)
+            return SimpleNamespace(returncode=0, stdout=claude_ulos('{"paatos": "HYVAKSY", "perustelu": "ok"}'), stderr="")
+
+        tk.kierros(dict(ENV, CLAUDEJONO_TILA=d.name, CLAUDEJONO_TARKASTAJA_MALLI="auto"), "t", suorita=suorita, avaa=api)
+        self.assertEqual(ajot[0][ajot[0].index("--model") + 1], "sonnet")
+        self.assertIn("Riippumaton tarkastus (sonnet)", api.postit[0][1]["body"])
+        self.assertEqual(json.loads((Path(d.name) / "kulutus.jsonl").read_text())["malli"], "sonnet")
+
+    def test_rajattu_muutos_ei_paase_malliin_ollenkaan_ja_iso_menee_opukselle(self):
+        d = tempfile.TemporaryDirectory()
+        self.addCleanup(d.cleanup)
+        api = Feikki([pr_olio()], [pieni("docs/a.md", muutos=400)], [])
+        ajot = []
+        tk.kierros(dict(ENV, CLAUDEJONO_TILA=d.name, CLAUDEJONO_TARKASTAJA_MALLI="auto"), "t", avaa=api,
+                   suorita=lambda kom, **kw: ajot.append(kom) or SimpleNamespace(returncode=0, stdout=claude_ulos('{"paatos": "HYVAKSY"}'), stderr=""))
+        self.assertEqual(ajot[0][ajot[0].index("--model") + 1], "opus")
+
+
 class KierrosTesti(unittest.TestCase):
     def setUp(self):
         self.d = tempfile.TemporaryDirectory()
