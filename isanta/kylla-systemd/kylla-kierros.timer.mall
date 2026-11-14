@@ -1,0 +1,9 @@
+[Unit]
+Description=Kylla-skriptit 5 min valein
+
+[Timer]
+OnBootSec=3min
+OnUnitInactiveSec=5min
+
+[Install]
+WantedBy=timers.target

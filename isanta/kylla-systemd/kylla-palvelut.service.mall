@@ -1,0 +1,10 @@
+# Kylla 5b: kaatuneiden palvelujen uudelleenkaynnistys Tonyn hyvaksyman listan mukaan. Ohje: docs/kylla-skriptit.md
+[Unit]
+Description=Kylla-palvelut: listattujen kaatuneiden palvelujen uudelleenkaynnistys
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/kylla/komentobotti.env
+ExecStart=/usr/bin/python3 -I -B /usr/local/lib/kylla/kylla.py palvelut --lista /etc/kylla/palvelut.txt --tila /var/lib/kylla/palvelut --chat-tiedosto /etc/kylla/chat-id
+TimeoutStartSec=600
+UMask=0077
