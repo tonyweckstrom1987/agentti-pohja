@@ -18,7 +18,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from . import aivo_arvio, ajuri, kaistamittaus, kulutus, vaiteportti, varaus
+from . import aivo_arvio, ajuri, kaistamittaus, kulutus, vaiteportti, valmis, varaus
 
 TZ = ZoneInfo("Europe/Helsinki")
 OLETUS_REPO = "/var/lib/claude-jono/docs"
@@ -68,7 +68,7 @@ def lue_tulokset(repo, alku, loppu):
     ulos = []
     if not hak.is_dir():
         return ulos
-    for p in sorted(hak.glob("*.md")):
+    for p in valmis.tulostiedostot(hak):   # sama suodatin kuin virhemittarilla: *.tarkastus.md ei ole jonotulos
         try:
             teksti = p.read_text(encoding="utf-8", errors="replace")
         except OSError:
@@ -83,7 +83,9 @@ def lue_tulokset(repo, alku, loppu):
         if aika.tzinfo is None:
             aika = aika.replace(tzinfo=TZ)
         if alku <= aika <= loppu:
-            ulos.append({"nimi": p.name, "tila": t.group(1), "aika": aika, "teksti": teksti})
+            # A515-A516: VALMIS vaatii riippumattoman tarkastajan merkinnan (valmis.py); muuten KESKEN.
+            tila = valmis.tehokas_tila(t.group(1), teksti, valmis.lue_tarkastus(hak, p.name))
+            ulos.append({"nimi": p.name, "tila": tila, "ajurin_tila": t.group(1), "aika": aika, "teksti": teksti})
     return ulos
 
 
@@ -203,7 +205,7 @@ def keraa(repo, perus, nyt, hae=None, yksikot=None, ero=None):
     tulokset = lue_tulokset(repo, alku, nyt)
     opit = []
     for t in tulokset:
-        if t["tila"] == "VALMIS":
+        if t["ajurin_tila"] == "VALMIS":   # opit tulevat ajurin VALMIS-tuloksista, vaikka tarkastus puuttuu
             opit += [o for o in ajuri.suodata_opit(ajuri.poimi_uusi_oppi(t["teksti"]))[0] if not TYHJA_OPPI_RE.match(o)]
     prt = []
     for t in tulokset:
@@ -299,7 +301,10 @@ def rivit(t):
         paatos_osat.append(f"{len(avoimet)} avointa kohtaa tonylle.md:ss\u00e4 (muistutus p\u00e4ivitt\u00e4in): " + "; ".join(f"{a.day}.{a.month}. {o}".strip() for a, o in avoimet[:2]))
     paatokset = "P\u00e4\u00e4t\u00f6kset sinulle: " + ", ".join(paatos_osat) + "."
 
-    osat = [f"{len(t['tulokset'])} jonotulosta ({nimet['VALMIS']} valmis, {nimet['EPAONNISTUI']} ep\u00e4onnistui, {nimet['HYLATTY']} hyl\u00e4tty)"]
+    ilman = sum(1 for r in t["tulokset"] if r["tila"] == "KESKEN" and r.get("ajurin_tila") == "VALMIS")
+    ilman_osa = f" (heist\u00e4 {ilman} ilman tarkastajan merkint\u00e4\u00e4)" if ilman else ""
+    kesken_osa = f"{nimet['KESKEN']} kesken{ilman_osa}, " if nimet["KESKEN"] else ""
+    osat = [f"{len(t['tulokset'])} jonotulosta ({nimet['VALMIS']} valmis, {kesken_osa}{nimet['EPAONNISTUI']} ep\u00e4onnistui, {nimet['HYLATTY']} hyl\u00e4tty)"]
     if t["uudet_prt"]:
         nayta = ", ".join(t["uudet_prt"][:4]) + (f" (+{len(t['uudet_prt']) - 4})" if len(t["uudet_prt"]) > 4 else "")
         osat.append("PR:t " + nayta)
