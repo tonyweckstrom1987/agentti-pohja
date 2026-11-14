@@ -109,7 +109,7 @@ class LaskeTesti(unittest.TestCase):
         v44, v45 = d[(2026, 44)], d[(2026, 45)]
         self.assertEqual((v44["yht"], v44["loki"], v44["ajot"]), (2, 1, 1))
         self.assertEqual(v44["luokat"]["1"], 2)
-        self.assertEqual(v45["luokat"], {"1": 0, "2": 0, "3": 2, "4": 1, "?": 1})
+        self.assertEqual(v45["luokat"], {"0": 0, "1": 0, "2": 0, "3": 2, "4": 1, "?": 1})
         self.assertEqual(sum(v45["luokat"].values()), v45["yht"])
         self.assertEqual(v44["toisto"], "ei")
         self.assertEqual(t["ajot"], 2)
@@ -247,6 +247,49 @@ class LisamittariTesti(unittest.TestCase):
             self.assertTrue(rivit)
             for r in rivit:
                 self.assertEqual(r.count("|"), otsikko.count("|"))
+
+
+class TodennusMahdotonTesti(unittest.TestCase):
+    def luokka(self, runko):
+        return vm.luokittele_ajo("KESKEN", runko)
+
+    def test_kolme_sanamuotoa_tunnistetaan(self):
+        self.assertEqual(self.luokka("Ei todennettu palvelimella (se oli rajattu pois)."), "0")
+        self.assertEqual(self.luokka("Todennus ei ollut mahdollinen, koska ajo oli kielletty."), "0")
+        self.assertEqual(self.luokka("Ymp\u00e4rist\u00f6 ei salli kirjoitusta isannalle."), "0")
+
+    def test_tavallinen_kesken_pysyy_luokassa_1(self):
+        self.assertEqual(self.luokka("Raportti ilman todennusta."), "1")
+        self.assertEqual(self.luokka("Ei todennettu k\u00e4yt\u00f6ss\u00e4."), "1")
+
+    def test_kielteinen_tai_lainaus_ei_muuta_luokkaa(self):
+        self.assertEqual(self.luokka("Todennus oli mahdollinen ja se ajettiin."), "1")
+        self.assertEqual(self.luokka("Ymp\u00e4rist\u00f6 salli ajon."), "1")
+        self.assertEqual(self.luokka('Ehdotus: tunnista "todennus ei ollut mahdollinen".'), "1")
+        self.assertEqual(self.luokka("Regex `ei todennettu x rajattu pois` on koodia."), "1")
+        self.assertEqual(self.luokka("> Todennus ei ollut mahdollinen (lainaus)"), "1")
+        self.assertEqual(self.luokka("```\nei todennettu, rajattu pois\n```"), "1")
+
+    def test_vain_kesken_saa_uuden_luokan(self):
+        self.assertIsNone(vm.luokittele_ajo("VALMIS", "todennus ei ollut mahdollinen"))
+        self.assertEqual(vm.luokittele_ajo("EPAONNISTUI", "todennus ei ollut mahdollinen"), "?")
+
+    def test_oma_sarake_ei_virheisiin_eika_toistoon(self):
+        tulokset = [tulos("KESKEN", d, "todennus ei ollut mahdollinen") for d in ("2026-11-02", "2026-11-09")]
+        tulokset.append(tulos("KESKEN", "2026-11-09", "ei todennusta"))
+        rivit, tilasto = vm.laske("# Virheloki\n", tulokset, datetime.date(2026, 11, 12))
+        v = dict(rivit)
+        self.assertEqual(v[(2026, 45)]["ajot"], 1)
+        self.assertEqual(v[(2026, 45)]["yht"], 0)
+        self.assertEqual(v[(2026, 45)]["luokat"]["0"], 1)
+        self.assertEqual(v[(2026, 45)]["luokat"]["1"], 0)
+        self.assertEqual(v[(2026, 45)]["kuka"][vm.TUNTEMATON], 0)
+        self.assertEqual(v[(2026, 46)]["yht"], 1)
+        self.assertEqual(v[(2026, 46)]["ajot"], 2)
+        self.assertEqual(v[(2026, 46)]["luokat"]["0"], 1)
+        self.assertEqual(v[(2026, 46)]["toisto"], "ei")
+        osio = "\n".join(vm.muodosta_osio(rivit, tilasto, datetime.date(2026, 11, 12)))
+        self.assertIn("KESKEN: todennus mahdoton", osio)
 
 
 class AsciiTesti(unittest.TestCase):
