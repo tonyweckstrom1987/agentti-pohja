@@ -1,0 +1,1 @@
+- seuranta: uusi `tools/seuranta.py` kertoo tulosten, PR:ien (CI ja tarkastajan päätös nykykärjestä löydöksineen), tailnet-osoitteen skannauksen, `tonylle.md`:n ja KIIRE-tehtävien tilan lähteistä; lukematon lähde näkyy rivinä `EI TIETOA` ja paluukoodina 4.
