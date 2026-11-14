@@ -39,6 +39,7 @@ SALLI_EI_ROOT=${PAIVITA_SALLI_EI_ROOT:-0}      # vain testeja varten
 # Kayttaja, jona uuden mainin testit ajetaan (rootina ei koskaan). Oletus rootina ajettaessa: claudejono.
 TESTIKAYTTAJA=${PAIVITA_TESTIKAYTTAJA:-}
 [ -n "$TESTIKAYTTAJA" ] || { [ "$(id -u)" = 0 ] && TESTIKAYTTAJA=claudejono; }
+ASETUKSET=${PAIVITA_ASETUKSET:-/etc/claude-jono/asetukset.env}   # systemd EnvironmentFile; luetaan vain avain CLAUDEJONO_KOEPAIVA
 POIS_YOJONO=".github"                          # sama kuin julkaisu/yojono-ajuri.conf POIS
 # Testit ajetaan puretussa uudessa kopiossa ennen vaihtoa. Koko sarja kaatuu CT115:ssa ymparistoeroihin (root, node
 # puuttuu), joten oletuksena ajetaan sama moduulijoukko kuin isanta/julkaisu/yojono-ajuri.conf.
@@ -124,10 +125,28 @@ palautuksen_tila() {                    # yksi rivi: mika palautui ja mika ei
   echo "palautettu: ${p:-ei mitaan}; EI palautettu: ${e:-ei mitaan}"
 }
 
+# Koepaivan asetus (A905): tulostaa vain avaimen CLAUDEJONO_KOEPAIVA arvon, ei muita rivejä eikä kirjoita mitaan.
+# Viimeinen asetus voittaa (kuten systemd). Arvo tulostetaan vain, jos se on ISO-paivamaara; muuten ei lainkaan.
+koepaiva_rivi() {
+  local rivi arvo="" luettu=0
+  if [ -r "$ASETUKSET" ]; then
+    while IFS= read -r rivi || [ -n "$rivi" ]; do
+      rivi=${rivi#"${rivi%%[![:space:]]*}"}; rivi=${rivi#export }
+      case "$rivi" in CLAUDEJONO_KOEPAIVA=*) arvo=${rivi#CLAUDEJONO_KOEPAIVA=}; luettu=1 ;; esac
+    done < "$ASETUKSET"
+  else
+    echo "koepaiva: EI LUETTAVISSA"; return 0
+  fi
+  arvo=${arvo%"${arvo##*[![:space:]]}"}; arvo=${arvo#[\"\']}; arvo=${arvo%[\"\']}
+  if [ "$luettu" = 0 ] || [ -z "$arvo" ]; then echo "koepaiva: PUUTTUU"
+  elif [[ "$arvo" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then echo "koepaiva: $arvo"
+  else echo "koepaiva: VIRHEELLINEN (ei ISO-paivamaara)"; fi
+}
+
 lopeta() {                              # $1 = koodi, $2 = loppurivi (ilman etuliitetta)
   [ "$LOPETETTU" = 1 ] && return; LOPETETTU=1
   siivoa; palauta_ajastimet
-  echo
+  echo; koepaiva_rivi
   if [ "$1" = 0 ]; then rivi_loppu "OK: $2"; else rivi_loppu "$(printf 'EP\xc3\x84ONNISTUI: %s' "$2")"; fi
   exit "$1"
 }
