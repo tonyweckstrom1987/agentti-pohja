@@ -600,18 +600,19 @@ class TestTelegram(unittest.TestCase):
             u.assert_not_called()
 
     def test_verkkovirhe_ei_kaada_eika_vuoda_tokenia(self):
-        env = {"YOJONO_TELEGRAM_TOKEN": "SALAINEN-TOKEN", "YOJONO_TELEGRAM_CHAT": "1"}
+        env = {"YOJONO_TELEGRAM_TOKEN": "SALAINEN-TOKEN", "YOJONO_TELEGRAM_CHAT": "1", "HALYTYSPORTTI_TILA": "/ei/ole/p.json"}
         with mock.patch("urllib.request.urlopen", side_effect=OSError("SALAINEN-TOKEN yhteys")), \
                 mock.patch("sys.stderr") as err:
-            self.assertFalse(ajuri.laheta_telegram("x", env=env))
+            self.assertFalse(ajuri.laheta_telegram("HALYTYS x", env=env))
         kirjoitettu = "".join(c.args[0] for c in err.write.call_args_list)
         self.assertNotIn("SALAINEN-TOKEN", kirjoitettu)
 
     def test_teksti_katkaistaan(self):
-        env = {"YOJONO_TELEGRAM_TOKEN": "t", "YOJONO_TELEGRAM_CHAT": "1"}
-        with mock.patch("urllib.request.urlopen") as u:
-            u.return_value.__enter__.return_value.status = 200
-            ajuri.laheta_telegram("x" * 10000, env=env)
+        with tempfile.TemporaryDirectory() as d:
+            env = {"YOJONO_TELEGRAM_TOKEN": "t", "YOJONO_TELEGRAM_CHAT": "1", "HALYTYSPORTTI_TILA": os.path.join(d, "p.json")}
+            with mock.patch("urllib.request.urlopen") as u:
+                u.return_value.__enter__.return_value.status = 200
+                ajuri.laheta_telegram("HALYTYS " + "x" * 10000, env=env)
         pyynto = u.call_args.args[0]
         self.assertLessEqual(len(json.loads(pyynto.data)["text"]), ajuri.TELEGRAM_MAX)
         self.assertTrue(pyynto.full_url.startswith("https://"))
@@ -1426,6 +1427,11 @@ class LisatiedotRajatTesti(Pohja):
 class TelegramTarkkaTesti(unittest.TestCase):
     ENV = {"YOJONO_TELEGRAM_TOKEN": "t", "YOJONO_TELEGRAM_CHAT": "1"}
 
+    def setUp(self):
+        self._d = tempfile.TemporaryDirectory()
+        self.addCleanup(self._d.cleanup)
+        self.ENV = dict(self.ENV, HALYTYSPORTTI_TILA=os.path.join(self._d.name, "p.json"))
+
     def test_puuttuva_asetus_palauttaa_false(self):
         with mock.patch("urllib.request.urlopen") as u:
             self.assertIs(ajuri.laheta_telegram("x", env={}), False)
@@ -1436,10 +1442,10 @@ class TelegramTarkkaTesti(unittest.TestCase):
     def test_tulos_ja_aikakatkaisu(self):
         with mock.patch("urllib.request.urlopen") as u:
             u.return_value.__enter__.return_value.status = 200
-            self.assertIs(ajuri.laheta_telegram("x", env=self.ENV), True)
+            self.assertIs(ajuri.laheta_telegram("HALYTYS x", env=self.ENV), True)
             self.assertEqual(u.call_args.kwargs, {"timeout": 20})
             u.return_value.__enter__.return_value.status = 500
-            self.assertIs(ajuri.laheta_telegram("x", env=self.ENV), False)
+            self.assertIs(ajuri.laheta_telegram("HALYTYS x", env=self.ENV), False)
 
     def test_verkkovirhe_palauttaa_false(self):
         with mock.patch("urllib.request.urlopen", side_effect=OSError("x")), mock.patch("sys.stderr"):

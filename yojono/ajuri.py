@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-from agentti import pr_kutsu
+from agentti import halytysportti, pr_kutsu
 from agentti.pr_kutsu import REPOT as PR_REPOT
 
 OLETUS_PERUS = "/var/lib/yojono"
@@ -339,28 +339,9 @@ def raportin_lisatiedot(tyyppi, md_polku):
     return ""
 
 
-ILMOITUKSET_ENV = "CLAUDEJONO_ILMOITUKSET"
-HETI_ALUT = ("HALYTYS", "PAATOS")
-
-
-def ilmoitus_heti(teksti, env):
-    """Ilmoitusten rajaus (aamukooste). Oletus 'heti' = nykyinen kayttaytyminen: kaikki viestit lahtevat heti.
-    'kooste': heti lahtevat vain viestit, jotka alkavat sanalla HALYTYS tai PAATOS; muut jaavat aamukoosteeseen.
-    Tuntematon arvo on 'heti' (rajaus ei saa vahingossa vaientaa halytyksia)."""
-    if env.get(ILMOITUKSET_ENV, "heti") != "kooste":
-        return True
-    return str(teksti).lstrip().upper().startswith(HETI_ALUT)
-
-
-def laheta_telegram(teksti, env=None, pakota=False):
-    """Lahettaa yhteenvedon, jos YOJONO_TELEGRAM_TOKEN ja YOJONO_TELEGRAM_CHAT on asetettu. Virhe ei kaada ajoa.
-    Palauttaa False myos, kun viesti jaa pois koosteeseen (ks. ilmoitus_heti). `pakota` ohittaa rajauksen (aamukooste itse)."""
-    env = os.environ if env is None else env
+def _laheta_raaka(teksti, env):
+    """Varsinainen Telegram-lahetys. Kayta vain halytysportin kautta (laheta_telegram)."""
     token, chat = env.get("YOJONO_TELEGRAM_TOKEN"), env.get("YOJONO_TELEGRAM_CHAT")
-    if not token or not chat:
-        return False
-    if not pakota and not ilmoitus_heti(teksti, env):
-        return False
     data = json.dumps({"chat_id": chat, "text": teksti[:TELEGRAM_MAX]}).encode()
     pyynto = urllib.request.Request(
         f"https://api.telegram.org/bot{token}/sendMessage", data=data, headers={"Content-Type": "application/json"}
@@ -371,6 +352,26 @@ def laheta_telegram(teksti, env=None, pakota=False):
     except Exception as virhe:  # verkkovirhe ei saa kaataa yoajoa; tokenia ei kirjata
         print(f"Telegram-lahetys epaonnistui: {type(virhe).__name__}", file=sys.stderr)
         return False
+
+
+def laheta_telegram(teksti, env=None, pakota=False):
+    """Lahettaa viestin Telegramiin halytysportin (agentti.halytysportti) kautta, jos YOJONO_TELEGRAM_TOKEN ja
+    YOJONO_TELEGRAM_CHAT on asetettu. Vain HALYTYS-alkuiset viestit paasevat lapi, enintaan 5 kpl vuorokaudessa;
+    muut jaavat docs-repoon (tulokset, aamukooste). Palauttaa True vain, kun viesti oikeasti lahti.
+    `pakota` on jaljella vain vanhojen kutsujen vuoksi eika ohita porttia. Virhe ei kaada ajoa."""
+    env = os.environ if env is None else env
+    if not env.get("YOJONO_TELEGRAM_TOKEN") or not env.get("YOJONO_TELEGRAM_CHAT"):
+        return False
+    tila = env.get(halytysportti.TILA_ENV)
+    return halytysportti.laheta(teksti, lambda t: _laheta_raaka(t, env), tila_polku=tila) == halytysportti.LAHETETTY
+
+
+def huuhtele_telegram(env=None):
+    """Lahettaa edellisen vuorokauden kootun halytysjonon (jos on). True, jos jono lahti."""
+    env = os.environ if env is None else env
+    if not env.get("YOJONO_TELEGRAM_TOKEN") or not env.get("YOJONO_TELEGRAM_CHAT"):
+        return False
+    return halytysportti.huuhtele(lambda t: _laheta_raaka(t, env), tila_polku=env.get(halytysportti.TILA_ENV))
 
 
 HALYTYS_EPAONNISTUNUTTA = 3

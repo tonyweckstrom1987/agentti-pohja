@@ -6,21 +6,23 @@ jolloin systemd ja sydamenlyonti nayttavat vian.
 """
 import os
 
-from . import config, kulu as kulu_mod, llm as llm_mod, sydan, telegram, tulos as tulos_mod
+from . import config, halytysportti, kulu as kulu_mod, llm as llm_mod, sydan, telegram, tulos as tulos_mod
 from .lukko import kirjoita_atomisesti, lukittu
 
 
 def _laheta_kerran(teksti, env, tila, kello, hae_tg):
-    """'lahetetty' | 'jo_lahetetty' | 'epaonnistui'. Merkki kirjoitetaan vasta onnistumisen jalkeen."""
+    """'lahetetty' | 'jo_lahetetty' | 'ohjattu' | 'jonoon' | 'epaonnistui'. Merkki kirjoitetaan vasta onnistumisen jalkeen.
+    Halytysportti (A427): agenttien paivaviesti ei ole halytys, joten se ohjataan tulosteeseen/docs-repoon eika Telegramiin."""
     paiva = config.paiva(kello() if kello else None)
     merkki = os.path.join(tila, "lahetetty-%s.txt" % paiva)
     with lukittu(os.path.join(tila, "laheta.lock")):
         if os.path.exists(merkki):
             return "jo_lahetetty"
-        if not telegram.laheta(teksti, env, hae=hae_tg):
+        tulos = halytysportti.laheta(teksti, lambda t: telegram.laheta(t, env, hae=hae_tg))
+        if tulos == halytysportti.EPAONNISTUI:
             return "epaonnistui"
         kirjoita_atomisesti(merkki, "ok\n")
-    return "lahetetty"
+    return tulos
 
 
 def suorita(agentti, env, tila, *, llm=False, laheta=False, kello=None,

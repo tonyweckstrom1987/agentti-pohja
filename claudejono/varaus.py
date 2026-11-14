@@ -187,8 +187,8 @@ def ilmoita_muutos(tila, a, laheta, nyt_s=None):
         return False
     if uusi == "ok":
         teksti = "Claude-kaistat palaavat normaaliksi (agenttien osuus alle rajan)."
-    else:
-        teksti = f"Claude-kaistat: {uusi}. {a['syy']}. Kerro asetussivun viikkoluku: python3 -m claudejono.varaus kalibroi <luku>"
+    else:   # vain pysayta on halytys (jono seisoo); hidasta ja paluu normaaliksi eivat mene Telegramiin (halytysportti)
+        teksti = f"{'HALYTYS ' if uusi == 'pysayta' else ''}Claude-kaistat: {uusi}. {a['syy']}. Kerro asetussivun viikkoluku: python3 -m claudejono.varaus kalibroi <luku>"
     laheta(teksti)
     try:
         (Path(tila) / ILMOITETTU).write_text(json.dumps({"tila": uusi, "aika": nyt_s}), encoding="utf-8")

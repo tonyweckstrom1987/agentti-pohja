@@ -168,7 +168,7 @@ Peruutus: `systemctl disable --now claude-vahti.timer` ja poista yksikkötiedost
 
 Kuiva-ajo (ei lähetä): `cd /opt/agentti-pohja && python3 -B -m claudejono.aamukooste`. Lähetys vain lipulla `--laheta`. Testibotti: aseta `YOJONO_TELEGRAM_TOKEN` ja `YOJONO_TELEGRAM_CHAT` testibotin arvoiksi tilapäisessä ympäristötiedostossa ennen ensimmäistä lähetystä.
 
-**Ilmoitusten rajaus** (`CLAUDEJONO_ILMOITUKSET`): oletus `heti` säilyttää nykyisen käytöksen (kaikki viestit lähtevät heti). Arvolla `kooste` heti lähtevät vain viestit, jotka alkavat sanalla `HALYTYS` tai `PAATOS` (kaatumishälytys, yöjonon hälytysrivi, päätöstä vaativat asiat, `agentti.ilmoita virhe|paatos`). Muut tulos- ja raporttiviestit jäävät pois ja näkyvät aamukoosteessa. Tuntematon arvo tulkitaan arvoksi `heti`. Rajaus on yhdessä paikassa (`yojono.ajuri.laheta_telegram`), ja aamukooste ohittaa sen itse (`pakota=True`). Muut lähettäjät (`agentti.aamupaketti --laheta`, `agentti.ajo`) eivät noudata asetusta.
+**Hälytysportti** (`agentti/halytysportti.py`, Tonyn linjaukset A62 ja A427, 5.11.2026): Telegramiin pääsevät vain viestit, joiden ensimmäinen rivi alkaa sanalla `HALYTYS` (tai `[VIRHE]`), enintään 5 kappaletta vuorokaudessa (Suomen aikaa). Viides lähtee maininnalla täynnä olevasta katosta. Sen jälkeiset hälytykset kootaan jonoon ja lähtevät seuraavan vuorokauden ensimmäisessä porttikutsussa (viimeistään aamukoosteessa) yhtenä viestinä. Kaikki muu (tulosviestit, itsesuunnittelun ilmoitukset, päätöspyynnöt, aamukooste, viikkoehdotus, aamupaketti, agenttien päiväviestit) jää tulosteeseen ja docs-repoon. Portti on yhdessä paikassa (`yojono.ajuri.laheta_telegram`, `agentti.ilmoita`, `agentti.ajo`, `agentti.aamupaketti`, `isanta/agentscope/virheilmoitus.py`). Vanha asetus `CLAUDEJONO_ILMOITUKSET` ja `pakota=True` on poistettu käytöstä: portti ei ole ohitettavissa. Tila on tiedostossa `HALYTYSPORTTI_TILA` (oletus `/var/lib/claude-jono/halytysportti.json`); jos tilaa ei voi kirjoittaa, hälytys lähtee silti.
 
 **Viikkoehdotus** (`python3 -m claudejono.viikkoehdotus`) kirjoittaa tiedoston `<vvvv-vv>-ehdotus.md` (hyöty × varmuus / vaiva). Ehdokkaat tulevat jonon tehtävistä, joilla ei ole tulosta ja joilla on `Pisteet:`-rivi, viimeisen 7 vuorokauden epäonnistuneista tai hylätyistä tehtävistä sekä valinnaisesta tiedostosta `claude-jono/ehdokkaat.md` (rivi: `- nimi | hyöty | varmuus | vaiva h | tavoite`). Pisteitä ei keksitä: välitavoite, jolle ei ole pisteytettyä ehdokasta, listataan erikseen aukkona. Oletushakemisto on `/var/lib/claude-jono/viikko` eli docs-kloonin ulkopuolella, koska ajuri saa committaa vain sallitut polut (`sallittu_polku`). Jos tiedoston haluaa docs-repoon, polkulistan laajennus on Tonyn päätös.
 
@@ -187,7 +187,7 @@ systemctl enable --now claude-aamukooste.timer claude-viikkoehdotus.timer
 systemctl list-timers 'claude-*'
 ```
 
-Ajastus on Helsingin aikaa (`OnCalendar=... Europe/Helsinki`), joten kesäaika ei siirrä kellonaikaa vaikka palvelimen aikavyöhyke on UTC. Kääntäminen päälle: lisää `Environment=CLAUDEJONO_ILMOITUKSET=kooste` tiedostoon `claude-jono.service` (ja yojono-palveluun), `daemon-reload`. Peruutus: poista rivi tai aseta arvoksi `heti`.
+Ajastus on Helsingin aikaa (`OnCalendar=... Europe/Helsinki`), joten kesäaika ei siirrä kellonaikaa vaikka palvelimen aikavyöhyke on UTC. Hälytysportti on aina päällä (ei asetusta).
 
 ## Riippumaton tarkastaja ja automerge v2 (Tonyn päätös 4.11.2026)
 

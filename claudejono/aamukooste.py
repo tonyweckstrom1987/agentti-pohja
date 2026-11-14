@@ -259,6 +259,39 @@ def _lyhenna(teksti, raja=RIVI_MAX):
     return teksti if len(teksti) <= raja else teksti[:raja - 3].rstrip() + "..."
 
 
+def halytyslista(t):
+    """Halytysluokan rivit (vakavat: failed-yksikot, epaonnistumiset, budjetti). 'systemd-tilaa ei saatu' on vain tiedon puute."""
+    nimet = {"VALMIS": 0, "KESKEN": 0, "EPAONNISTUI": 0, "HYLATTY": 0}
+    for r in t["tulokset"]:
+        if r["tila"] in nimet:
+            nimet[r["tila"]] += 1
+    yj = t["yojono"]
+    halytykset = []
+    if t["yksikot"] is None:
+        halytykset.append("systemd-tilaa ei saatu")
+    elif t["yksikot"]:
+        halytykset.append("failed: " + ", ".join(t["yksikot"][:3]) + (f" (+{len(t['yksikot']) - 3})" if len(t["yksikot"]) > 3 else ""))
+    if t.get("vaiteportti"):
+        halytykset.append("v\u00e4iteportti: " + ", ".join(t["vaiteportti"][:3]) + " valmis ilman .tarkastus.md-tiedostoa")
+    if t.get("tarkastaja_virheet"):
+        tv = t["tarkastaja_virheet"]
+        kohde = tv[-1].get("haara") or tv[-1].get("pr") or tv[-1].get("repo") or "?"
+        halytykset.append(f"PR-tarkastaja/-avaaja: {len(tv)} virhett\u00e4, viimeisin {kohde}: " + _lyhenna(str(tv[-1].get("syy", "")), 80))
+    if nimet["EPAONNISTUI"]:
+        halytykset.append(f"{nimet['EPAONNISTUI']} jonoteht\u00e4v\u00e4\u00e4 ep\u00e4onnistui")
+    if yj and yj["epaonnistui"]:
+        halytykset.append("y\u00f6jono ep\u00e4onnistui: " + ", ".join(yj["epaonnistui"][:3]))
+    if yj and isinstance(yj["kuukausikatto"], (int, float)) and yj["kuukausikatto"] > 0 \
+            and yj["kuukausikulu"] >= BUDJETTI_HALYTYS * yj["kuukausikatto"]:
+        halytykset.append(f"kuukausibudjetista k\u00e4ytetty {round(100 * yj['kuukausikulu'] / yj['kuukausikatto'])} %")
+    return halytykset
+
+
+def halytysrivi(t):
+    """Telegramiin menevat halytykset yhdella rivilla (tyhja, jos vakavia ei ole)."""
+    return "; ".join(h for h in halytyslista(t) if h != "systemd-tilaa ei saatu")
+
+
 def rivit(t):
     """Enint\u00e4\u00e4n 10 rivi\u00e4, p\u00e4\u00e4t\u00f6kset ensin: P\u00e4\u00e4t\u00f6kset, Tehty, Kesken, S\u00e4\u00e4nn\u00f6t, Opittu, H\u00e4lytykset, Kulut."""
     nimet = {"VALMIS": 0, "KESKEN": 0, "EPAONNISTUI": 0, "HYLATTY": 0}
@@ -319,24 +352,7 @@ def rivit(t):
 
     opittu = "Opittu: " + ("; ".join(o.rstrip(".") for o in t["opit"][:2]) if t["opit"] else "ei uusia oppeja viime vuorokaudessa") + "."
 
-    halytykset = []
-    if t["yksikot"] is None:
-        halytykset.append("systemd-tilaa ei saatu")
-    elif t["yksikot"]:
-        halytykset.append("failed: " + ", ".join(t["yksikot"][:3]) + (f" (+{len(t['yksikot']) - 3})" if len(t["yksikot"]) > 3 else ""))
-    if t.get("vaiteportti"):
-        halytykset.append("v\u00e4iteportti: " + ", ".join(t["vaiteportti"][:3]) + " valmis ilman .tarkastus.md-tiedostoa")
-    if t.get("tarkastaja_virheet"):
-        tv = t["tarkastaja_virheet"]
-        kohde = tv[-1].get("haara") or tv[-1].get("pr") or tv[-1].get("repo") or "?"
-        halytykset.append(f"PR-tarkastaja/-avaaja: {len(tv)} virhett\u00e4, viimeisin {kohde}: " + _lyhenna(str(tv[-1].get("syy", "")), 80))
-    if nimet["EPAONNISTUI"]:
-        halytykset.append(f"{nimet['EPAONNISTUI']} jonoteht\u00e4v\u00e4\u00e4 ep\u00e4onnistui")
-    if yj and yj["epaonnistui"]:
-        halytykset.append("y\u00f6jono ep\u00e4onnistui: " + ", ".join(yj["epaonnistui"][:3]))
-    if yj and isinstance(yj["kuukausikatto"], (int, float)) and yj["kuukausikatto"] > 0 \
-            and yj["kuukausikulu"] >= BUDJETTI_HALYTYS * yj["kuukausikatto"]:
-        halytykset.append(f"kuukausibudjetista k\u00e4ytetty {round(100 * yj['kuukausikulu'] / yj['kuukausikatto'])} %")
+    halytykset = halytyslista(t)
     hal = "H\u00e4lytykset: " + ("; ".join(halytykset) if halytykset else "ei") + "."
 
     if yj:
@@ -377,13 +393,19 @@ def main(argv=None):
     nyt = datetime.fromisoformat(a.nyt) if a.nyt else datetime.now(TZ)
     if nyt.tzinfo is None:
         nyt = nyt.replace(tzinfo=TZ)
-    teksti = muotoile(keraa(a.repo, a.yojono, nyt, ero=kayttoonotto_ero_rivi))
+    t = keraa(a.repo, a.yojono, nyt, ero=kayttoonotto_ero_rivi)
+    teksti = muotoile(t)
     print(teksti)
     if a.laheta:
-        from yojono.ajuri import laheta_telegram
-        if not laheta_telegram(teksti, pakota=True):
+        # A427: Telegramiin vain halytykset. Koko kooste jaa tulosteeseen (journal) ja docs-repon tuloksiin.
+        from yojono import ajuri as ajuri_y
+        laheta_telegram = ajuri_y.laheta_telegram
+        hal = halytysrivi(t)
+        if hal and not laheta_telegram("HALYTYS aamukooste: " + hal + f"\nKooste: {DOCS_URL}/tulokset"):
             print("Telegram-l\u00e4hetys ep\u00e4onnistui tai ei asetettu".encode("ascii", "backslashreplace").decode(), file=sys.stderr)
             return 1
+        if not hal:
+            ajuri_y.huuhtele_telegram()   # eilisen ylitys lahtee aamulla, vaikka tanaan ei ole halytysta
     return 0
 
 

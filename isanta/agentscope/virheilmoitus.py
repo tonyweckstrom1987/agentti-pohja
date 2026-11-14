@@ -212,8 +212,24 @@ def yojono_viesti(tila, pvm=None, nyt=None, nahdyt=None):
     return muotoile(f"yojono {pvm}", ["yojono_tehtava_epaonnistui"], "katselmointitehtava ei tuottanut raporttia", "tehtavat: " + " ".join(osat))
 
 
+AJURI_POLKU = "/opt/yojono-ajuri"   # taalta loytyy agentti.halytysportti (paivakatto 5/vrk); puuttuessa lahetetaan suoraan
+
+
 def laheta(teksti, env=None):
+    """Halytys Telegramiin. Portin kautta, jos agentti.halytysportti on asennettu; muuten suoraan (halytys ei saa jaada pois)."""
     env = os.environ if env is None else env
+    try:
+        if AJURI_POLKU not in sys.path:
+            sys.path.append(AJURI_POLKU)
+        from agentti import halytysportti
+    except Exception:
+        return _laheta_raaka(teksti, env)
+    viesti = teksti if halytysportti.luokittele(teksti) == "halytys" else "HALYTYS " + teksti
+    tulos = halytysportti.laheta(viesti, lambda t: _laheta_raaka(t, env))
+    return tulos in (halytysportti.LAHETETTY, halytysportti.JONOON)   # jonoon = tallessa ja lahtee koosteena
+
+
+def _laheta_raaka(teksti, env):
     token = env.get("TELEGRAM_TOKEN") or env.get("YOJONO_TELEGRAM_TOKEN")
     chat = env.get("TELEGRAM_CHAT_ID") or env.get("YOJONO_TELEGRAM_CHAT")
     if not token or not chat:

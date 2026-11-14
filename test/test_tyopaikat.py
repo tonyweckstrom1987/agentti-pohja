@@ -256,7 +256,7 @@ class AjoTest(unittest.TestCase):
 class IlmoitaYhteysTest(unittest.TestCase):
     def test_oikea_ilmoita_polku_ei_tunnuksia(self):
         with tempfile.TemporaryDirectory() as d:
-            tulos = t.ilmoita.ilmoita("valmis", "x", "y", env_polku=os.path.join(d, "ei"), tila_polku=os.path.join(d, "t"))
+            tulos = t.ilmoita.ilmoita("virhe", "x", "y", env_polku=os.path.join(d, "ei"), tila_polku=os.path.join(d, "t"))
             self.assertEqual(tulos, "ei_tunnuksia")
 
 

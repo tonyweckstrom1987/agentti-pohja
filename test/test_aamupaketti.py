@@ -1,4 +1,6 @@
 import contextlib
+import os
+import tempfile
 import io
 import unittest
 from unittest import mock
@@ -221,6 +223,11 @@ class MuotoiluJaMainTesti(unittest.TestCase):
     def test_tyhja(self):
         self.assertIn("Ei avoimia PR:ita.", ap.muotoile({"tony": [], "automerge": [], "muut": []}))   # vanha muoto ilman puuttuu-avainta toimii
 
+    def portti(self):
+        d = tempfile.TemporaryDirectory()
+        self.addCleanup(d.cleanup)
+        return os.path.join(d.name, "portti.json")
+
     def ajaa(self, argv, env=None, laheta=True):
         ulos, virhe = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(ulos), contextlib.redirect_stderr(virhe), mock.patch.object(ap.telegram, "laheta", return_value=laheta) as t:
@@ -295,12 +302,17 @@ class MuotoiluJaMainTesti(unittest.TestCase):
         self.assertNotIn("Yojono-PR:t", ulos)
 
     def test_main_laheta_kayttaa_yojonon_telegram_ymparistoa(self):
-        rc, _, _, t = self.ajaa(["--laheta"], env={"YOJONO_TELEGRAM_TOKEN": "tok", "YOJONO_TELEGRAM_CHAT": "42"})
+        env = {"YOJONO_TELEGRAM_TOKEN": "tok", "YOJONO_TELEGRAM_CHAT": "42", "HALYTYSPORTTI_TILA": self.portti()}
+        rc, _, _, t = self.ajaa(["--laheta"], env=env)
         self.assertEqual(rc, 0)
+        t.assert_not_called()   # A427: aamupaketti ei ole halytys, ei Telegramiin
+        with mock.patch("agentti.halytysportti.luokittele", return_value="halytys"):
+            rc, _, _, t = self.ajaa(["--laheta"], env=env)
         self.assertEqual(t.call_args[0][1], {"TELEGRAM_BOT_TOKEN": "tok", "TELEGRAM_CHAT_ID": "42"})
 
     def test_main_lahetysvirhe_palauttaa_1(self):
-        rc, _, virhe, _ = self.ajaa(["--laheta"], laheta=False)
+        with mock.patch("agentti.halytysportti.luokittele", return_value="halytys"):
+            rc, _, virhe, _ = self.ajaa(["--laheta"], laheta=False, env={"HALYTYSPORTTI_TILA": self.portti()})
         self.assertEqual(rc, 1)
         self.assertIn("epaonnistui", virhe)
 
