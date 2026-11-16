@@ -128,7 +128,7 @@ class PaivitaAjuritTesti(unittest.TestCase):
         env = dict(os.environ, SIM=str(self.sim), PATH=str(self.sim / "bin") + ":" + os.environ["PATH"],
                    PAIVITA_LAHDE=str(self.src), PAIVITA_POHJA=str(self.pohja), POHJA_POLKU=str(self.pohja),
                    PAIVITA_YOJONO=str(self.yojono), PAIVITA_LOKI=str(self.tmp / "loki.log"), PAIVITA_LUKKO=str(self.tmp / "lukko"),
-                   PAIVITA_SYSTEMCTL=str(self.sim / "systemctl"), PAIVITA_SALLI_EI_ROOT="1", PAIVITA_VAPAA_MB="1",
+                   PAIVITA_SYSTEMCTL=str(self.sim / "systemctl"), PAIVITA_SALLI_EI_ROOT="1", PAIVITA_ASETUKSET=str(self.tmp / "ei-ole.env"), PAIVITA_VAPAA_MB="1",
                    PAIVITA_SEURANTA_S="0", PAIVITA_TS="20261108-10%02d00" % self.kerta,
                    PAIVITA_TESTI_POHJA="test.test_ok", PAIVITA_TESTI_YOJONO="test.test_ok",
                    PAIVITA_SAVU_POHJA="claudejono.ajuri agentti.pr_kutsu", PAIVITA_SAVU_YOJONO="yojono.ajuri agentti.pr_kutsu")
@@ -324,6 +324,38 @@ class PaivitaAjuritTesti(unittest.TestCase):
         self.assertEqual(p.returncode, 1, ulos)
         self.assertIn("keskeytetty", ulos); self.assertIn("vanha koodi palautettu", ulos)
         self.assertEnnallaan(); self.assertAjastimetPalautettu(); self.assertEqual(len(self.ajastinloki()), 4)
+
+    # ---- koepaivan asetus (A905) -----------------------------------------------------
+    def koepaiva(self, sisalto):
+        """Ajaa --kuiva-ajon valeasetustiedostolla; palauttaa (tuloste, koepaiva-rivit). sisalto None = tiedostoa ei ole."""
+        polku = self.tmp / "asetukset.env"
+        if sisalto is not None:
+            polku.write_text(sisalto)
+        r = self.aja("--kuiva", PAIVITA_ASETUKSET=str(polku))
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertTrue(self.loppurivi(r).startswith("OK: "), self.loppurivi(r))   # koepaivarivi ei ole loppurivi
+        return r.stdout, [x for x in r.stdout.splitlines() if x.startswith("koepaiva:")]
+
+    def test_koepaiva_tulostetaan_eika_muita_rivien_sisaltoa(self):
+        ulos, rivit = self.koepaiva("CLAUDEJONO_LITELLM_KEY=salainen-arvo-123\nCLAUDEJONO_KOEPAIVA=2026-11-20\nMUU=toinen-salaisuus\n")
+        self.assertEqual(rivit, ["koepaiva: 2026-11-20"])
+        for kielletty in ("salainen-arvo-123", "toinen-salaisuus", "LITELLM"):
+            self.assertNotIn(kielletty, ulos)
+
+    def test_koepaiva_puuttuu(self):
+        ulos, rivit = self.koepaiva("CLAUDEJONO_LITELLM_KEY=salainen-arvo-123\n# CLAUDEJONO_KOEPAIVA=2026-11-20\n")
+        self.assertEqual(rivit, ["koepaiva: PUUTTUU"]); self.assertNotIn("salainen-arvo-123", ulos)
+        self.assertEqual(self.koepaiva("CLAUDEJONO_KOEPAIVA=\n")[1], ["koepaiva: PUUTTUU"])
+
+    def test_koepaiva_viimeinen_asetus_voittaa_ja_lainausmerkit_ok(self):
+        self.assertEqual(self.koepaiva("CLAUDEJONO_KOEPAIVA=2026-11-01\nexport CLAUDEJONO_KOEPAIVA=\"2026-11-20\"\n")[1], ["koepaiva: 2026-11-20"])
+
+    def test_koepaiva_ei_paljasta_virheellista_arvoa(self):
+        ulos, rivit = self.koepaiva("CLAUDEJONO_KOEPAIVA=salainen-arvo-123\n")
+        self.assertEqual(len(rivit), 1); self.assertTrue(rivit[0].startswith("koepaiva: VIRHEELLINEN")); self.assertNotIn("salainen-arvo-123", ulos)
+
+    def test_koepaiva_tiedostoa_ei_ole(self):
+        self.assertEqual(self.koepaiva(None)[1], ["koepaiva: EI LUETTAVISSA"])
 
     # ---- peruutus --------------------------------------------------------------------
     def test_peruuta_palauttaa_viimeisimman_ajon_varmuuskopiot(self):
