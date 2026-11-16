@@ -767,6 +767,27 @@ class HylatytIlmanKasiteltyja(unittest.TestCase):
     def test_puuttuva_hakemisto_ei_kaada(self):
         self.assertEqual(ajuri.ilman_kasiteltyja(self.h, self.repo / "ei-ole"), self.h)
 
+    def tonylle(self, teksti):
+        p = self.repo / ajuri.JONO / ajuri.TONYLLE
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(teksti, encoding="utf-8")
+
+    def test_sunnuntaiehdotusrivi_pudottaa_rivin(self):
+        self.tonylle("## 15.11.\n- Sunnuntaiehdotus (uusi): pr-303-93060a6 - Korjaa jotain\n")
+        self.assertEqual(ajuri.ilman_kasiteltyja(self.h, self.repo), [])
+
+    def test_sunnuntaiehdotus_eri_shalla_jaa_listalle(self):
+        self.tonylle("- Sunnuntaiehdotus (uusi): pr-303-1111111 - Korjaa jotain\n- Sunnuntaiehdotus (uusi): pr-30-93060a6 - X\n")
+        self.assertEqual(ajuri.ilman_kasiteltyja(self.h, self.repo), self.h)
+
+    def test_puuttuva_tonylle_ei_kaada(self):
+        self.tehtava("2026-11-14-04-auto-pr-999-1111111.md")          # hakemisto on, tonylle.md puuttuu
+        self.assertEqual(ajuri.ilman_kasiteltyja(self.h, self.repo), self.h)
+
+    def test_pelkka_maininta_ilman_sunnuntairivia_ei_pudota(self):
+        self.tonylle("## 15.11.\nHylatty pr-303-93060a6 odottaa.\n- Muu rivi: pr-303-93060a6 - x\n")
+        self.assertEqual(ajuri.ilman_kasiteltyja(self.h, self.repo), self.h)
+
 
 class HylatytKasiteltyOhitetaanSuunnittelussa(Pohja):
     def test_kasitelty_commit_ei_paady_kehotteeseen(self):

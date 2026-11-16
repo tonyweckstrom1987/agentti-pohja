@@ -364,10 +364,10 @@ class Avaa422Testi(unittest.TestCase):
     def tearDown(self):
         self.d.cleanup()
 
-    def api(self, postin_virhe=422):
+    def api(self, postin_virhe=422, haarat=("korjaus/uusi",)):
         api = Feikki([], [], [])
-        api.haarat = [{"name": "korjaus/uusi"}]
-        api.vertailu = {"korjaus%2Fuusi": {"ahead_by": 1, "commits": [{"commit": {"message": "Otsikko"}}]}}
+        api.haarat = [{"name": h} for h in haarat]
+        api.vertailu = {h.replace("/", "%2F"): {"ahead_by": 1, "commits": [{"commit": {"message": "Otsikko"}}]} for h in haarat}
         orig = api.__call__
 
         class Kaareet:
@@ -434,6 +434,15 @@ class Avaa422Testi(unittest.TestCase):
                 return orig(req, timeout)
             self.assertEqual(self.kierros(kaareet)[0]["tulos"], "virhe", osa)
             self.assertNotIn("avaa_422", self.tila(), osa)
+
+    def test_vuorokauden_kierrokset_kirjaavat_yhden_virheen_per_haara(self):
+        # aamukooste laskee lokin virherivit 24 h ikkunasta: ilman takaiskua 120 kierrosta x haarat (mitattu 13.11.: 3469 rivia)
+        api = self.api(haarat=("korjaus/uusi", "korjaus/toinen"))
+        for i in range(120):                                       # ajastin 12 min valein
+            self.kierros(api, i / 5)
+        self.assertEqual(len([k for k in api.kutsut if k[0] == "POST"]), 2)
+        alku = self.nyt - timedelta(minutes=1)
+        self.assertEqual(len(tk.virheet_lokista(Path(self.d.name), alku)), 2)
 
     def test_avainta_ei_luoda_ennen_ensimmaista_422a(self):
         api = self.api(postin_virhe=None)

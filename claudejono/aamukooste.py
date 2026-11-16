@@ -329,7 +329,8 @@ def rivit(t):
     if t.get("tarkastaja_virheet"):
         tv = t["tarkastaja_virheet"]
         kohde = tv[-1].get("haara") or tv[-1].get("pr") or tv[-1].get("repo") or "?"
-        halytykset.append(f"PR-tarkastaja/-avaaja: {len(tv)} virhett\u00e4, viimeisin {kohde}: " + _lyhenna(str(tv[-1].get("syy", "")), 80))
+        kohteet = len({(v.get("repo"), v.get("haara") or v.get("pr")) for v in tv})   # rivimaara kasvaa kierroksista, kohteet eivat
+        halytykset.append(f"PR-tarkastaja/-avaaja: {len(tv)} virhett\u00e4 {kohteet} kohteessa, viimeisin {kohde}: " + _lyhenna(str(tv[-1].get("syy", "")), 80))
     if nimet["EPAONNISTUI"]:
         halytykset.append(f"{nimet['EPAONNISTUI']} jonoteht\u00e4v\u00e4\u00e4 ep\u00e4onnistui")
     if yj and yj["epaonnistui"]:

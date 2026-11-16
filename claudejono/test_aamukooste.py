@@ -335,7 +335,14 @@ class TarkastajaVirheet(Pohja):
         (self.tmp / "tarkastukset.jsonl").write_text(json.dumps(
             {"repo": "agentti-pohja", "haara": "korjaus/x", "tulos": "virhe", "syy": "GitHub HTTP 403: /repos", "aika": "2026-11-03T05:00:00+02:00"}) + "\n")
         rivi = next(r for r in aamukooste.rivit(self.aineisto()) if r.startswith("H\u00e4lytykset:"))
-        self.assertIn("PR-tarkastaja/-avaaja: 1 virhett\u00e4, viimeisin korjaus/x: GitHub HTTP 403", rivi)
+        self.assertIn("PR-tarkastaja/-avaaja: 1 virhett\u00e4 1 kohteessa, viimeisin korjaus/x: GitHub HTTP 403", rivi)
+
+    def test_toistuvat_virheet_lasketaan_kohteittain(self):
+        rivit = [{"repo": "mcp-doctor", "haara": h, "tulos": "virhe", "syy": "GitHub HTTP 422: /pulls", "aika": "2026-11-03T0%d:00:00+02:00" % t}
+                 for t in (3, 4, 5) for h in ("korjaus/a", "korjaus/b")]
+        (self.tmp / "tarkastukset.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rivit))
+        rivi = next(r for r in aamukooste.rivit(self.aineisto()) if r.startswith("H\u00e4lytykset:"))
+        self.assertIn("PR-tarkastaja/-avaaja: 6 virhett\u00e4 2 kohteessa, viimeisin korjaus/b", rivi)
 
     def test_ohitettu_pr_ei_nouse_halytyksiin(self):
         (self.tmp / "tarkastukset.jsonl").write_text(json.dumps(

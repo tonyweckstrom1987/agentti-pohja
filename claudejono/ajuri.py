@@ -977,16 +977,29 @@ def hylatyt_prt(tila_hak, nyt=None, ika_pv=HYLATYT_IKA_PV):
     return ulos[:HYLATYT_MAX]
 
 
+SUNNUNTAIRIVI_RE = re.compile(r"Sunnuntaiehdotus \(.*?\): (\S+)")
+
+
 def ilman_kasiteltyja(hylatyt, repo):
-    """Pudottaa listalta rivit, joille tehtavat/-hakemistossa on jo tiedosto, jonka nimi paattyy muotoon -pr-<nro>-<sha7>.md
-    (sama nimi kuin hylatyt_kehote ehdottaa). Puuttuva hakemisto tai lukuvirhe: lista sellaisenaan."""
-    teht = Path(repo) / JONO / "tehtavat"
+    """Pudottaa listalta rivit, jotka on jo kasitelty: tehtavat/-hakemistossa on tiedosto, jonka nimi paattyy muotoon
+    -pr-<nro>-<sha7>.md (sama nimi kuin hylatyt_kehote ehdottaa), tai tonylle.md:ssa on Sunnuntaiehdotus-rivi, jonka
+    ehdotusnimessa on pr-<nro>-<sha7>. Puuttuva hakemisto tai tiedosto tai lukuvirhe: kyseinen tarkistus ei pudota mitaan."""
+    nimet = []
     try:
-        nimet = [p.name for p in teht.iterdir()]
+        nimet = [p.name for p in (Path(repo) / JONO / "tehtavat").iterdir()]
     except OSError:
-        return hylatyt
-    return [h for h in hylatyt
-            if not any(n.endswith(f"-pr-{h['pr']}-{h['sha'][:7]}.md") for n in nimet)]
+        pass
+    try:
+        sunn = [m.group(1) for r in (Path(repo) / JONO / TONYLLE).read_text(encoding="utf-8").splitlines()
+                if (m := SUNNUNTAIRIVI_RE.search(r))]
+    except (OSError, UnicodeDecodeError):
+        sunn = []
+
+    def kasitelty(h):
+        tunnus = f"pr-{h['pr']}-{h['sha'][:7]}"
+        return (any(n.endswith(f"-{tunnus}.md") for n in nimet)
+                or any(re.search(rf"(?<![0-9A-Za-z]){re.escape(tunnus)}(?![0-9A-Za-z])", n) for n in sunn))
+    return [h for h in hylatyt if not kasitelty(h)]
 
 
 def hylatyt_kehote(hylatyt):

@@ -1,3 +1,4 @@
+import contextlib
 import io
 import json
 import os
@@ -1573,7 +1574,8 @@ class MainTarkkaTesti(Pohja):
     def test_peilaus_vain_ajolla(self):
         self.kirjoita_jono(jono([]))
         with self.env(), mock.patch.dict(os.environ, {"YOJONO_PEILAA": "/p.sh"}), mock.patch.object(ajuri, "peilaa") as p, \
-                mock.patch.object(ajuri, "paivita_opit"), mock.patch.object(ajuri, "laheta_aamupaketti"), mock.patch("builtins.print"):
+                mock.patch.object(ajuri, "paivita_opit"), mock.patch.object(ajuri, "laheta_aamupaketti"), mock.patch("builtins.print"), \
+                contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(ajuri.main(["ajo"]), 0)
             p.assert_called_once_with("/p.sh")
             p.reset_mock()
@@ -1583,7 +1585,8 @@ class MainTarkkaTesti(Pohja):
     def test_opit_paivittyy_vain_ajolla(self):
         self.kirjoita_jono(jono([]))
         with self.env(), mock.patch.object(ajuri, "paivita_opit") as p, \
-                mock.patch.object(ajuri, "laheta_aamupaketti"), mock.patch("builtins.print"):
+                mock.patch.object(ajuri, "laheta_aamupaketti"), mock.patch("builtins.print"), \
+                contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(ajuri.main(["kuiva"]), 0)
             p.assert_not_called()
             self.assertEqual(ajuri.main(["ajo"]), 0)

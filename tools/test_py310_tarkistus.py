@@ -38,9 +38,9 @@ class Py310Testit(unittest.TestCase):
 
     @VAIN_JOS_TULKKI
     def test_cli_paluukoodit(self):
-        with tee(F312) as d:
+        with tee(F312) as d, contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(t.main(["--python", TULKKI, d]), 1)
-        with tee("x = 1\n") as d:
+        with tee("x = 1\n") as d, contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(t.main(["--python", TULKKI, d]), 0)
 
     @VAIN_JOS_TULKKI
@@ -54,7 +54,7 @@ class Py310Testit(unittest.TestCase):
         alku, t.OLETUS_HAKU = t.OLETUS_HAKU, "/olematon/*/python3.10"
         pysyva, t.PYSYVA_HAUT = t.PYSYVA_HAUT, ["/olematon/pysyva/python3.10"]
         try:
-            with tee("x = 1\n") as d:
+            with tee("x = 1\n") as d, contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(t.main([d]), t.EI_TULKKIA)
         finally:
             t.OLETUS_HAKU = alku
@@ -63,7 +63,7 @@ class Py310Testit(unittest.TestCase):
                 os.environ["PY310"] = vanha
 
     def test_vaara_versio_ei_anna_ok(self):
-        with tee("x = 1\n") as d:
+        with tee("x = 1\n") as d, contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(t.main(["--python", sys.executable, d]), t.EI_TULKKIA if sys.version_info[:2] != (3, 10) else 0)
 
     def test_epavarma_tulostetaan(self):

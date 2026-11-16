@@ -547,7 +547,8 @@ class PalvelinTesti(unittest.TestCase):
         self.assertIn(" 200 ", otsikko.split("\r\n")[0])
         self.assertIn("H\u00e4n \u00f6isi", runko)
         d = json.loads(runko)
-        self.assertLess(abs(int(d["id"].split("-")[1]) - int(time.time() * 1000)), 60000)
+        self.assertRegex(d["id"], r"^chatcmpl-[0-9a-f]{32}$")
+        self.assertLess(abs(d["created"] - time.time()), 60)
         self.assertEqual(d["choices"][0]["index"], 0)
         self.assertEqual(d["usage"], {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0})
 
@@ -700,3 +701,106 @@ class MainKaynnistysTesti(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# --- Katselmointi 15.11.2026, loydokset 9 ja 10 seka pienet HTTP-viat ---
+
+class HttpLuentaTesti(unittest.TestCase):
+    def setUp(self):
+        self.srv = portti.luo_palvelin(tee_portti(tee_hakemisto(), FakeLLM("Moi")), "127.0.0.1", 0)
+        self.osoite = ("127.0.0.1", self.srv.server_address[1])
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+
+    def tearDown(self):
+        self.srv.shutdown()
+        self.srv.server_close()
+
+    def chat(self, data):
+        r = urllib.request.Request("http://%s:%d/v1/chat/completions" % self.osoite, data=json.dumps(data).encode(),
+                                   headers={"Content-Type": "application/json", "Authorization": "Bearer " + AVAIN})
+        try:
+            with urllib.request.urlopen(r, timeout=5) as v:
+                return v.status, v.read().decode()
+        except urllib.error.HTTPError as e:
+            return e.code, e.read().decode()
+
+    def test_tunniste_yksilollinen_samassa_millisekunnissa(self):
+        # Loydos 9: chatcmpl-<millisekunti> toistui, kun kaksi vastausta alkoi samalla hetkella.
+        kello = mock.Mock()
+        kello.time.return_value = 1763200000.123
+        kello.monotonic.side_effect = time.monotonic
+        viesti = {"model": "tutkija", "messages": [{"role": "user", "content": "moi"}]}
+        with mock.patch.object(portti, "time", kello):
+            a = json.loads(self.chat(viesti)[1])["id"]
+            b = json.loads(self.chat(viesti)[1])["id"]
+        self.assertTrue(a.startswith("chatcmpl-"))
+        self.assertNotEqual(a, b)
+
+    def test_hidas_runko_katkaistaan_kokonaisajalla(self):
+        # Loydos 10: tavu kerrallaan lahetetty runko ei saa pitaa saietta varattuna (socketin 30 s koskee vain yhta lukua).
+        with mock.patch.object(portti, "PYYNTO_LUKU_MAX_S", 0.5, create=True):
+            s = socket.create_connection(self.osoite, timeout=5)
+            try:
+                s.sendall(("POST /v1/chat/completions HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer %s\r\n"
+                           "Content-Type: application/json\r\nContent-Length: 1000\r\n\r\n" % AVAIN).encode())
+                alku, vastaus = time.monotonic(), b""
+                while time.monotonic() - alku < 4:
+                    try:
+                        s.sendall(b" ")
+                    except OSError:
+                        break  # palvelin sulki yhteyden
+                    s.settimeout(0.1)
+                    try:
+                        osa = s.recv(4096)
+                    except socket.timeout:
+                        continue
+                    except OSError:
+                        break
+                    vastaus += osa
+                    if not osa or b"\r\n\r\n" in vastaus:
+                        break
+                kesto = time.monotonic() - alku
+            finally:
+                s.close()
+        self.assertLess(kesto, 3, "palvelin luki hidasta runkoa liian kauan")
+        if vastaus:
+            self.assertIn(b" 408 ", vastaus.split(b"\r\n", 1)[0])
+
+    def test_tavallinen_runko_luetaan_kokonaan(self):
+        iso = "x" * 200000  # useampi lukupala
+        koodi, runko = self.chat({"model": "tutkija", "messages": [{"role": "user", "content": "moi"}], "taytto": iso})
+        self.assertEqual(koodi, 200)
+        self.assertEqual(json.loads(runko)["choices"][0]["message"]["content"], "Moi")
+
+    def test_vajaa_runko_hylataan(self):
+        s = socket.create_connection(self.osoite, timeout=5)
+        try:
+            s.sendall(("POST /v1/chat/completions HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer %s\r\n"
+                       "Content-Length: 50\r\n\r\n{\"model\":" % AVAIN).encode())
+            s.shutdown(socket.SHUT_WR)
+            vastaus = s.recv(4096)
+        finally:
+            s.close()
+        self.assertIn(b" 400 ", vastaus.split(b"\r\n", 1)[0])
+
+    def test_model_ei_merkkijono(self):
+        # Lista mallina kaatoi kasittelijan (unhashable dict.get) ilman vastausta.
+        self.assertEqual(self.chat({"model": ["tutkija"], "messages": [{"role": "user", "content": "x"}]})[0], 400)
+        self.assertEqual(self.chat({"model": {"a": 1}, "messages": [{"role": "user", "content": "x"}]})[0], 400)
+
+    def test_virhe_sulkee_yhteyden(self):
+        # 413-vastauksen jalkeen lukematon runko ei saa jaada tulkittavaksi seuraavana pyyntona.
+        s = socket.create_connection(self.osoite, timeout=5)
+        try:
+            s.sendall(("POST /v1/chat/completions HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer %s\r\n"
+                       "Content-Length: %d\r\n\r\n" % (AVAIN, portti.PYYNTO_MAX_TAVUA + 1)).encode())
+            vastaus = b""
+            while True:
+                osa = s.recv(4096)
+                if not osa:
+                    break
+                vastaus += osa
+        finally:
+            s.close()
+        self.assertIn(b" 413 ", vastaus.split(b"\r\n", 1)[0])
+        self.assertEqual(vastaus.count(b"HTTP/1.1"), 1)

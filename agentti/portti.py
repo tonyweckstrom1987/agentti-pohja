@@ -21,8 +21,10 @@ import hmac
 import http.server
 import json
 import os
+import socket
 import sys
 import time
+import uuid
 
 from . import config, ehdotukset, llm as llm_mod, maaritys, portti_tyokalut
 from .lukko import kirjoita_atomisesti, lukittu
@@ -39,6 +41,11 @@ KUTSU_VARAUS_USD = 0.02          # pessimistinen varaus ennen kutsua
 HINTA_ARVIO_USD_PER_M = (1.0, 4.0)   # jos mallin hintaa ei tunneta (syote, tuloste)
 SAILYTYS_PAIVAA = 62
 OLETUSPORTTI = 8810
+
+# Pyynnon rungon luvun kokonaisaikaraja (s). Socketin oma aikakatkaisu koskee vain yksittaista lukua,
+# joten tavu kerrallaan lahetetty runko voisi muuten pitaa saikeen varattuna loputtomiin.
+PYYNTO_LUKU_MAX_S = 30.0
+LUKU_PALA_TAVUA = 65536
 
 
 class PorttiVirhe(Exception):
@@ -326,6 +333,8 @@ def _kasittelija(portti):
             self.wfile.write(runko)
 
         def _virhe(self, koodi, viesti, tyyppi="error"):
+            # Virheen jalkeen yhteys suljetaan: lukematon runko ei saa jaada tulkittavaksi seuraavana pyyntona.
+            self.close_connection = True
             self._json(koodi, {"error": {"message": viesti, "type": tyyppi}})
 
         def _auth(self):
@@ -334,6 +343,25 @@ def _kasittelija(portti):
                 return True
             self._virhe(401, "Virheellinen avain.", "auth")
             return False
+
+        def _lue_runko(self, pituus):
+            """Lukee rungon kokonaisaikarajan sisalla. Nostaa TimeoutError, jos aika loppuu."""
+            loppu = time.monotonic() + PYYNTO_LUKU_MAX_S
+            osat, saatu = [], 0
+            try:
+                while saatu < pituus:
+                    jaljella = loppu - time.monotonic()
+                    if jaljella <= 0:
+                        raise TimeoutError("pyynnon luku")
+                    self.connection.settimeout(min(self.timeout, jaljella))
+                    osa = self.rfile.read1(min(LUKU_PALA_TAVUA, pituus - saatu))
+                    if not osa:
+                        break  # vajaa runko: JSON-tulkinta hylkaa sen
+                    osat.append(osa)
+                    saatu += len(osa)
+            finally:
+                self.connection.settimeout(self.timeout)
+            return b"".join(osat)
 
         def do_GET(self):
             if self.path.rstrip("/") == "/v1/models":
@@ -356,8 +384,18 @@ def _kasittelija(portti):
             if not 0 < pituus <= PYYNTO_MAX_TAVUA:
                 return self._virhe(413, "Pyynto liian suuri.")
             try:
-                pyynto = json.loads(self.rfile.read(pituus).decode("utf-8"))
+                runko = self._lue_runko(pituus)
+            except (socket.timeout, TimeoutError):
+                try:
+                    self._virhe(408, "Pyynnon luku kesti liian kauan.")
+                except OSError:
+                    self.close_connection = True  # asiakas on jo poissa
+                return
+            try:
+                pyynto = json.loads(runko.decode("utf-8"))
                 nimi, viestit = pyynto["model"], pyynto["messages"]
+                if not isinstance(nimi, str):
+                    raise TypeError("model")
             except (ValueError, KeyError, TypeError):
                 return self._virhe(400, "Virheellinen pyynto.")
             a, _, virhe = portti.tarkista(nimi, viestit)
@@ -365,7 +403,7 @@ def _kasittelija(portti):
                 return self._virhe(*VIRHEVIESTIT[virhe])
             if virhe:
                 return self._virhe(502, "Mallikutsu epaonnistui (%s)." % virhe)
-            tunniste, t = "chatcmpl-%d" % int(time.time() * 1000), int(time.time())
+            tunniste, t = "chatcmpl-" + uuid.uuid4().hex, int(time.time())
             if pyynto.get("stream") is True:
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream")
