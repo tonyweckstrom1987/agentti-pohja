@@ -236,7 +236,7 @@ class KilpaAjo(Pohja):
         tulokset = sorted(p.name for p in (tarkistus / ajuri.JONO / "tulokset").iterdir())
         self.assertEqual(tulokset, sorted(nimet))
         for n in nimet:
-            self.assertIn("VALMIS", (tarkistus / ajuri.JONO / "tulokset" / n).read_text())
+            self.assertIn("TEHTY", (tarkistus / ajuri.JONO / "tulokset" / n).read_text())
         self.assertEqual(git_ulos(tarkistus, "status", "--porcelain"), "")
         subprocess.run(["git", "-C", str(self.origin), "fsck", "--strict"], check=True, capture_output=True)
         self.assertEqual(git_ulos(self.repo, "status", "--porcelain"), "")
@@ -306,7 +306,7 @@ class Ajo(Pohja):
             git(muu, "commit", "-q", "-m", "muu")
             git(muu, "push", "-q", "origin", "main")
         v = ajuri.aja(self.repo, self.tmp, env={"CLAUDEJONO_ITSESUUNNITTELU": "0"}, suorita=self.f(sivu=toinen_ehtii_ensin))
-        self.assertEqual(v, "claude-jono: 2026-11-03-01-a.md VALMIS")   # ei "push epaonnistui"
+        self.assertEqual(v, "claude-jono: 2026-11-03-01-a.md TEHTY")   # ei "push epaonnistui"
         loki = git_ulos(self.origin, "log", "--format=%s", "main").splitlines()
         self.assertIn("muu", loki)
         self.assertIn("claude-jono: tulos 2026-11-03-01-a.md", loki)
@@ -348,7 +348,7 @@ class Ajo(Pohja):
         nahdyt = []
         v = ajuri.aja(self.repo, self.tmp, env={"CLAUDEJONO_KAISTOJA": "2", "CLAUDEJONO_ITSESUUNNITTELU": "0"},
                       suorita=self.f(sivu=lambda kom, kw: nahdyt.append(kw["cwd"])), kaista=2)
-        self.assertEqual(v, "claude-jono: 2026-11-03-02-b.md VALMIS [kaista 2]")
+        self.assertEqual(v, "claude-jono: 2026-11-03-02-b.md TEHTY [kaista 2]")
         self.assertTrue(nahdyt[0].endswith("/tyo/k2"), nahdyt)
         self.assertTrue((self.tmp / "tyo" / "k2").is_dir())
 
@@ -472,7 +472,7 @@ class Ajo(Pohja):
         self.lisaa_tehtava("2026-11-03-01-a.md")
         (self.tmp / ajuri.KAISTALOKI).mkdir()   # kirjoitus epaonnistuu (hakemisto)
         v = ajuri.aja(self.repo, self.tmp, env={"CLAUDEJONO_ITSESUUNNITTELU": "0"}, suorita=self.f())
-        self.assertIn("VALMIS", v)
+        self.assertIn("TEHTY", v)
 
 
 class Paaohjelma(Pohja):

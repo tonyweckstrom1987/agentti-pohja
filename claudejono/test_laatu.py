@@ -24,7 +24,7 @@ class Perus(unittest.TestCase):
         self.tyohak = self.tmp / "tyohak"
         self.tyohak.mkdir()
 
-    def tulos(self, nimi, teksti="- Tila: VALMIS\n\nTodennettu kaytossa: ajettu.\n"):
+    def tulos(self, nimi, teksti="- Tila: TEHTY\n\nTodennettu kaytossa: ajettu.\n"):
         p = self.repo / "claude-jono" / "tulokset" / nimi
         p.write_text(teksti, encoding="utf-8")
         return p
@@ -204,7 +204,7 @@ class Ajo(Perus):
 class Mittari(Perus):
     def test_mittaririvi_luvut(self):
         self.tulos("2026-11-02-01-a.md")
-        self.tulos("2026-11-02-02-b.md", "- Tila: VALMIS\n\nei todennusta\n")
+        self.tulos("2026-11-02-02-b.md", "- Tila: TEHTY\n\nei todennusta\n")
         self.tulos("2026-11-02-03-c.md", "- Tila: EPAONNISTUI\n")
         (self.repo / "claude-jono" / "virheloki.md").write_text(
             "- 2026-11-02: a. Syy: x.\n- 2026-11-02: b.\n- 2026-10-31: c.\n", encoding="utf-8")

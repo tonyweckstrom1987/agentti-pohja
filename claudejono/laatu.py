@@ -34,7 +34,7 @@ OLETUS_AIKARAJA_S = 20 * 60
 OLETUS_MAX_KIERROKSET = 25
 PAIVIA_TILASSA = 30
 TODENNETTU_RE = re.compile(r"todennettu k.yt.ss.", re.IGNORECASE)
-VALMIS_RE = re.compile(r"^- Tila:\s*VALMIS\s*$", re.MULTILINE)
+VALMIS_RE = re.compile(r"^- Tila:\s*(?:TEHTY|VALMIS)\s*$", re.MULTILINE)
 VIRHELOKI_RE = re.compile(r"^- (\d{4}-\d{2}-\d{2}):", re.MULTILINE)
 KUVAUS_MAX = 300
 
