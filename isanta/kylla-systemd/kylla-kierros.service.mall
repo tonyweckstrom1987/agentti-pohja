@@ -1,0 +1,13 @@
+# Kylla-skriptit: yksi kierros (Proxmox-isanta, root). Ohje: docs/kylla-skriptit.md
+[Unit]
+Description=Kylla-skriptit: kysy uudet, aja Tonyn hyvaksymat
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/kylla/komentobotti.env
+ExecStart=/usr/bin/python3 -I -B /usr/local/lib/kylla/kylla.py kierros --ajettavat /var/lib/kylla/docs/claude-jono/isanta-kasin/ajettavat --tila /var/lib/kylla/tila --tulosteet /var/lib/kylla/tulosteet --chat-tiedosto /etc/kylla/chat-id --hae-git /var/lib/kylla/docs
+# Skriptin oma aikaraja on 10 min; tama on varaventtiili koko kierrokselle.
+TimeoutStartSec=900
+UMask=0077
