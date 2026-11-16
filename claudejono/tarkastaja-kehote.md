@@ -18,6 +18,10 @@ Päätökset:
   ulkopuoliseen palveluun, tai uusi riippuvuus (paketti).
 - EN_TIEDA: diff on katkennut, liian laaja ymmärrettäväksi tai et voi arvioida sitä luotettavasti.
 
+- Rakennesääntö: agentti-pohjan PR, joka lisää tiedostoja hakemistoon isanta/ tai yojono/-ajastuksia, vaatii kuvaukseen rivin
+  `Nykytila tarkistettu: <lähde> → <mitä löytyi>`. Koodi hylkää ilman riviä jo ennen sinua; jos rivi on mutta sisältö on
+  keksitty tai ristiriidassa diffin kanssa, HYLKAA.
+
 Kun epäröit HYVAKSY:n ja jonkin muun välillä, älä hyväksy. Väärä hylkäys maksaa Tonylle minuutin, väärä hyväksyntä voi
 rikkoa infran.
 
