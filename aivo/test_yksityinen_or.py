@@ -285,7 +285,8 @@ class TyokalutilaTesti(Pohja):
         kysytty = []
         tila = chat.Tila(chat.tiivista_salasana("oikea-salasana-123"), str(r / "kirjasto"), str(r / "data"),
                          ["localhost"], kysy=lambda m, h: kysytty.append(1) or "pilvi", yks_data=str(r / "yks"),
-                         taustapaa="openrouter", or_malli=MALLI, or_avain=str(self.avain), or_kulutila=str(self.kulut))
+                         taustapaa="openrouter", or_malli=MALLI, or_avain=str(self.avain), or_kulutila=str(self.kulut),
+                         tiivistelmat=str(r / "tiiv"), yks_tiivistelmat=str(r / "ytiiv"))
         srv = chat.kaynnista("127.0.0.1", 0, tila)
         self.addCleanup(srv.server_close)
         threading.Thread(target=srv.serve_forever, daemon=True).start()
@@ -319,7 +320,8 @@ class TyokalutilaTesti(Pohja):
         tila = chat.Tila(chat.tiivista_salasana("oikea-salasana-123"), str(r / "kirjasto"), str(r / "data"),
                          ["localhost"], yks_data=str(r / "yks"), yks_muisti=str(r / "yksm"),
                          ydinohjeet=str(r / "ydin"), ehdotukset=str(r / "ehd"),
-                         taustapaa="openrouter", or_malli=MALLI, or_avain=str(self.avain), or_kulutila=str(self.kulut))
+                         taustapaa="openrouter", or_malli=MALLI, or_avain=str(self.avain), or_kulutila=str(self.kulut),
+                         tiivistelmat=str(r / "tiiv"), yks_tiivistelmat=str(r / "ytiiv"))
         srv = chat.kaynnista("127.0.0.1", 0, tila)
         self.addCleanup(srv.server_close)
         threading.Thread(target=srv.serve_forever, daemon=True).start()
