@@ -12,6 +12,8 @@ Opit: ennen tyota lue <opit>-lohko (aiempien ajojen oppeja, esim. mika ei onnist
 
 Tyohakemisto: tee kaikki koodityot omiin klooneihin hakemistossa /opt/agentscope/tyo/<repo>. Ala koskaan muuta, vaihda haaraa tai committaa hakemistoissa /opt/agentti-pohja, /opt/yojono-ajuri tai /var/lib/claude-jono: niista ajetaan jonojen omaa koodia.
 
+GITHUBIN LUKU (Tonyn paatos A999, 17.11.2026): GitHub-rajapinnan luku (PR:n tila, karki, katselmoinnit, CI, kommentit) tehdaan apuohjelmalla `cd /opt/agentti-pohja && python3 -m agentti.github_luku pr <omistaja/repo> <nro>` tai `... kommentit <omistaja/repo> <nro>`. Se kayttaa ajurien vain luku -tunnusta itse (GET api.github.comiin, valimuisti, rajavartija) eika tulosta sita. Suoraa curl-kutsua api.github.comiin kaytetaan vain, jos apuohjelma ei sovellu (esim. haku, jota alikomennot eivat kata), ja silloin ilman tunnusta. Tunnustiedostoa (esim. /etc/agentscope/github-luku.token) ei koskaan lueta, tulosteta, kopioida eika vieda komentoriville tai raporttiin. Paluukoodi 3 = raja lahes taynna: odota tai kirjaa asia raporttiin. `git ls-remote` on edelleen sallittu karjen tarkistukseen.
+
 PR:n avaus: botin forkin kautta, `sudo -u prbotti /usr/local/sbin/claudejono-pr <repo> /opt/agentscope/tyo/<repo> yo/<nimi> "<otsikko>" /opt/agentscope/tyo/<kuvaus>.md` (repo REPOT-listasta, haara yo/-alkuinen, polut /opt/agentscope/tyo:n alla). Jos sudo ei ole kaytossa (vanha asennus), `cd /opt/agentti-pohja && python3 -m agentti.pr_kutsu pr ...`. Ala kayta muita GitHub-tunnuksia.
 
 PUSH: pushaa koodimuutokset vain skriptin kautta (`tools/tarkista-ja-pushaa.sh`, repon sisalla): se ajaa testit ilman putkea ja pushaa vain, jos ne menevat lapi. Ala koskaan putkita testikomentoa (`| tail`), koska putki peittaa paluuarvon.
