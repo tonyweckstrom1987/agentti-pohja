@@ -91,7 +91,7 @@ Jokainen tehtävä ajetaan halvimmalla mallilla, joka riittää laatuun.
 **Mallin valinta** (`malli.py`, taulukko `TYYPPI_MALLI` on ainoa paikka):
 1. Tehtävätiedoston rivi `Malli: opus|sonnet|openrouter:<alias>` (rivin alusta; tekstin seassa oleva maininta ei laukaise).
 2. Puuttuessa tehtävän nimen tyyppi: suunnittelu, arkkitehtuuri, tarkastus ja vaikeat viat → Opus; tarkkailu, päiväkatsaus, tiivistelmä, luokittelu ja kauppa-analyysi → OpenRouter (vain jos tehtävä ei tarvitse työkaluja, kuten PR:ää tai gitiä).
-3. Muuten Sonnet.
+3. Muuten Opus (Tonyn päätös A1009 18.11.2026; aiemmin Sonnet).
 Sallitut mallit ovat koodissa. Tuntematon arvo hylätään ja malli päätellään tyypistä. OpenRouter-aliakset: `deepseek-flash`, `deepseek-pro`, `qwen-coder`. Jonon itsesuunnittelu ajetaan Opuksella.
 
 **Reitit.** Claude-reitti ajaa `claude -p --model opus|sonnet`. OpenRouter-reitti kutsuu LiteLLM:ää ajurin omassa prosessissa (`litellm_ajo.py`), ilman työkaluja: se tuottaa vain tekstiraportin. Avain `CLAUDEJONO_LITELLM_KEY` luetaan ajurin ympäristöstä (Tony kirjoittaa tiedoston `/etc/claude-jono/litellm.env`, ks. palvelumallit), eikä se kulkeudu agentin ympäristöön. Samaan tiedostoon tulee myös osoite `CLAUDEJONO_LITELLM_URL=http://<LiteLLM-kontin osoite>:4000/v1` (pakollinen, ei oletusta, jottei sisäverkon osoite päädy repoon). Jos avainta tai osoitetta ei ole, OpenRouter-tehtävät jäävät jonoon eivätkä estä muita.

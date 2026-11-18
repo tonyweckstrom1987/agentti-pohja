@@ -14,7 +14,7 @@ from dataclasses import dataclass
 CLAUDE_MALLIT = ("opus", "sonnet")
 # Sallitut LiteLLM-aliakset (CLAUDE.md: qwen-coder, deepseek-flash, deepseek-pro). posti-zdr kuuluu posti-agentille, ei jonolle.
 OPENROUTER_ALIAKSET = ("deepseek-flash", "deepseek-pro", "qwen-coder")
-OLETUS_MALLI = "sonnet"
+OLETUS_MALLI = "opus"  # Tonyn paatos A1009 18.11.2026: oletus sonnet -> opus (viikkokaytto hyotyyn, A958)
 OPENROUTER_OLETUS = "openrouter:deepseek-flash"
 
 # Tyyppi tunnistetaan tehtavan nimen osasta (pvm-NN-<nimi>.md). Ensimmainen osuma voittaa. YKSI PAIKKA tyyppien mallivalinnalle.
