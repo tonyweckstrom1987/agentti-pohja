@@ -280,11 +280,55 @@ class KierrosTesti(unittest.TestCase):
         self.assertEqual(self.ajot, [])
         self.assertIn("paatos=EN_TIEDA", api.postit[0][1]["body"])
 
+    def aikakatkaisu(self, kom, **kw):
+        self.ajot.append((kom, kw))
+        raise subprocess.TimeoutExpired(kom, 1, output="osittainen", stderr="virhe")
+
     def test_aikakatkaisu_on_en_tieda(self):
-        def f(kom, **kw):
-            raise subprocess.TimeoutExpired(kom, 1)
+        # Ensimmainen aikakatkaisu ei kirjoita paatosta (tulos 18-59); toinen samalla commitilla on EN_TIEDA kuten ennen.
         api = Feikki([pr_olio()], [tiedosto()], [])
-        self.assertEqual(tk.kierros(self.env, "t", suorita=f, avaa=api)[0]["tulos"], "EN_TIEDA")
+        tk.kierros(self.env, "t", suorita=self.aikakatkaisu, avaa=api)
+        api2 = Feikki([pr_olio()], [tiedosto()], [])
+        self.assertEqual(tk.kierros(self.env, "t", suorita=self.aikakatkaisu, avaa=api2)[0]["tulos"], "EN_TIEDA")
+        self.assertIn("paatos=EN_TIEDA", api2.postit[0][1]["body"])
+
+    def test_ensimmainen_aikakatkaisu_ei_kommentoi_ja_seuraava_kierros_yrittaa_uudelleen(self):
+        api = Feikki([pr_olio()], [tiedosto()], [])
+        tulos = tk.kierros(self.env, "t", suorita=self.aikakatkaisu, avaa=api)
+        self.assertEqual(tulos[0]["tulos"], "aikakatkaisu")
+        self.assertEqual((tulos[0]["stdout_pituus"], tulos[0]["stderr_pituus"]), (len("osittainen"), len("virhe")))
+        self.assertEqual(api.postit, [])                               # ei sha-merkkia -> commit ei ole "jo tarkastettu"
+        rivi = json.loads((Path(self.d.name) / "kulutus.jsonl").read_text().splitlines()[0])
+        self.assertEqual((rivi["ok"], rivi["aikakatkaisu"], rivi["stderr_pituus"]), (False, 1, len("virhe")))
+        tila = json.loads((Path(self.d.name) / tk.TILA_TIEDOSTO).read_text())
+        self.assertEqual((tila["maara"], tila["per_pr"]["agentti-pohja#5"]), (1, 1))   # uusinta kuluttaa rajoja
+        api2 = Feikki([pr_olio()], [tiedosto()], [])
+        self.assertEqual(tk.kierros(self.env, "t", suorita=self.suorita(), avaa=api2)[0]["tulos"], "HYVAKSYTTY")
+        self.assertEqual(len(api2.postit), 1)
+        self.assertEqual(len(self.ajot), 2)
+
+    def test_uusi_commit_saa_oman_uusinnan_ja_tila_sailyy_paivan_vaihtuessa(self):
+        nyt = datetime(2026, 11, 18, 2, 0).astimezone()
+        tk.kierros(self.env, "t", nyt=nyt, suorita=self.aikakatkaisu, avaa=Feikki([pr_olio()], [tiedosto()], []))
+        api = Feikki([pr_olio()], [tiedosto()], [])                   # seuraava paiva, sama commit: uusinta jo kaytetty
+        self.assertEqual(tk.kierros(self.env, "t", nyt=nyt + timedelta(days=1), suorita=self.aikakatkaisu, avaa=api)[0]["tulos"],
+                         "EN_TIEDA")
+        uusi = "e" * 40
+        api = Feikki([pr_olio(sha=uusi)], [tiedosto()], [])
+        self.assertEqual(tk.kierros(self.env, "t", nyt=nyt + timedelta(days=1), suorita=self.aikakatkaisu, avaa=api)[0]["tulos"],
+                         "aikakatkaisu")
+        self.assertEqual(api.postit, [])
+
+    def test_aikakatkaisun_merkinta_poistuu_kun_pr_suljetaan(self):
+        tk.kierros(self.env, "t", suorita=self.aikakatkaisu, avaa=Feikki([pr_olio()], [tiedosto()], []))
+        self.assertIn("aikakatkaisut", json.loads((Path(self.d.name) / tk.TILA_TIEDOSTO).read_text()))
+        tk.kierros(self.env, "t", suorita=self.suorita(), avaa=Feikki([pr_olio(9)], [tiedosto()], []))
+        self.assertNotIn("aikakatkaisut", json.loads((Path(self.d.name) / tk.TILA_TIEDOSTO).read_text()))
+
+    def test_aikakatkaisu_ei_ole_hylatty_paatos_ajurille(self):
+        tk.kierros(self.env, "t", suorita=self.aikakatkaisu, avaa=Feikki([pr_olio()], [tiedosto()], []))
+        from claudejono import ajuri
+        self.assertEqual(ajuri.hylatyt_prt(self.d.name), [])
 
     def test_kuiva_ei_aja_eika_kirjoita(self):
         api = Feikki([pr_olio()], [tiedosto()], [])

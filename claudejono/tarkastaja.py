@@ -17,6 +17,7 @@ Automerge-tyonkulku (tools/automerge.py) kaynnistyy kommentista ja kytkee auto-m
 samaan head-commitiin. Kaikki muu kuin selva HYVAKSY on Tonylle (fail closed).
 
 Rajat koodissa: MAX_PAIVASSA tarkastusta / vrk, MAX_PER_PR / PR, DIFF_MAX tavua (isompi -> EN_TIEDA ilman mallia).
+Aikakatkaisu: ensimmainen samalla commitilla ei kirjoita paatosta (yksi uusinta), toinen -> EN_TIEDA.
 Kaytto: python3 -m claudejono.tarkastaja kierros [--kuiva]
 """
 import argparse
@@ -47,6 +48,11 @@ LOKI = "tarkastukset.jsonl"
 KEHOTE = Path(__file__).resolve().parent / "tarkastaja-kehote.md"
 MAX_PAIVASSA = 40
 MAX_PER_PR = 6
+AIKAKATKAISU_SYY = "tarkastus aikakatkaistiin"
+# Ensimmainen aikakatkaisu samalla commitilla ei kirjoita paatoskommenttia, jotta seuraava kierros yrittaa kerran uudelleen
+# (tulos 18-59: ai-pr-reviewer-action#40 jai pysyvasti ilman tarkastusta yhden jumin takia). Toinen aikakatkaisu -> EN_TIEDA
+# kuten ennen. Yritykset kuluttavat edelleen MAX_PAIVASSA- ja MAX_PER_PR-rajoja, joita ei muuteta.
+AIKAKATKAISU_UUSINTOJA = 1
 DIFF_MAX = 150_000
 AIKARAJA_S = 900
 PERUSTELU_MAX = 1500
@@ -134,11 +140,14 @@ def lue_tila(polku, pvm):
     if not isinstance(d, dict):
         d = {}
     if d.get("pvm") != pvm:
-        # per_pr ja avaa_422 ovat pidempaikaisia: ne sailyvat paivan vaihtuessa
+        # per_pr, avaa_422 ja aikakatkaisut ovat pidempaikaisia: ne sailyvat paivan vaihtuessa
         d = {"pvm": pvm, "maara": 0, "avattu": 0, "per_pr": d.get("per_pr") if isinstance(d.get("per_pr"), dict) else {},
-             **({"avaa_422": d["avaa_422"]} if isinstance(d.get("avaa_422"), dict) and d["avaa_422"] else {})}
+             **({"avaa_422": d["avaa_422"]} if isinstance(d.get("avaa_422"), dict) and d["avaa_422"] else {}),
+             **({"aikakatkaisut": d["aikakatkaisut"]} if isinstance(d.get("aikakatkaisut"), dict) and d["aikakatkaisut"] else {})}
     d.setdefault("maara", 0)
     d.setdefault("per_pr", {})
+    if "aikakatkaisut" in d and not isinstance(d["aikakatkaisut"], dict):
+        del d["aikakatkaisut"]
     if "avaa_422" in d and not isinstance(d["avaa_422"], dict):
         del d["avaa_422"]                                              # roskaa: ei jateta tyhjaa avainta
     return d
@@ -233,8 +242,10 @@ def tarkasta_pr(repo, nro, d, tunnus, env, suorita=subprocess.run, avaa=urllib.r
     kehote = rakenna_kehote(repo, nro, d, diff.decode("utf-8", "replace"))
     try:
         r = suorita(kom, input=kehote, cwd=koti, env=alaenv, capture_output=True, text=True, timeout=AIKARAJA_S, check=False)
-    except subprocess.TimeoutExpired:
-        return "EN_TIEDA", "tarkastus aikakatkaistiin", [], {}, malli
+    except subprocess.TimeoutExpired as e:
+        # Lyhyt diagnostiikka lokiin (tulos 18-59: jumin syyta ei voitu selvittaa, koska tulostetta ei tallennettu).
+        return "EN_TIEDA", AIKAKATKAISU_SYY, [], {"aikakatkaisu": 1, "stdout_pituus": len(e.stdout or ""),
+                                                 "stderr_pituus": len(e.stderr or "")}, malli
     except OSError as e:
         raise TarkastajaVirhe("tarkastajaa ei voitu kaynnistaa: " + type(e).__name__)
     paatos, perustelu, loydokset, luvut = tulkitse(r.stdout, r.returncode)
@@ -389,18 +400,32 @@ def kierros(env, tunnus, nyt=None, suorita=subprocess.run, avaa=urllib.request.u
                     continue
                 alku = time.monotonic()
                 paatos, perustelu, loydokset, luvut, malli = tarkasta_pr(repo, nro, d, tunnus, env, suorita=suorita, avaa=avaa)
-                if tarkasta_rajattu:
-                    paatos, perustelu = rajaa_paatos(paatos, perustelu, syyt)
                 tila["maara"] += 1
                 tila["per_pr"][avain] = tila["per_pr"].get(avain, 0) + 1
+                aikakatkaistu = paatos == "EN_TIEDA" and perustelu == AIKAKATKAISU_SYY
+                uusitaan = (aikakatkaistu and AIKAKATKAISU_UUSINTOJA > 0
+                            and tila.get("aikakatkaisut", {}).get(avain) != pr["head_sha"])
+                if aikakatkaistu:
+                    tila.setdefault("aikakatkaisut", {})[avain] = pr["head_sha"]   # commit, jolle uusinta on jo kaytetty
                 kirjoita_tila(tilapolku, tila)
                 kulutus.kirjaa(tila_hak, malli, avain, 0, "tarkastus", paatos != "EN_TIEDA", time.monotonic() - alku, luvut)
+                if uusitaan:
+                    tehty.append({"repo": repo, "pr": nro, "tulos": "aikakatkaisu", "sha": pr["head_sha"][:12],
+                                  "syy": "yritetaan kerran uudelleen seuraavalla kierroksella",
+                                  "stdout_pituus": luvut.get("stdout_pituus", 0), "stderr_pituus": luvut.get("stderr_pituus", 0)})
+                    continue
+                if tarkasta_rajattu:
+                    paatos, perustelu = rajaa_paatos(paatos, perustelu, syyt)
                 _pyynto("%s/repos/%s/%s/issues/%s/comments" % (API, OMISTAJA, repo, nro), tunnus,
                         data={"body": kommentti(paatos, pr["head_sha"], perustelu, loydokset, malli)}, avaa=avaa)
                 tehty.append({"repo": repo, "pr": nro, "tulos": paatos, "sha": pr["head_sha"][:12]})
             except TarkastajaVirhe as e:
                 tehty.append({"repo": repo, "pr": nro, "tulos": "virhe", "syy": str(e)})
     tila["per_pr"] = {k: v for k, v in tila["per_pr"].items() if k in auki or not auki}
+    if "aikakatkaisut" in tila:
+        tila["aikakatkaisut"] = {k: v for k, v in tila["aikakatkaisut"].items() if k in auki or not auki}
+        if not tila["aikakatkaisut"]:
+            del tila["aikakatkaisut"]
     if not kuiva:
         try:
             kirjoita_tila(tilapolku, tila)
