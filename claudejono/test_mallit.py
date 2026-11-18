@@ -33,20 +33,20 @@ class MallinValinta(unittest.TestCase):
         self.assertEqual((m.reitti, m.nimi, m.tunniste), ("openrouter", "deepseek-flash", "openrouter:deepseek-flash"))
         self.assertEqual(malli.valitse("a", "  malli:  OPUS  \n").tunniste, "opus")
 
-    def test_tyyppi_antaa_mallin_ja_oletus_on_opus(self):
+    def test_tyyppi_antaa_mallin_ja_oletus_on_sonnet(self):
         self.assertEqual(malli.valitse("2026-11-03-02-arkkitehtuuri-lukko.md", "").tunniste, "opus")
         self.assertEqual(malli.valitse("2026-11-03-03-paivakatsaus-teksti.md", "Tiivista.").tunniste, "openrouter:deepseek-flash")
         m = malli.valitse("2026-11-03-04-korjaa-bugi.md", "")
-        self.assertEqual((m.tunniste, m.lahde), ("opus", "oletus"))
+        self.assertEqual((m.tunniste, m.lahde), ("sonnet", "oletus"))
 
     def test_halpa_reitti_ei_kaiken_tyokaluja_vaativan_tehtavan_tyyppiin(self):
         m = malli.valitse("2026-11-03-03-tarkkailu-x.md", "Avaa PR claudejono-pr:lla.")
-        self.assertEqual(m.tunniste, "opus")
+        self.assertEqual(m.tunniste, "sonnet")
 
     def test_sallitun_listan_ulkopuolinen_malli_hylataan(self):
         for huono in ("gpt-5", "openrouter:posti-zdr", "openrouter:../x", "opus; rm", "openrouter:", "haiku"):
             m = malli.valitse("2026-11-03-04-korjaa.md", f"Malli: {huono}\n")
-            self.assertEqual((m.tunniste, m.lahde), ("opus", "kentta-hylatty"), huono)
+            self.assertEqual((m.tunniste, m.lahde), ("sonnet", "kentta-hylatty"), huono)
 
     def test_maininta_tekstin_seassa_ei_laukaise(self):
         self.assertEqual(malli.valitse("a", "kirjoita rivi `Malli: opus` tiedostoon").lahde, "oletus")
@@ -204,17 +204,17 @@ class AjuriReitit(Pohja):
     ENV = {"CLAUDEJONO_ITSESUUNNITTELU": "0"}
 
     def test_claude_reitti_valitsee_mallin_kirjaa_kulutuksen_ja_mallin_tulokseen(self):
-        self.lisaa_tehtava("2026-11-03-01-x.md", "Malli: sonnet\ntee")
+        self.lisaa_tehtava("2026-11-03-01-x.md", "Malli: opus\ntee")
         self.lisaa_tehtava("2026-11-03-02-y.md", "tee")
         komennot = []
         suorita = ajo(komennot, usage={"input_tokens": 3, "output_tokens": 4}, total_cost_usd=0.5)
         self.assertEqual(ajuri.aja(self.repo, self.tmp, env=dict(self.ENV), suorita=suorita), "claude-jono: 2026-11-03-01-x.md VALMIS")
         self.assertEqual(ajuri.aja(self.repo, self.tmp, env=dict(self.ENV), suorita=suorita), "claude-jono: 2026-11-03-02-y.md VALMIS")
-        self.assertEqual([k[k.index("--model") + 1] for k in komennot], ["sonnet", "opus"])
+        self.assertEqual([k[k.index("--model") + 1] for k in komennot], ["opus", "sonnet"])
         rivit = kulutus.lue(self.tmp)
         self.assertEqual([(r["malli"], r["tehtava"], r["tokenit_in"], r["usd"]) for r in rivit],
-                         [("sonnet", "2026-11-03-01-x.md", 3, 0.5), ("opus", "2026-11-03-02-y.md", 3, 0.5)])
-        self.assertIn("- Malli: sonnet\n", (self.repo / ajuri.JONO / "tulokset" / "2026-11-03-01-x.md").read_text())
+                         [("opus", "2026-11-03-01-x.md", 3, 0.5), ("sonnet", "2026-11-03-02-y.md", 3, 0.5)])
+        self.assertIn("- Malli: opus\n", (self.repo / ajuri.JONO / "tulokset" / "2026-11-03-01-x.md").read_text())
 
     def test_openrouter_reitti_ei_kayta_claudea(self):
         self.lisaa_tehtava("2026-11-03-01-x.md", "Malli: openrouter:deepseek-flash\nTiivista.")
