@@ -157,7 +157,7 @@ class Silmukka(Pohja):
         self.assertEqual(kutsut, [])
 
     def test_paivaraja_ja_per_ajo_ennallaan(self):
-        self.assertEqual(ajuri.AUTO_MAX_PAIVA, 30)
+        self.assertEqual(ajuri.AUTO_MAX_PAIVA, 60)
         self.assertEqual(ajuri.AUTO_PER_AJO, 5)
         self.assertTrue(ajuri.sallittu_polku("claude-jono/tonylle.md"))
         self.assertFalse(ajuri.sallittu_polku("claude-jono/sunnuntaiehdotukset.md"))
