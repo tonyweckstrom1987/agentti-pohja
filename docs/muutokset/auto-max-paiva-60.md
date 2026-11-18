@@ -1,0 +1,1 @@
+- claudejono: itsesuunnittelun päiväraja `AUTO_MAX_PAIVA` 30 → 60 (Tonyn päätös A1008, 18.11.2026). 18.11. raja täyttyi aamulla klo 3 jälkeen, ja jono seisoi tyhjänä. `AUTO_PER_AJO` (5) ennallaan. Vartijatestit päivitetty, uusi testi: 31. tehtävä samana päivänä sallitaan.

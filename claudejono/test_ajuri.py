@@ -404,7 +404,18 @@ class Itsesuunnittelu(Pohja):
         self.assertFalse(ajuri.sallittu_polku("claude-jono/tulokset/../../x.md"))
 
     def test_raja_on_laissa(self):
-        self.assertLessEqual(ajuri.AUTO_MAX_PAIVA, 30)
+        self.assertLessEqual(ajuri.AUTO_MAX_PAIVA, 60)   # A1008 18.11.2026
+
+    def test_31_tehtava_paivassa_sallitaan(self):
+        """A1008: 30 auto-tehtavan jalkeen suunnittelu kutsuu yha mallia (vanha raja pysaytti)."""
+        teht = self.repo / ajuri.JONO / "tehtavat"
+        teht.mkdir(parents=True)
+        for i in range(30):
+            (teht / f"2026-10-30-{i + 1:02d}-auto-t{i}.md").write_text("x")
+        kutsut = []
+        v = ajuri.suunnittele(self.repo, self.tmp, {}, self.malli('{"tehtavat": [], "tonylle": ""}', kutsut), nyt=self.nyt())
+        self.assertNotIn("paivaraja", v)
+        self.assertEqual(len(kutsut), 1)
 
     def test_tyhja_kierros_aloittaa_tauon(self):
         kutsut = []
