@@ -323,10 +323,35 @@ def kelvottomat_tehtavat(repo):
 def varoita_kelvottomista(repo, tila, laheta):
     """Lahettaa viestin kerran kustakin kelvottomasta tehtavanimesta (tila: NIMIVAROITUKSET). Palauttaa uudet nimet.
     Ei koskaan kaada jonoa: tilatiedoston virhe tarkoittaa vain, etta varoitus voi toistua."""
-    nimet = kelvottomat_tehtavat(repo)
+    return _varoita_kerran(kelvottomat_tehtavat(repo), Path(tila) / NIMIVAROITUKSET, laheta,
+                           "claude-jono OHITTAA tehtavan, nimi ei kelpaa: ",
+                           "Sallittu muoto: VVVV-KK-PP-NN-kirjaimet-numerot-viivat.md (a-z, A-Z, 0-9, -). Nimea tiedosto uudelleen.",
+                           "varoita_kelvottomista")
+
+
+TAVOITEVAROITUKSET = "tavoitevaroitukset.json"
+
+
+def tavoitteettomat_tehtavat(repo):
+    """Kelvollisesti nimetyt odottavat tehtavat, joita mikaan kaista ei aloita, koska Tavoite-rivi puuttuu tai ei kelpaa.
+    tavoite.kirjaa_hylkays vie ne vain tilahakemiston lokiin, joten ne pitaa nostaa nakyviin (vika 19.11.2026: tehtava
+    2026-11-19-35 seisoi yli 3 h, koska rivilla oli vapaata tekstia "Tavoite: karkiprojekti ..., TO-haun portfolio")."""
+    return [p.name for p in odottavat_tehtavat(repo) if tavoite.luokittele(p)[0] is None]
+
+
+def varoita_tavoitteettomista(repo, tila, laheta):
+    """Kuten varoita_kelvottomista, mutta Tavoite-rivin vuoksi aloittamatta jaavista tehtavista (tila: TAVOITEVAROITUKSET)."""
+    return _varoita_kerran(tavoitteettomat_tehtavat(repo), Path(tila) / TAVOITEVAROITUKSET, laheta,
+                           "claude-jono EI ALOITA tehtavaa, Tavoite-rivi puuttuu tai ei kelpaa: ",
+                           "Lisaa tehtavaan oma rivi, jonka arvo on tasan yksi naista: portfolio, ansainta, Aivo, yllapito "
+                           "(esim. 'Tavoite: portfolio'). Perustelut kuuluvat Hyoty-riville.",
+                           "varoita_tavoitteettomista")
+
+
+def _varoita_kerran(nimet, polku, laheta, alku, ohje, kutsuja):
+    """Yksi viesti uusista nimista; jo varoitetut ovat tilatiedostossa. Lahetysvirhe ei kirjaa tilaa (yritetaan uudelleen)."""
     if not nimet or not laheta:
         return []
-    polku = Path(tila) / NIMIVAROITUKSET
     try:
         vanhat = set(json.loads(polku.read_text()))
     except (OSError, ValueError, TypeError):
@@ -334,13 +359,11 @@ def varoita_kelvottomista(repo, tila, laheta):
     uudet = [n for n in nimet if n not in vanhat]
     if not uudet:
         return []
-    teksti = ("claude-jono OHITTAA tehtavan, nimi ei kelpaa: " + ", ".join(uudet[:5])
-              + ("" if len(uudet) <= 5 else f" (+{len(uudet) - 5})")
-              + "\nSallittu muoto: VVVV-KK-PP-NN-kirjaimet-numerot-viivat.md (a-z, A-Z, 0-9, -). Nimea tiedosto uudelleen.")
+    teksti = (alku + ", ".join(uudet[:5]) + ("" if len(uudet) <= 5 else f" (+{len(uudet) - 5})") + "\n" + ohje)
     try:
         lahti = laheta(teksti)
     except Exception as virhe:  # ilmoituskanavan vika ei saa estaa kelvollisten tehtavien ajoa (tarkastus #265)
-        print(f"varoita_kelvottomista: lahetys epaonnistui ({type(virhe).__name__})", file=sys.stderr)
+        print(f"{kutsuja}: lahetys epaonnistui ({type(virhe).__name__})", file=sys.stderr)
         return []
     if lahti is False:   # laheta_telegram palauttaa False epaonnistuessaan: tilaa ei kirjata, joten varoitus yritetaan uudelleen
         return []
@@ -1205,6 +1228,7 @@ def aja(repo, tyohak, env=None, suorita=subprocess.run, laheta=None, kaista=1, l
     with git_lukko(tila) as odotus:
         git(repo, "pull", "-q", "--rebase", "origin", "main")
         varoita_kelvottomista(repo, tila, laheta)   # muuten vaarin nimetty tehtava jaa jonoon nakymatta
+        varoita_tavoitteettomista(repo, tila, laheta)   # samoin tehtava, jonka Tavoite-rivi ei kelpaa
         if env.get("CLAUDEJONO_ITSESUUNNITTELU", "1") == "1" and env.get("CLAUDEJONO_TOISTUVAT") == "1":
             luo_toistuvat(repo, tyohak)   # toistuvat (esim. viikon optimointikierros) vain kun palvelu kytkee ne paalle
         t = varaa_seuraava(repo, tila, kaista, vanhenee_s=vanhenee, kaistoja=kaistojen_maara(env), ohita=ohita)

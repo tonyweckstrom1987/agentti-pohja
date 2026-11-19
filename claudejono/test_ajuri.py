@@ -54,6 +54,41 @@ class Nimi(unittest.TestCase):
             self.assertFalse(ajuri.kelvollinen_nimi(n), n)
 
 
+class TavoitteetonTehtava(Pohja):
+    """Vika 19.11.2026: 2026-11-19-35 seisoi yli 3 h, koska Tavoite-rivilla oli vapaata tekstia; hylkays meni vain tilan lokiin."""
+
+    def test_vapaa_teksti_tavoiterivilla_loytyy(self):
+        self.lisaa_tehtava("2026-11-19-35-router-pr.md", "Tavoite: k\u00e4rkiprojekti mcp-model-router (A983), TO-haun portfolio\n")
+        self.lisaa_tehtava("2026-11-19-36-ok.md", "Tavoite: portfolio\n")
+        self.lisaa_tehtava("2026-11-19-37-ei-rivia.md", "# T\n")
+        self.lisaa_tehtava("2026-11-01-01-vanha.md", "# vanha ilman rivia ajetaan yllapitona\n")
+        self.assertEqual(ajuri.tavoitteettomat_tehtavat(self.repo), ["2026-11-19-35-router-pr.md", "2026-11-19-37-ei-rivia.md"])
+
+    def test_tehtava_jolla_on_tulos_ei_nouse(self):
+        self.lisaa_tehtava("2026-11-19-35-x.md", "Tavoite: jotain muuta\n")
+        tul = self.repo / ajuri.JONO / "tulokset"
+        tul.mkdir(parents=True)
+        (tul / "2026-11-19-35-x.md").write_text("tulos")
+        self.assertEqual(ajuri.tavoitteettomat_tehtavat(self.repo), [])
+
+    def test_varoitus_kerran_ja_ohje_mukana(self):
+        self.lisaa_tehtava("2026-11-19-35-x.md", "Tavoite: TO-haun portfolio\n")
+        viestit = []
+        self.assertEqual(ajuri.varoita_tavoitteettomista(self.repo, self.tmp, viestit.append), ["2026-11-19-35-x.md"])
+        self.assertEqual(ajuri.varoita_tavoitteettomista(self.repo, self.tmp, viestit.append), [])
+        self.assertEqual(len(viestit), 1)
+        self.assertIn("EI ALOITA", viestit[0])
+        self.assertIn("Tavoite: portfolio", viestit[0])
+        self.assertTrue((self.tmp / ajuri.TAVOITEVAROITUKSET).exists())
+        self.assertFalse((self.tmp / ajuri.NIMIVAROITUKSET).exists())   # eri tilatiedosto kuin nimivaroituksilla
+
+    def test_lahetysvirhe_ei_kirjaa_tilaa(self):
+        self.lisaa_tehtava("2026-11-19-35-x.md", "# T\n")
+        self.assertEqual(ajuri.varoita_tavoitteettomista(self.repo, self.tmp, lambda _: False), [])
+        self.assertFalse((self.tmp / ajuri.TAVOITEVAROITUKSET).exists())
+        self.assertEqual(ajuri.varoita_tavoitteettomista(self.repo, self.tmp, None), [])
+
+
 class KelvotonNimi(Pohja):
     """Vika 7.11.2026: tehtava 2026-11-07-33-KIIRE-... ohitettiin hiljaa 2,5 h. Isot kirjaimet kelpaavat 8.11. alkaen; muut kelvottomat nimet nostetaan nakyviin."""
 

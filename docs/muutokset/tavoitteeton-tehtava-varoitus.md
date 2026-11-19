@@ -1,0 +1,1 @@
+- claude-jono: tehtava, jonka `Tavoite:`-rivi puuttuu tai ei kelpaa, nostetaan nakyviin kerran viestina (tila `tavoitevaroitukset.json`) ja aamukoosteen Halytykset-riville niin kauan kuin se odottaa. Ennen hylkays meni vain tilahakemiston lokiin, ja tehtava 2026-11-19-35 seisoi yli 3 h huomaamatta. Valintasaanto ja sallitut arvot ennallaan.

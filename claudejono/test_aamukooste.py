@@ -355,6 +355,23 @@ class TarkastajaVirheet(Pohja):
         self.assertNotIn("PR-tarkastaja", rivi)
 
 
+class TavoitteetonHalytys(Pohja):
+    def aineisto(self):
+        return aamukooste.keraa(self.repo, self.yj, NYT, hae=lambda url: [], yksikot=lambda: [])
+
+    def test_kelpaamaton_tavoiterivi_nousee_halytyksiin(self):
+        self.kirjoita("tehtavat/2026-11-19-35-router-pr.md", "Tavoite: k\u00e4rkiprojekti, TO-haun portfolio\n")
+        self.kirjoita("tehtavat/2026-11-19-36-ok.md", "Tavoite: Aivo\n")
+        rivi = next(r for r in aamukooste.rivit(self.aineisto()) if r.startswith("H\u00e4lytykset:"))
+        self.assertIn("1 jonoteht\u00e4v\u00e4\u00e4 ei k\u00e4ynnisty (Tavoite-rivi ei kelpaa): 2026-11-19-35-router-pr", rivi)
+        self.assertNotIn("36-ok", rivi)
+
+    def test_kelvollinen_ei_halyta(self):
+        self.kirjoita("tehtavat/2026-11-19-36-ok.md", "Tavoite: yll\u00e4pito\n")
+        rivi = next(r for r in aamukooste.rivit(self.aineisto()) if r.startswith("H\u00e4lytykset:"))
+        self.assertNotIn("Tavoite-rivi", rivi)
+
+
 class IlmoitusRajaus(unittest.TestCase):
     ENV = {"YOJONO_TELEGRAM_TOKEN": "t", "YOJONO_TELEGRAM_CHAT": "c"}
 

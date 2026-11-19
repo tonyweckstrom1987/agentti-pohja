@@ -246,13 +246,17 @@ def keraa(repo, perus, nyt, hae=None, yksikot=None, ero=None):
         tarkastaja_virheet = tarkastaja.virheet_lokista(Path(repo).parent, alku)
     except Exception:
         tarkastaja_virheet = []
+    try:   # Tavoite-rivin vuoksi aloittamatta jaavat tehtavat (vika 19.11.2026); virhe ei kaada koostetta
+        tavoitteettomat = ajuri.tavoitteettomat_tehtavat(repo)
+    except Exception:
+        tavoitteettomat = []
     try:   # ajurien jaljessaolo mainista: vain pyydettaessa, virhe ei kaada koostetta
         ero_teksti = ero() if ero else None
     except Exception:
         ero_teksti = None
     return {"nyt": nyt, "aivo_valmis": aivo_valmis, "tarkastaja_virheet": tarkastaja_virheet, "kaistat": kaistat, "kulutus": kulutus_teksti, "varaus": varaus_rivi, "varaus_kysymys": varaus_kysymys, "tulokset": tulokset, "uudet_prt": prt, "opit": opit, "tonylle": tonylle_uudet(repo, alku), "paatokset": avoimet_paatokset(repo, nyt), "saannot": tonylle_uudet(repo, alku, SAANTOPAIVITYKSET),
             "pr": pr_ryhmat, "pr_virheita": virheet, "yojono": yojono_tila(perus, nyt),
-            "yksikot": (yksikot or rikkinaiset_yksikot)(), "vaiteportti": vaiteportti.puutteet(repo), "ero": ero_teksti}
+            "yksikot": (yksikot or rikkinaiset_yksikot)(), "vaiteportti": vaiteportti.puutteet(repo), "ero": ero_teksti, "tavoitteettomat": tavoitteettomat}
 
 
 def _lyhenna(teksti, raja=RIVI_MAX):
@@ -331,6 +335,10 @@ def rivit(t):
         kohde = tv[-1].get("haara") or tv[-1].get("pr") or tv[-1].get("repo") or "?"
         kohteet = len({(v.get("repo"), v.get("haara") or v.get("pr")) for v in tv})   # rivimaara kasvaa kierroksista, kohteet eivat
         halytykset.append(f"PR-tarkastaja/-avaaja: {len(tv)} virhett\u00e4 {kohteet} kohteessa, viimeisin {kohde}: " + _lyhenna(str(tv[-1].get("syy", "")), 80))
+    if t.get("tavoitteettomat"):
+        tt = t["tavoitteettomat"]
+        halytykset.append(f"{len(tt)} jonoteht\u00e4v\u00e4\u00e4 ei k\u00e4ynnisty (Tavoite-rivi ei kelpaa): "
+                          + ", ".join(n.removesuffix(".md") for n in tt[:2]) + (f" (+{len(tt) - 2})" if len(tt) > 2 else ""))
     if nimet["EPAONNISTUI"]:
         halytykset.append(f"{nimet['EPAONNISTUI']} jonoteht\u00e4v\u00e4\u00e4 ep\u00e4onnistui")
     if yj and yj["epaonnistui"]:
