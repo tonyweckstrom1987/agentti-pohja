@@ -83,6 +83,12 @@ Ajastus: kopioi `systemd/yojono.service.mall` ja `systemd/yojono.timer.mall` nim
 - Ei merge-, push- eikä käyttöönottotyyppejä. Uusi tehtävätyyppi vaatii oman suorittajan ja testit.
 - Ajuri ei näe salaisuuksia: katselmoi.sh lukee ne itse omasta tiedostostaan.
 
+## Mallikartta ja eskalointi (A860, 8.11.2026)
+Rutiinityö ajetaan halvimmalla riittävällä mallilla (`MALLIKARTTA` ajuri.py:ssä): tarkkailu sekä kehitys/readme ja kehitys/riippuvuudet haikulla,
+muut sonnetilla. Jos halpa malli epäonnistuu mallista johtuvaan syyhyn (`ESKALOI_KOODIT`: tyhjä raportti, raportti puuttuu, mallivirhe, punaiset testit),
+ajuri yrittää kerran sonnetilla. Eskalointi tapahtuu vain, jos päivä- ja kuukausikatto riittävät uuteen varaukseen (budjetti x 1,3) ja PR-paikkoja on
+jäljellä. Kulut summataan, joten katot eivät muutu. Budjetin loppuminen, aikakatkaisu ja PR-vika eivät eskaloidu. Tehtävän oma `malli` ohittaa kartan.
+
 ## Mallikutsun ohitus (kulun pienennys)
 
 - `kehitys.sh`: jos saman repon + aiheen + teeman edellinen onnistunut ajo ei tuottanut muutoksia ja repon HEAD on sama, mallikutsua ei tehda (raportti: "ohitettu", kulu 0). Tila: `<perus>/kehitys-tyhjat.tsv`. Raja `KEHITYS_OHITUS_S` (oletus 604800 s = 7 vrk).
