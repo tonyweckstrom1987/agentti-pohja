@@ -4,6 +4,7 @@ import subprocess
 import tempfile
 import time
 import unittest
+from unittest import mock
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -77,8 +78,34 @@ class Kulutus(unittest.TestCase):
         l = kulutus.claude_luvut(CLAUDE_JSON)
         self.assertEqual((l["tokenit_in"], l["tokenit_out"], l["cache_luku"], l["cache_kirjoitus"]), (2, 4, 13112, 12124))
         self.assertEqual((l["usd"], l["api_ms"], l["malli_todellinen"]), (0.049851, 1400, "claude-sonnet-5-5"))
-        self.assertEqual(kulutus.claude_luvut("ei jsonia"), {})
-        self.assertEqual(kulutus.claude_luvut("[1]"), {})
+        self.assertEqual(kulutus.claude_luvut("ei jsonia"), {"jasennysvirhe": "ei_tulosta"})
+        self.assertEqual(kulutus.claude_luvut("[1]"), {"jasennysvirhe": "ei_tulosta"})
+        self.assertEqual(kulutus.claude_luvut(""), {"jasennysvirhe": "tyhja"})
+        self.assertEqual(kulutus.claude_luvut(None), {"jasennysvirhe": "tyhja"})
+
+    def test_jasennysvirhe_kirjataan_riville_ja_nakyy_rivilla(self):
+        luvut = kulutus.claude_luvut("{rikki, salainen-sisalto")
+        kulutus.kirjaa(self.tila, "sonnet", "t", 1, "tehtava", True, 1.0, luvut, self.nyt)
+        r = kulutus.lue(self.tila)[0]
+        self.assertEqual(r["jasennysvirhe"], "ei_tulosta")
+        self.assertNotIn("salainen", json.dumps({k: v for k, v in r.items() if k != "_aika"}))  # vain vakiosanasto, ei tulosteen sisaltoa
+        self.assertEqual(kulutus.malleittain([r])["sonnet"]["jasennysvirheita"], 1)
+        self.assertIn("1 ajon luvut puuttuvat", kulutus.kulutusrivi(self.tila, self.nyt + timedelta(days=1)))
+
+    def test_stdoutin_koko_rajataan(self):
+        raja = 1000
+        with mock.patch.object(kulutus, "STDOUT_MAX", raja):
+            loppu = json.dumps({"type": "result", "usage": {"input_tokens": 7}})
+            virta = "\n".join(['{"type":"assistant","x":"' + "a" * 400 + '"}'] * 20 + [loppu])
+            self.assertGreater(len(virta), raja)
+            self.assertEqual(kulutus.claude_luvut(virta), {"tokenit_in": 7})      # loppuolio loytyy lopusta
+            # yksittainen iso JSON-olio (vanha --output-format json) jasentyy kuten ennen, vaikka ylittaisi rajan
+            iso = json.dumps({"type": "result", "x": "a" * 3000, "usage": {"input_tokens": 9}})
+            self.assertGreater(len(iso), raja)
+            self.assertEqual(kulutus.claude_luvut(iso), {"tokenit_in": 9})
+            # rivipohjainen virta ilman loppuoliota rajan ylittyessa: vakiosyy liian_suuri
+            self.assertEqual(kulutus.claude_luvut("\n".join(['{"type":"assistant","x":"' + "a" * 400 + '"}'] * 20)),
+                             {"jasennysvirhe": "liian_suuri"})
 
     def test_kirjaus_ja_malleittain_ja_rivi(self):
         k = lambda malli_, usd, ok=True, paivia=1: kulutus.kirjaa(

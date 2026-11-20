@@ -10,7 +10,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from claudejono import ajuri
+from claudejono import ajuri, kulutus
 
 
 def git(hak, *a):
@@ -184,6 +184,44 @@ class Tulkinta(unittest.TestCase):
         self.assertFalse(ajuri.tulkitse(json.dumps({"subtype": "error_max_turns", "is_error": True}), 1)[0])
         self.assertFalse(ajuri.tulkitse("ei json", 0)[0])
         self.assertFalse(ajuri.tulkitse(json.dumps({"subtype": "success", "result": "x"}), 2)[0])
+
+
+def _virta(*rivit):
+    return "\n".join(json.dumps(r) for r in rivit) + "\n"
+
+
+def _viesti(teksti):
+    return {"type": "assistant", "message": {"content": [{"type": "text", "text": teksti}]}}
+
+
+class TulkintaVirta(unittest.TestCase):
+    RAPORTTI = "# Raportti\n\nTehty, PR #262 auki.\n\n## Tonylle opittavaa\nJotain."
+    LOPPU = {"type": "result", "subtype": "success", "is_error": False, "result": "Ilmoitus koskee vanhaa monitoria."}
+
+    def test_raportti_ja_lyhyt_jalkiviesti_valitaan_raportti(self):
+        ulos = _virta({"type": "system"}, _viesti(self.RAPORTTI), _viesti("Ilmoitus koskee vanhaa monitoria."), self.LOPPU)
+        self.assertEqual(ajuri.tulkitse(ulos, 0), (True, self.RAPORTTI))
+
+    def test_yksi_viesti_toiminta_ennallaan(self):
+        loppu = dict(self.LOPPU, result="vastaus")
+        self.assertEqual(ajuri.tulkitse(_virta(_viesti("vastaus"), loppu), 0), (True, "vastaus"))
+        # vanha yksittainen json-tuloste toimii edelleen
+        self.assertEqual(ajuri.tulkitse(json.dumps(loppu), 0), (True, "vastaus"))
+        # itsesuunnittelun JSON-olio kelpaa raportiksi
+        vastaus = '{"tehtavat": []}'
+        self.assertEqual(ajuri.tulkitse(_virta(_viesti(vastaus), _viesti("ok"), self.LOPPU), 0), (True, vastaus))
+
+    def test_lukukelvoton_virta_epaonnistuu(self):
+        self.assertFalse(ajuri.tulkitse("roskaa\nvaan roskaa\n", 0)[0])
+        self.assertFalse(ajuri.tulkitse(_virta(_viesti(self.RAPORTTI)), 0)[0])   # ei loppuoliota
+        virhe = dict(self.LOPPU, subtype="error_max_turns", is_error=True)
+        ok, teksti = ajuri.tulkitse(_virta(_viesti(self.RAPORTTI), virhe), 1)
+        self.assertFalse(ok)                                                       # virhetila ei muutu
+        self.assertEqual(teksti, "Ilmoitus koskee vanhaa monitoria.")
+
+    def test_kulutusluvut_luetaan_virran_loppuoliosta(self):
+        loppu = dict(self.LOPPU, total_cost_usd=0.5, usage={"input_tokens": 3})
+        self.assertEqual(kulutus.claude_luvut(_virta(_viesti("x"), loppu)), {"tokenit_in": 3, "usd": 0.5})
 
 
 class Komento(unittest.TestCase):
