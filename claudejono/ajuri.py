@@ -119,6 +119,33 @@ def kelvollinen_nimi(nimi):
     return bool(TEHTAVA_RE.match(nimi))
 
 
+PILVI_OTSAKE_RE = re.compile(r"^\s*<!--\s*pilvi-Claude\b", re.IGNORECASE)
+
+
+def pilvinimen_virhe(polku):
+    """Syy (str), jos pilvi-Clauden tehtavan nimessa on osa 'auto', muuten None. Pilvi-Clauden tehtava tunnistetaan
+    tiedoston alun otsakekommentista '<!-- pilvi-Claude ...'. Vika 18.11.2026: tehtava 2026-11-18-34-auto-max-paiva-60.md
+    laskettiin ajurin itsesuunnittelemaksi (auto_tanaan, glob <pvm>-*-auto-*.md), joten se kulutti paivapaikan ja jono seisoi 3,5 h."""
+    nimi = Path(polku).name
+    if not kelvollinen_nimi(nimi) or "auto" not in nimi[14:-3].lower().split("-"):
+        return None
+    try:
+        with open(polku, "rb") as f:
+            alku = f.read(2000).decode("utf-8", "replace")
+    except OSError:
+        return None
+    rivit = [r for r in alku.splitlines() if r.strip()][:3]
+    if any(PILVI_OTSAKE_RE.match(r) for r in rivit):
+        return ("nimessa on osa 'auto', mutta tehtava on pilvi-Clauden kirjoittama: ajuri laskisi sen itsesuunnitelluksi "
+                "(<pvm>-*-auto-*.md) ja se veisi paivapaikan. Nimea tiedosto ilman osaa 'auto'")
+    return None
+
+
+def kelvollinen_tehtava(polku):
+    """Kelvollinen nimi eika pilvi-Clauden auto-nimea (pilvinimen_virhe)."""
+    return kelvollinen_nimi(Path(polku).name) and pilvinimen_virhe(polku) is None
+
+
 def seuraava_tehtava(repo):
     """Vanhin (nimen mukaan) kelvollinen tehtava, jolla ei ole tulosta. None jos jono on tyhja."""
     teht = Path(repo) / JONO / "tehtavat"
@@ -126,7 +153,7 @@ def seuraava_tehtava(repo):
     if not teht.is_dir():
         return None
     for p in sorted(teht.iterdir()):
-        if p.is_file() and kelvollinen_nimi(p.name) and not (tul / p.name).exists():
+        if p.is_file() and kelvollinen_tehtava(p) and not (tul / p.name).exists():
             return p
     return None
 
@@ -258,7 +285,7 @@ def avoimet_tehtavat(repo, tila, nyt=None, vanhenee_s=OLETUS_AIKARAJA_S + VARAUS
         return 0
     varatut = set(aktiiviset_varaukset(tila, nyt, vanhenee_s))
     return sum(1 for p in teht.iterdir()
-               if p.is_file() and kelvollinen_nimi(p.name) and not (tul / p.name).exists() and p.name not in varatut
+               if p.is_file() and kelvollinen_tehtava(p) and not (tul / p.name).exists() and p.name not in varatut
                and tavoite.luokittele(p)[0] is not None)   # ilman Tavoite-riviae hylatty tehtava ei tayta jonoa
 
 
@@ -302,7 +329,7 @@ def odottavat_tehtavat(repo):
     tul = Path(repo) / JONO / "tulokset"
     if not teht.is_dir():
         return []
-    return [p for p in sorted(teht.iterdir()) if p.is_file() and kelvollinen_nimi(p.name) and not (tul / p.name).exists()]
+    return [p for p in sorted(teht.iterdir()) if p.is_file() and kelvollinen_tehtava(p) and not (tul / p.name).exists()]
 
 
 NIMIVAROITUKSET = "nimivaroitukset.json"
@@ -317,7 +344,7 @@ def kelvottomat_tehtavat(repo):
         return []
     return [p.name for p in sorted(teht.iterdir())
             if p.is_file() and p.suffix.lower() == ".md" and p.name.lower() != "readme.md"
-            and not kelvollinen_nimi(p.name) and not (tul / p.name).exists()]
+            and not kelvollinen_tehtava(p) and not (tul / p.name).exists()]
 
 
 def varoita_kelvottomista(repo, tila, laheta):
@@ -337,6 +364,10 @@ def varoita_kelvottomista(repo, tila, laheta):
     teksti = ("claude-jono OHITTAA tehtavan, nimi ei kelpaa: " + ", ".join(uudet[:5])
               + ("" if len(uudet) <= 5 else f" (+{len(uudet) - 5})")
               + "\nSallittu muoto: VVVV-KK-PP-NN-kirjaimet-numerot-viivat.md (a-z, A-Z, 0-9, -). Nimea tiedosto uudelleen.")
+    syyt = [f"{n}: {pilvinimen_virhe(Path(repo) / JONO / 'tehtavat' / n)}" for n in uudet[:5]
+            if pilvinimen_virhe(Path(repo) / JONO / "tehtavat" / n)]
+    if syyt:
+        teksti += "\n" + "\n".join(syyt)
     try:
         lahti = laheta(teksti)
     except Exception as virhe:  # ilmoituskanavan vika ei saa estaa kelvollisten tehtavien ajoa (tarkastus #265)

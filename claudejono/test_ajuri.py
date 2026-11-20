@@ -128,6 +128,37 @@ class KelvotonNimi(Pohja):
         self.assertTrue(any("OHITTAA" in v and "kiire poista" in v for v in viestit), viestit)
 
 
+class PilviAutoNimi(Pohja):
+    """Vika 18.11.2026: pilvi-Clauden tehtava 2026-11-18-34-auto-max-paiva-60.md laskettiin itsesuunnitelluksi ja jono seisoi."""
+    PILVI = "<!-- pilvi-Claude kirjoitti 18.11.2026 -->\n# Tehtava\n"
+
+    def test_pilvin_auto_nimi_hylataan_syyn_kanssa(self):
+        for nimi in ("2026-11-18-34-auto-max-paiva-60.md", "2026-11-18-35-max-auto.md", "2026-11-18-36-x-AUTO-y.md"):
+            p = self.lisaa_tehtava(nimi, self.PILVI)
+            self.assertIn("auto", ajuri.pilvinimen_virhe(p), nimi)
+            self.assertFalse(ajuri.kelvollinen_tehtava(p), nimi)
+        self.assertIsNone(ajuri.seuraava_tehtava(self.repo))
+        self.assertEqual(len(ajuri.kelvottomat_tehtavat(self.repo)), 3)
+
+    def test_itsesuunnittelijan_auto_nimi_kelpaa(self):
+        p = self.lisaa_tehtava("2026-11-18-34-auto-max-paiva-60.md", "# Tehtava\nSuunta: jatko\n")
+        self.assertIsNone(ajuri.pilvinimen_virhe(p))
+        self.assertEqual(ajuri.seuraava_tehtava(self.repo).name, p.name)
+        self.assertEqual(ajuri.kelvottomat_tehtavat(self.repo), [])
+
+    def test_pilvin_nimi_ilman_osaa_auto_kelpaa(self):
+        for nimi in ("2026-11-18-34-automerge-korjaus.md", "2026-11-18-35-max-paiva-60.md"):
+            p = self.lisaa_tehtava(nimi, self.PILVI)
+            self.assertIsNone(ajuri.pilvinimen_virhe(p), nimi)
+        self.assertEqual(ajuri.kelvottomat_tehtavat(self.repo), [])
+
+    def test_varoitus_kertoo_syyn(self):
+        self.lisaa_tehtava("2026-11-18-34-auto-max-paiva-60.md", self.PILVI)
+        viestit = []
+        ajuri.varoita_kelvottomista(self.repo, self.tmp, viestit.append)
+        self.assertTrue(viestit and "pilvi-Clauden" in viestit[0] and "auto-max-paiva-60" in viestit[0], viestit)
+
+
 class IsotKirjaimet(Pohja):
     """Vika 7.-8.11.2026: KIIRE-tehtavat 33, 13, 39 ja 55 seisoivat 1,5-2,7 h, koska kaava salli vain pienet kirjaimet."""
 
