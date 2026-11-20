@@ -355,6 +355,49 @@ Keskustelun pitää olla yksityisen tilan keskustelu. Työkalutilan keskustelull
 
 **Kehotteen taustapää.** Paikallisella mallilla kehote kertoo, että malli ajetaan Tonyn omalla koneella. OpenRouter-taustapäällä kehote kertoo, että käytössä on avoin malli OpenRouterin kautta nollasäilytyksellä (ZDR) ja että ulos lähtee vain kulloinenkin kehote (`aivo/yksityinen_or.py`, `KEHOTE`).
 
+## Luovutus yksityisestä tilasta työkalutilaan
+
+Tilojen välillä ei muuten ole siltaa. Luovutus on yksisuuntainen: yksityisessä tilassa sovittu teksti voidaan viedä työkalutilaan vasta, kun Tony on nähnyt sen ja hyväksynyt sen. Työkalutilasta yksityiseen ei kulje mitään. Säännöt sille, mitä luovutetaan ja miten teksti siivotaan, Tony ja Aivo sopivat ydinohjeisiin. Koodi rakentaa vain mekanismin (`aivo/luovutus.py`).
+
+**Ehdotus.** Ehdotus syntyy kahdella tavalla:
+
+- Aivon yksityisen tilan vastauksessa on lohko `[[LUOVUTUS]] teksti [[/LUOVUTUS]]`. Palvelin poistaa lohkon näkyvästä vastauksesta, tallentaa tekstin ehdotukseksi ja palauttaa tunnuksen kentässä `luovutukset`. Jos vastaus katkeaa ennen sulkevaa merkintää, mitään ei tallenneta.
+- Jokaisen yksityisen tilan viestin (Tonyn ja Aivon) alla on painike "Luovuta työkalutilaan". Palvelin ottaa tekstin omasta keskusteluhistoriastaan viestin indeksin perusteella, ei selaimen lähettämänä.
+
+Ehdotus tallentuu yksityiseen kansioon `/var/lib/aivo-yksityinen/luovutukset` (0700, tiedostot 0600) tunnuksen ja sha256-tiivisteen kanssa. Tonyn chat-viestiä ei koskaan tulkita lohkoksi. Työkalutilan vastauksen lohkoa ei tulkita lainkaan.
+
+**Laatikko.** Sivu näyttää laatikon, jossa lukee "Tämä teksti lähtee Clauden pilveen" ja jossa on täsmälleen lähtevä teksti muokattavassa kentässä. Painikkeet ovat "Lähetä työkalutilaan" ja "Hylkää".
+
+- Jos Tony muokkaa tekstiä, sivu tallentaa ensin muokkauksen (`/api/luovutus/muokkaa`). Muokattu teksti saa uuden sha:n, ja hyväksyntä sidotaan siihen. Vanhan sha:n vahvistus ei enää kelpaa (409).
+- "Lähetä työkalutilaan" kysyy vahvistuksen ja lähettää `kyllä <sha8>`. Palvelin hyväksyy vain täsmälleen tämän muodon, kuten ydinohjeiden ehdotuksissa.
+- "Hylkää" siirtää ehdotuksen alikansioon `hylatyt/`. Mitään ei poisteta.
+
+**Hyväksynnän järjestys.** (1) Vahvistus tarkistetaan tallennetun tekstin tiivistettä vasten. (2) Yksityiseen lokiin `luovutetut.jsonl` (0600) kirjataan aika, tunnus, sha ja teksti ennen kuin mitään lähtee. (3) Teksti kopioidaan sellaisenaan kirjaston tiedostoon `saapuneet/<tunnus>.md`, ja kirjasto commitoidaan ja pushataan samalla funktiolla kuin päätöskirjaus (`julkaise_kirjastoon`, vain sallitut etäpalvelimet). (4) Jos julkaisu heittää virheen, tiedosto poistetaan kirjastosta, virhe kirjataan lokiin ja ehdotus jää odottamaan. (5) Onnistuneen julkaisun jälkeen ehdotus siirretään alikansioon `hyvaksytyt/`. Pushin epäonnistuminen ei peru commitia; sivu kertoo tuloksen.
+
+**Työkalutila.** Työkalutilan kehotteessa on osio "SAAPUNEET LUOVUTUKSET": käsittelemättömät luovutukset sanasta sanaan, yhteensä enintään 20 000 tavua. Rajan yli jäävät mainitaan tunnuksella. Tiedosto, jonka tiiviste ei täsmää otsakeriviin (esim. käsin muutettu), jätetään pois ja mainitaan. Kansio `saapuneet/` ei tule kehotteeseen tavallisena muistina. Työkalutila lukee vain kirjaston `saapuneet/`-kansiota eikä koskaan yksityisiä kansioita.
+
+Linkki "Saapuneet" näyttää työkalutilassa käsittelemättömät luovutukset ja painikkeen "Merkitse käsitellyksi". Painike siirtää tiedoston kansioon `saapuneet/kasitellyt/` ja julkaisee muutoksen. Aivo ei voi merkitä luovutusta käsitellyksi itse, koska työkalutilalla ei ole työkaluja (itsenäinen käsittely on erillinen päätös, A1001).
+
+**Loki.** Linkki "Luovutetut" näyttää yksityisessä tilassa kaikki luovutetut tekstit (aika, tunnus, sha, tulos ja teksti) uusimmasta vanhimpaan.
+
+Reitit (kirjautuminen, `Host`, `X-Aivo` ja sama alkuperä tarkistetaan kuten muillakin `/api`-reiteillä):
+
+| Reitti | Tila | Kuvaus |
+|---|---|---|
+| `GET /api/luovutukset?keskustelu=ID` | yksityinen | odottavat ehdotukset: tunnus, sha8, lähde |
+| `GET /api/luovutus?keskustelu=ID&tunnus=T` | yksityinen | yhden ehdotuksen teksti ja sha8 |
+| `GET /api/luovutetut?keskustelu=ID` | yksityinen | loki |
+| `POST /api/luovutus/uusi` `{keskustelu, indeksi}` | yksityinen | ehdotus keskustelun viestistä |
+| `POST /api/luovutus/muokkaa` `{keskustelu, tunnus, teksti}` | yksityinen | uusi teksti ja uusi sha8 |
+| `POST /api/luovutus/hyvaksy` `{keskustelu, tunnus, vahvistus}` | yksityinen | vahvistus täsmälleen `kyllä <sha8>` |
+| `POST /api/luovutus/hylkaa` `{keskustelu, tunnus}` | yksityinen | siirto kansioon `hylatyt/` |
+| `GET /api/saapuneet?keskustelu=ID` | työkalu | käsittelemättömät luovutukset |
+| `POST /api/saapuneet/kasitelty` `{keskustelu, tunnus}` | työkalu | siirto kansioon `saapuneet/kasitellyt/` |
+
+Väärän tilan keskustelulle reitit vastaavat 404. Tunnus on aina 12 heksamerkkiä, joten polkuja (`../`) ei hyväksytä. Kaikki teksti lisätään sivulle `textContent`- tai `value`-ominaisuudella.
+
+**Käyttöönotto.** Kansio luodaan automaattisesti yksityisen datan viereen (`--luovutukset` tai `AIVO_LUOVUTUKSET` vaihtaa polun). Jos palvelu ei saa luoda sitä, luo se itse: `sudo install -d -m 700 -o aivo-yksityinen -g aivo-yksityinen /var/lib/aivo-yksityinen/luovutukset`. Chat-palvelun käyttäjällä pitää olla kirjoitusoikeus kirjastoon, kuten päätöskirjauksessakin.
+
 ## Asennuksen tilatarkistus (vain luku)
 
 Päivityksen jälkeen kontissa 122 yksi komento kertoo, onko asennus kunnossa. Anna argumenttina odotettu commit (`git rev-parse HEAD` agentti-pohjan kloonista, jonka PR on mergattu):
@@ -381,7 +424,7 @@ Valinnat `--koodi` (oletus `/opt/agentti-pohja`) ja `--portti` (oletus 8780) vai
 ## Testit
 
 ```
-python3 -m unittest aivo.test_chat aivo.test_tiivista aivo.test_kalenteri_kytkenta aivo.test_yksityinen_hyvaksynta aivo.test_tarkista_asennus
+python3 -m unittest aivo.test_chat aivo.test_tiivista aivo.test_kalenteri_kytkenta aivo.test_yksityinen_hyvaksynta aivo.test_luovutus aivo.test_tarkista_asennus
 ```
 
 Testit kattavat salasanan tiivisteen ja lukituksen, osoite- ja Host-rajat, CSRF-suojan, muistin lukemisen (ei linkkejä kirjaston ulkopuolelle), lähdeviitteiden tarkistuksen, päätöksen kirjaamisen sanasta sanaan, GitHub-pushin eston ja sen, että Claude-kutsu ei käytä työkaluja eikä välittäjiä.

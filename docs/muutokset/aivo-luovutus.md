@@ -1,0 +1,1 @@
+- aivo: hyväksytty luovutus yksityisestä tilasta työkalutilaan (`[[LUOVUTUS]]`-lohko tai painike, sha-sidottu hyväksyntä, kopio kirjaston kansioon `saapuneet/`, loki yksityiseen kansioon)

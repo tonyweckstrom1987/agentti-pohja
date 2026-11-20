@@ -70,6 +70,10 @@ S\u00e4\u00e4nn\u00f6t:
 5. Kun Tonyn vastaus on valinta muutamasta vaihtoehdosta, lis\u00e4\u00e4 vastauksen aivan viimeiselle riville merkint\u00e4
    [[VALINNAT: vaihtoehto 1 | vaihtoehto 2 | vaihtoehto 3]] (2\u20136 vaihtoehtoa, kukin enint\u00e4\u00e4n 80 merkki\u00e4, ei
    merkkej\u00e4 [ ] tai |). Muuten esit\u00e4 tavallinen kysymys ilman merkint\u00e4\u00e4.
+6. Voit ehdottaa tekstin luovuttamista ty\u00f6kalutilaan (Claude pilvess\u00e4) vain t\u00e4ss\u00e4 muodossa:
+   [[LUOVUTUS]] teksti [[/LUOVUTUS]]. Lohko on vain ehdotus: Tony n\u00e4kee tekstin, voi muokata sit\u00e4 ja hyv\u00e4ksyy
+   luovutuksen itse painikkeella. Sin\u00e4 et voi l\u00e4hett\u00e4\u00e4 mit\u00e4\u00e4n itse. Noudata ydinohjeiden luovutuss\u00e4\u00e4nt\u00f6j\u00e4.
+   Jos niit\u00e4 ei ole, \u00e4l\u00e4 ehdota luovutusta ennen kuin Tony pyyt\u00e4\u00e4.
 """
 
 
