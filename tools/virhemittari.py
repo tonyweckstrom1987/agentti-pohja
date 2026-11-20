@@ -28,15 +28,25 @@ from pathlib import Path
 
 OTSIKKO_ALKU = "## Virhemittari"
 LUOKAT = ("1", "2", "3", "4", "?")
+# Ei virhe: KESKEN, jossa raportti itse kertoo, ettei todennus ollut mahdollinen (ei luokkaa 1-4, oma sarake).
+MAHDOTON = "0"
+LUOKAT_KAIKKI = LUOKAT + (MAHDOTON,)
 LUOKKA_OTSIKOT = {
     "1": "1 tehty \u2260 toimii",
     "2": "2 muistista, ei l\u00e4hteest\u00e4",
     "3": "3 v\u00e4\u00e4r\u00e4 oletus ymp\u00e4rist\u00f6st\u00e4",
     "4": "4 muu",
     "?": "luokittelematon",
+    MAHDOTON: "KESKEN: todennus mahdoton",
 }
 # Epaonnistumisen syy ajon tekstissa: resurssiraja tai ajuri, ei kolmea juurisyyta -> 4 muu.
 RAJA_RE = re.compile(r"aikakatkaisu|error_max_turns|kierrosraja|lukukelvoton", re.I)
+# KESKEN, jonka raportti itse sanoo todennuksen olleen mahdoton (kehote: rivi jatetaan pois, tila KESKEN on oikein).
+# Konservatiivinen: vain nama ilmaukset; kielteinen ("oli mahdollinen"), lainaus, koodi ja sitaattirivi eivat riita.
+TODENNUS_MAHDOTON_RE = re.compile(
+    r"\bei todennettu\b[^\n]{0,150}?\brajattu pois\b|\btodennus ei ollut mahdollinen\b"
+    r"|\bymp[a\u00e4]rist[o\u00f6] ei salli\b", re.I)
+_LAINAUS_RE = re.compile(r"```.*?```|`[^`\n]*`|\"[^\"\n]*\"|\u201c[^\u201d\n]*\u201d|'[^'\n]*'", re.S)
 
 # Vanhat virhelokin merkinnat: (tunnistava ASCII-osa merkinnan tekstista, luokka). Perusteet:
 # virheiden-ehkaisy.md luettelee tapaukset luokkiin 1-3; muut luokitellaan vain jos merkinnan oma Syy-teksti
@@ -204,8 +214,17 @@ def lue_tulos(teksti):
     return (tila.group(1), paiva, teksti) if paiva else None
 
 
+def todennus_mahdoton(teksti):
+    """True, jos raportin oma teksti (ilman lainauksia, koodia ja sitaattirivien) sanoo todennuksen olleen mahdoton."""
+    ilman = _LAINAUS_RE.sub(" ", teksti)
+    ilman = "\n".join(r for r in ilman.splitlines() if not r.lstrip().startswith(">"))
+    return bool(TODENNUS_MAHDOTON_RE.search(ilman))
+
+
 def luokittele_ajo(tila, teksti):
     if tila == "KESKEN":
+        if todennus_mahdoton(teksti):
+            return MAHDOTON
         # Ajuri (claudejono/ajuri.py, on_todennettu) asettaa KESKEN vain, kun raportissa ei ole kelvollista
         # "Todennettu kaytossa: miten" -rivia: tehty != toimii. Siksi KESKEN on aina luokka 1.
         return "1"
@@ -221,7 +240,7 @@ def laske(loki_teksti, tulokset, nyt, tehtavat=None):
 
     def rivi(v):
         return viikot.setdefault(v, {
-            "loki": 0, "ajot": 0, "luokat": dict.fromkeys(LUOKAT, 0), "merkinnat": [],
+            "loki": 0, "ajot": 0, "luokat": dict.fromkeys(LUOKAT_KAIKKI, 0), "merkinnat": [],
             "tunnit": [], "kuka": dict.fromkeys(HAVAITSIJAT, 0), "ehkaisy": dict.fromkeys(EHKAISYT, 0),
             "tehtavia": 0 if tehtavat is not None else None})
 
@@ -249,7 +268,8 @@ def laske(loki_teksti, tulokset, nyt, tehtavat=None):
         r = rivi(viikko(t[1]))
         r["ajot"] += 1
         r["luokat"][luokka] += 1
-        r["kuka"][TUNTEMATON] += 1  # ajurin tilasta ei nay, kuka virheen havaitsi
+        if luokka != MAHDOTON:
+            r["kuka"][TUNTEMATON] += 1  # ajurin tilasta ei nay, kuka virheen havaitsi
         n_ajot += 1
     for paiva in tehtavat or []:
         rivi(viikko(paiva))["tehtavia"] += 1
@@ -264,7 +284,8 @@ def laske(loki_teksti, tulokset, nyt, tehtavat=None):
             paiva += datetime.timedelta(days=7)
     jarj = sorted(viikot)
     for i, v in enumerate(jarj):
-        viikot[v]["yht"] = viikot[v]["loki"] + viikot[v]["ajot"]
+        # Virheita: ei lasketa KESKEN-ajoja, joissa todennus oli mahdoton (ne eivat ole virhe).
+        viikot[v]["yht"] = viikot[v]["loki"] + viikot[v]["ajot"] - viikot[v]["luokat"][MAHDOTON]
         viikot[v]["toisto"] = toisto(viikot, jarj, i)
         viikot[v]["mediaani_h"] = mediaani(viikot[v]["tunnit"])
         viikot[v]["per10"] = (viikot[v]["yht"] * 10.0 / viikot[v]["tehtavia"]
@@ -319,7 +340,7 @@ def luku(x):
 
 def muodosta_osio(rivit, tilastot, nyt):
     ot = ["Viikko", "Virheit\u00e4", "Virhelokissa", "Ajoissa (EP\u00c4ONNISTUI/KESKEN)"]
-    ot += [LUOKKA_OTSIKOT[k] for k in LUOKAT]
+    ot += [LUOKKA_OTSIKOT[k] for k in LUOKAT_KAIKKI]
     ot.append("Toistuiko sama juurisyy")
     ot += ["Toistuneet: ehk\u00e4isy " + e for e in EHKAISYT]
     ot.append("Havaitsemisaika, mediaani (h)")
@@ -330,7 +351,7 @@ def muodosta_osio(rivit, tilastot, nyt):
            "| " + " | ".join(ot) + " |", "|" + "---|" * len(ot)]
     for v, r in rivit:
         solut = [viikko_nimi(v, nyt), str(r["yht"]), str(r["loki"]), str(r["ajot"])]
-        solut += [str(r["luokat"][k]) for k in LUOKAT]
+        solut += [str(r["luokat"][k]) for k in LUOKAT_KAIKKI]
         solut.append(r["toisto"])
         solut += [str(r["ehkaisy"][e]) for e in EHKAISYT]
         solut.append(luku(r["mediaani_h"]))
@@ -340,7 +361,9 @@ def muodosta_osio(rivit, tilastot, nyt):
     out += ["",
             "Luokitus: virhelokin merkinn\u00e4t `virheiden-ehkaisy.md`:n kolmen juurisyyn mukaan; jos luokkaa ei n\u00e4e, "
             "merkint\u00e4 on luokittelematon (ei arvata). Ajoista KESKEN (ei kelvollista \"Todennettu k\u00e4yt\u00f6ss\u00e4\" -rivi\u00e4) on luokka 1 "
-            "(4.11. l\u00f6ydetty juurisyy), EP\u00c4ONNISTUI aikakatkaisun tai kierrosrajan takia on luokka 4. Sama juurisyy "
+            "(4.11. l\u00f6ydetty juurisyy), paitsi jos raportti itse kertoo, ettei todennus ollut mahdollinen: se lasketaan "
+            "sarakkeeseen \"KESKEN: todennus mahdoton\", mukaan sarakkeeseen Ajoissa mutta ei virheisiin, luokkaan 1 eik\u00e4 toistolaskentaan; "
+            "EP\u00c4ONNISTUI aikakatkaisun tai kierrosrajan takia on luokka 4. Sama juurisyy "
             "kahtena viikkona: korjausehdotus koodiin; kolmantena: Tonylle (A8).",
             "",
             "Lis\u00e4mittarit (Tonyn p\u00e4\u00e4t\u00f6s 11.11.2026): ehk\u00e4isy (koodi/ohje/ei viel\u00e4) lasketaan vain toistuneiden "
