@@ -162,6 +162,7 @@ except Exception:
 SYY=""
 PR=""
 TESTIT="ei ajettu"
+TODENNUS=""
 MUUTOKSET=$(git status --porcelain --untracked-files=all)
 
 if [ -n "$OHITETTU" ]; then
@@ -189,13 +190,34 @@ else
     if [ -n "$VAARAT" ]; then
       SYY="muutos aiheen ($AIHE) ulkopuolella:$VAARAT : PR:aa ei avattu"
     elif testaa > "$TMP/testit.log" 2>&1; then
-      # Python-repoissa "Ran N tests" on pakollinen: nolla testia tai puuttuva rivi ei ole vihrea (npm-repoissa lukumaaraa ei lueta).
-      LKM=$(grep -Eo '^Ran [0-9]+ tests?' "$TMP/testit.log" | tail -n 1 | grep -Eo '[0-9]+' || true)
-      if [ ! -f package.json ] && [ "${LKM:-0}" -eq 0 ]; then
-        TESTIT="punainen (ei testeja kloonista)"
-        SYY="ei testeja kloonista: PR:aa ei avattu"
+      # Testien lukumaara luetaan ajon omasta lokista. Python: "Ran N tests"; npm: vitest/jest "Tests N passed" tai node:test "# pass N".
+      # Nolla tai lukematon maara ei ole vihrea eika anna todennusrivia (Python-repoissa se on pakollinen, npm-repoissa rivin ehto).
+      if [ -f package.json ]; then
+        LKM=$(sed 's/\x1b\[[0-9;]*m//g' "$TMP/testit.log" | grep -Eo '^[[:space:]]*(Tests[: ]+[0-9]+ passed|# pass [0-9]+)' | tail -n 1 | grep -Eo '[0-9]+' | tail -n 1 || true)
+        # Testikomento otetaan repon omasta maarittelysta (package.json scripts.test), ei arvata.
+        TESTIKOMENTO=$("$PYTHON" -c "import json,sys
+try:
+    t = json.load(open('package.json')).get('scripts', {}).get('test', '')
+    print(''.join(c for c in t if c.isprintable())[:80].strip() if isinstance(t, str) else '')
+except Exception:
+    print('')" || true)
+        [ -n "$TESTIKOMENTO" ] && TESTIKOMENTO="npm test ($TESTIKOMENTO)"
       else
-        TESTIT="vihrea${LKM:+, $LKM testia} ($(tail -n 3 "$TMP/testit.log" | tr '\n' ' ' | cut -c1-120))"
+        LKM=$(grep -Eo '^Ran [0-9]+ tests?' "$TMP/testit.log" | tail -n 1 | grep -Eo '[0-9]+' || true)
+        # Todellinen ajettu komento on testaa()-funktion PY_TESTAA (unittest discover, test_*.py kloonin juuressa).
+        TESTIKOMENTO="python3 -m unittest discover -p test_*.py"
+      fi
+      if [ "${LKM:-0}" -eq 0 ]; then
+        TESTIT="punainen (ei testeja kloonista)"
+        SYY="ei testeja kloonista (maara 0 tai lukematon): PR:aa ei avattu"
+      elif [ -z "$TESTIKOMENTO" ]; then
+        TESTIT="punainen (testikomentoa ei loydy repon maarittelysta)"
+        SYY="testikomentoa ei loydy repon maarittelysta: PR:aa ei avattu"
+      else
+        TESTIT="vihrea, $LKM testia ($(tail -n 3 "$TMP/testit.log" | tr '\n' ' ' | cut -c1-120))"
+        # Koodiportti (pr_kutsu tarkista_todennus) vaatii kuvaukseen rivin "Todennettu kaytossa: miten". Rivi muodostetaan vain
+        # tassa haarassa: testit ajettiin, menivat lapi, maara > 0 ja komento on repon omasta maarittelysta.
+        TODENNUS="Todennettu kaytossa: $TESTIKOMENTO kloonissa, $LKM testia, rc=0"
       fi
     else
       TESTIT="punainen ($(tail -n 3 "$TMP/testit.log" | tr '\n' ' ' | cut -c1-120))"
@@ -222,8 +244,9 @@ if [ -z "$SYY" ]; then
   git -c user.name=yojono -c user.email=yojono@localhost -c core.hooksPath=/dev/null commit -q -m "yojono: $AIHE ($PVM)"
   {
     echo "Yojonon automaattinen kehitystehtava: $AIHE ($PVM)."
-    echo "Testit: vihrea. Automerge yhdistaa itse, kun CI on vihrea ja muutos on sallituilla poluilla; muuten se jaa ihmisen katselmoitavaksi."
+    echo "Testit: vihrea. Todennusrivi ei yksin yhdista mitaan: automerge vaatii riippumattoman tarkastajan hyvaksynnan, vihrean CI:n ja sallitut polut; muuten PR jaa ihmisen katselmoitavaksi."
     git diff --stat HEAD~1 | tail -n 15
+    if [ -n "$TODENNUS" ]; then echo; echo "$TODENNUS"; fi
   } > "$TMP/kuvaus.txt"
   if [ -n "$KUIVA" ]; then
     if ( cd "$AJURI" && python3 -B -m agentti.pr_kutsu tarkista "$REPO" "$TMP/klooni" "$HAARA" ) > "$TMP/tarkista.log" 2>&1; then
