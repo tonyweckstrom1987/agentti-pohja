@@ -191,6 +191,28 @@ def valitse_ajettavat(tehtavat, tila, pvm):
 
 
 RAPORTTI_MIN_KOKO = 200
+# Katselmointiraportti alkaa otsikolla "# ..." (katselmoi.sh:n kehote). Jos otsikko puuttuu, claude -p:n `result` sisaltaa todennakoisesti vain
+# raportin loppuosan (11/2026: 10.11. ja 15.11. alkoivat kesken lauseen). Raporttia ei hylata (kulu on jo syntynyt, osa loydoksista nakyy),
+# vaan sen alkuun lisataan merkinta ja yhteenvetoon sana VAJAA.
+VAJAA_MERKKI = "> VAJAA:"
+
+
+def merkitse_vajaa_katselmointi(md_polku):
+    """Lisaa katselmointiraportin alkuun VAJAA-merkinnan, jos ensimmainen ei-tyhja rivi ei ole `# `-otsikko. Palauttaa True, jos raportti on vajaa.
+    Virhe tiedoston kasittelyssa ei kaada ajoa (palauttaa False)."""
+    try:
+        polku = Path(md_polku)
+        teksti = polku.read_text(encoding="utf-8")
+        eka = next((r.strip() for r in teksti.splitlines() if r.strip()), "")
+        if eka.startswith(VAJAA_MERKKI):
+            return True
+        if eka.startswith("# "):
+            return False
+        polku.write_text(f"{VAJAA_MERKKI} raportista puuttuu otsikko, joten sen alku on todennakoisesti kadonnut "
+                         "(claude palautti vain viimeisen tekstiosan). Tarkista loydokset uudella ajolla.\n\n" + teksti, encoding="utf-8")
+        return True
+    except (OSError, ValueError):
+        return False
 MALLI_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,39}$")
 
 
@@ -299,6 +321,8 @@ def suorita_katselmointi(tehtava, pvm, perus, skripti, aikaraja=TEHTAVA_AIKARAJA
     ok = koodi == 0 and md_polku.exists() and paivittyi
     tyhja = ok and tyyppi != "kehitys" and md_polku.stat().st_size < RAPORTTI_MIN_KOKO
     if ok and not tyhja:
+        if tyyppi == "katselmointi" and merkitse_vajaa_katselmointi(md_polku):
+            return Tulos(True, kulu, str(md_polku), "ok (raportti vajaa: otsikko puuttuu)")
         return Tulos(True, kulu, str(md_polku), "ok")
     if tyhja:  # tyhja raportti ei ole tulos: ei merkita valmiiksi, yritys kuluu (kulu on jo syntynyt)
         syy, virhekoodi = f"raportti tyhja tai liian lyhyt (<{RAPORTTI_MIN_KOKO} tavua)", "raportti_tyhja"
@@ -333,6 +357,9 @@ def raportin_lisatiedot(tyyppi, md_polku):
         if pr.startswith("http"):
             return f" PR {pr}"
         return " EI PR:AA" + (f" ({syy[:120]})" if syy else "")
+    if tyyppi == "katselmointi":
+        eka = next((r.strip() for r in rivit if r.strip()), "")
+        return " VAJAA (raportin alku puuttuu)" if eka.startswith(VAJAA_MERKKI) else ""
     if tyyppi == "tarkkailu":
         parhaat = [re.sub(r"^\d+[.)]\s*", "", r.strip().lstrip("-*# "))[:160] for r in rivit if "PARAS" in r][:3]
         return "\n    " + "\n    ".join(parhaat) if parhaat else ""

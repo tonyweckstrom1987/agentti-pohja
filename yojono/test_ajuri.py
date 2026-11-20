@@ -287,6 +287,45 @@ class TestKatselmointiSkripti(Pohja):
         self.assertEqual((self.perus / "argumentit").read_text().strip(), "mcp-homelab 2.00")
         self.assertTrue(tulos.raportti.endswith(f"{PVM}-mcp-homelab.md"))
 
+    def _md_skripti(self, md):
+        (self.perus / "md.txt").write_text(md, encoding="utf-8")
+        return self.skripti(f'echo \'{{"total_cost_usd": 0.5}}\' > "{self.perus}/raportit/{PVM}-$1.json"\n'
+                            f'cp "{self.perus}/md.txt" "{self.perus}/raportit/{PVM}-$1.md"\n')
+
+    def test_katselmointi_ilman_otsikkoa_merkitaan_vajaaksi(self):
+        """15.11.2026: claude -p palautti vain raportin lopun (alkoi "ilman virhekoodia, ja varaus jaa...", loydokset 1-8 puuttuivat)."""
+        katkennut = "ilman virhekoodia, ja varaus jaa pessimistisena voimaan (`portti.py:259`).\n" + "9. Matala: x\n" * 30
+        tulos = ajuri.suorita_katselmointi(t("a", repo="agentti-pohja"), PVM, self.perus, self._md_skripti(katkennut))
+        self.assertTrue(tulos.ok)  # osa loydoksista on silti luettavissa, kulu on syntynyt: ei hylata
+        self.assertIn("vajaa", tulos.viesti)
+        md = Path(tulos.raportti).read_text(encoding="utf-8")
+        self.assertTrue(md.startswith(ajuri.VAJAA_MERKKI))
+        self.assertTrue(md.endswith(katkennut))  # alkuperainen teksti sailyy
+        self.assertIn("VAJAA", ajuri.raportin_lisatiedot("katselmointi", tulos.raportti))
+        # toinen kasittely ei lisaa merkintaa uudelleen
+        self.assertTrue(ajuri.merkitse_vajaa_katselmointi(tulos.raportti))
+        self.assertEqual(Path(tulos.raportti).read_text(encoding="utf-8").count(ajuri.VAJAA_MERKKI), 1)
+
+    def test_katselmointi_otsikolla_ei_ole_vajaa(self):
+        ehja = "\n# Koodikatselmointi: ai-pr-reviewer-action\n\n" + "1. Korkea: x\n" * 30
+        tulos = ajuri.suorita_katselmointi(t("a", repo="ai-pr-reviewer-action"), PVM, self.perus, self._md_skripti(ehja))
+        self.assertTrue(tulos.ok)
+        self.assertEqual(tulos.viesti, "ok")
+        self.assertEqual(Path(tulos.raportti).read_text(encoding="utf-8"), ehja)
+        self.assertEqual(ajuri.raportin_lisatiedot("katselmointi", tulos.raportti), "")
+
+    def test_vajaa_tarkistus_ei_koske_ideointia(self):
+        s = self.skripti(f'echo \'{{"total_cost_usd": 0.3}}\' > "{self.perus}/raportit/{PVM}-ideointi-$1.json"\n'
+                         f'yes raportti | head -n 40 > "{self.perus}/raportit/{PVM}-ideointi-$1.md"\n')
+        tulos = ajuri.suorita_katselmointi(dict(t("i", repo="agenttifirma", budjetti=1.0), tyyppi="ideointi"), PVM, self.perus, s)
+        self.assertTrue(tulos.ok)
+        self.assertFalse(Path(tulos.raportti).read_text(encoding="utf-8").startswith(ajuri.VAJAA_MERKKI))
+
+    def test_katselmointikehote_vaatii_otsikon_ja_yhden_viestin(self):
+        kehote = (Path(__file__).resolve().parent / "katselmoi.sh").read_text(encoding="utf-8")
+        self.assertIn("# Koodikatselmointi:", kehote)
+        self.assertIn("yhteen viimeiseen viestiin", kehote)
+
     def test_ideointi_raportti_on_nimetty_tyypin_mukaan(self):
         s = self.skripti(f'echo \'{{"total_cost_usd": 0.3}}\' > "{self.perus}/raportit/{PVM}-ideointi-$1.json"\n'
                          f'yes raportti | head -n 40 > "{self.perus}/raportit/{PVM}-ideointi-$1.md"\n')
