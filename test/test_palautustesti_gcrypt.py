@@ -17,7 +17,9 @@ SKRIPTI = JUURI / "isanta" / "palautustesti-gcrypt.sh"
 RCLONE = """#!/bin/bash
 echo "$*" >> "$VALE_LOKI"
 case "$1" in
-  listremotes) echo "${VALE_TYYPPI-gcrypt: crypt}"; exit 0 ;;
+  listremotes) echo "${VALE_TYYPPI-gcrypt: crypt}"
+    for ((i = 0; i < ${VALE_LISAKOHTEET:-0}; i++)); do echo "muu$i: drive"; done
+    exit ${VALE_LR_KOODI:-0} ;;
   lsf) cat "$VALE_LISTA"; exit ${VALE_LSF_KOODI:-0} ;;
   copyto)
     lahde="${@: -2:1}"; kohde="${@: -1}"
@@ -178,6 +180,15 @@ class Virheet(Pohja):
         r = self.aja(VALE_TYYPPI="gcrypt: drive")
         self.assert_epaonnistui(r, "ei ole crypt-tyyppinen")
         self.assertFalse([x for x in self.rclone_kutsut() if x.startswith("copyto")])
+
+    def test_crypt_loytyy_vaikka_kohteita_on_paljon(self):
+        # grep -q lopettaa lukemisen osumaan; ennen korjausta rclone sai SIGPIPEn (141) ja pipefail kaatoi ajon.
+        r = self.aja(VALE_LISAKOHTEET="20000")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertTrue([x for x in self.rclone_kutsut() if x.startswith("copyto")])
+
+    def test_listremotes_epaonnistuu(self):
+        self.assert_epaonnistui(self.aja(VALE_LR_KOODI="1"), "rclone listremotes epaonnistui")
 
     def test_listaus_epaonnistuu(self):
         self.assert_epaonnistui(self.aja(VALE_LSF_KOODI="3"), "listaus kohteesta epaonnistui")

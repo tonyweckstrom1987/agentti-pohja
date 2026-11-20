@@ -117,10 +117,12 @@ PERUSNIMET=$(printf '%s\n' "${TIEDOSTOT[@]:-}" \
 
 # Vaaditut tunnukset (esim. Gitea = 113) on oltava mukana, muuten kopio on hiljaa vajaa.
 PUUTTUVAT=""
+TIEDOSTOLISTA=$(printf '%s\n' "${TIEDOSTOT[@]:-}")
 for id in $VAADITUT_KONTIT; do
   [[ "$id" =~ ^[0-9]+$ ]] || { loki "VAADITUT_KONTIT ei kelpaa: $id"; exit 1; }
   # Vain varsinainen arkisto kelpaa (pelkka .log epaonnistuneesta ajosta ei riita).
-  printf '%s\n' "${TIEDOSTOT[@]:-}" | grep -qE "^vzdump-(lxc|qemu)-$id-[0-9_-]+\.(tar|vma)(\.(zst|gz|lzo))?\$" \
+  # Ei putkea: grep -q lopettaa lukemisen osumaan, ja pipefail tulkitsisi printf:n SIGPIPEn (141) puutteeksi.
+  grep -qE "^vzdump-(lxc|qemu)-$id-[0-9_-]+\.(tar|vma)(\.(zst|gz|lzo))?\$" <<<"$TIEDOSTOLISTA" \
     || PUUTTUVAT="$PUUTTUVAT $id"
 done
 
@@ -148,7 +150,12 @@ BASE=("$RCLONE" --bwlimit "$BWLIMIT" --log-file "$LOKI" --log-level NOTICE --sta
 # Salaus ennen siirtoa: kohteen on oltava rclone crypt -tyyppinen. Pelkka Drive-kohde veisi
 # dumpit selkokielisina, joten silloin ei siirreta mitaan. (listremotes ei tulosta salaisuuksia.)
 KOHDE_NIMI="${REMOTE%%:*}"
-if ! "$RCLONE" listremotes --long 2>/dev/null | grep -qE "^${KOHDE_NIMI}:[[:space:]]+crypt\$"; then
+# Listaus ensin muuttujaan: putkessa grep -q lopettaa lukemisen osumaan, rclone saa SIGPIPEn (141)
+# ja pipefail tulkitsisi oikean crypt-kohteen virheeksi.
+if ! KOHTEET=$("$RCLONE" listremotes --long 2>/dev/null); then
+  loki "rclone listremotes epaonnistui, ei siirreta"; exit 1
+fi
+if ! grep -qE "^${KOHDE_NIMI}:[[:space:]]+crypt\$" <<<"$KOHTEET"; then
   loki "kohde $KOHDE_NIMI ei ole crypt-tyyppinen, ei siirreta eika haeta salaamatonta dataa"; exit 1
 fi
 

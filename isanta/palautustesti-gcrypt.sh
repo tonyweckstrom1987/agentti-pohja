@@ -128,7 +128,10 @@ if ! flock -n 9; then loki "toinen ajo kaynnissa, ohitetaan"; ONNISTUI=1; exit 0
 
 # Kohteen on oltava crypt-tyyppinen: muuten luettaisiin salaamatonta dataa tai vaaraa kohdetta.
 KOHDE_NIMI="${REMOTE%%:*}"
-"$RCLONE" listremotes --long 2>/dev/null | grep -qE "^${KOHDE_NIMI}:[[:space:]]+crypt\$" \
+# Listaus ensin muuttujaan: putkessa grep -q lopettaa lukemisen osumaan, rclone saa SIGPIPEn (141)
+# ja pipefail tulkitsisi oikean crypt-kohteen virheeksi, kun kohteita on paljon.
+KOHTEET=$("$RCLONE" listremotes --long 2>/dev/null) || vika "rclone listremotes epaonnistui"
+grep -qE "^${KOHDE_NIMI}:[[:space:]]+crypt\$" <<<"$KOHTEET" \
   || vika "kohde $KOHDE_NIMI ei ole crypt-tyyppinen"
 
 # 1) Uusin arkisto. lsf: "koko;polku" (crypt-kohde kertoo purkautuneen koon). Nimen aikaleima jarjestaa.

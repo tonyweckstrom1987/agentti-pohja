@@ -16,7 +16,11 @@ SKRIPTI = Path(__file__).resolve().parent.parent / "isanta" / "varmuuskopio-driv
 VALE = """#!/bin/bash
 # rclone-vale: kirjaa argumentit; copy/delete tallentaa suodatintiedoston; copyto kopioi $VALE_KOHDE:sta;
 # lsf listaa Driven "sisallon" = $VALE_ETA (oletus: DUMP_DIR, eli kuin edellinen kopio olisi onnistunut).
-if [ "$1" = listremotes ]; then echo "${VALE_TYYPPI-drive-crypt: crypt}"; exit 0; fi
+if [ "$1" = listremotes ]; then
+  echo "${VALE_TYYPPI-drive-crypt: crypt}"
+  for ((i = 0; i < ${VALE_LISAKOHTEET:-0}; i++)); do echo "muu$i: drive"; done
+  exit ${VALE_LR_KOODI:-0}
+fi
 for a in "$@"; do
   if [ "$a" = lsf ]; then ls -1 "${VALE_ETA:-$DUMP_DIR}"; exit ${VALE_LSF_KOODI:-0}; fi
 done
@@ -151,6 +155,27 @@ class ValeTesti(Pohja):
         r = self.aja(VAADITUT_KONTIT="110 113")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn("valmis", self.loki.read_text())
+
+    def test_crypt_loytyy_vaikka_kohteita_on_paljon(self):
+        # grep -q lopettaa lukemisen osumaan; ennen korjausta rclone sai SIGPIPEn (141) ja pipefail esti kopion.
+        r = self.aja(VALE_LISAKOHTEET="20000")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertTrue(any(" copy " in " " + x + " " for x in self.valeloki.read_text().splitlines()))
+
+    def test_listremotes_virhe_ei_siirra(self):
+        r = self.aja(VALE_LR_KOODI="1")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("rclone listremotes epaonnistui", self.loki.read_text())
+        self.assertFalse(self.valeloki.exists())
+
+    def test_vaadittu_kontti_loytyy_vaikka_tiedostoja_on_paljon(self):
+        # Vaaditun kontin arkisto on listan alussa; ennen korjausta printf sai SIGPIPEn ja kontti nayttaa puuttuvan.
+        # yli 64 kt (putken puskuri): 2400 nimea x 45 merkkia
+        for i in range(2400):
+            (self.dump / f"vzdump-qemu-900-2026_10_31-{i // 3600:02d}_{i // 60 % 60:02d}_{i % 60:02d}.log").write_bytes(b"x")
+        r = self.aja("--luettelo", VAADITUT_KONTIT="110")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertNotIn("PUUTTUU", r.stdout)
 
     def test_luettelo_ilmoittaa_puuttuvan_vaaditun_kontin(self):
         r = self.aja("--luettelo", VAADITUT_KONTIT="113")
