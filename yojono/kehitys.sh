@@ -97,6 +97,35 @@ testaa() {
       timeout 600 python3 -B -c "$PY_TESTAA" )
   fi
 }
+# Punaisen ajon tiedot (itsesuunnittelu 15.11.: raportissa oli vain `tail -n 3`, joten kaatunutta testia ei voitu nimetaa jalkikateen).
+# salaisuus_epailys: lukee stdinista, paluuarvo 0 jos jokin rivi muistuttaa salaisuutta. Kuviot vastaavat agentti/tilannekuva.py:n
+# SALAISUUDET-listaa (ajurin kopio ei ole aina kaytettavissa, joten ne ovat tassa); virheellinen halytys vain ohittaa patchin.
+salaisuus_epailys() {
+  grep -Eiq -e 'sk-[A-Za-z0-9_-]{16,}' -e 'gh[pousr]_[A-Za-z0-9]{20,}' -e 'github_pat_[A-Za-z0-9_]{20,}' \
+    -e '[0-9]{8,10}:[A-Za-z0-9_-]{30,}' -e '(api[_-]?key|token|secret|password|bearer)[[:space:]]*[:=][[:space:]]*[^[:space:]]{8,}' \
+    -e '-----BEGIN [A-Z ]*PRIVATE KEY-----'
+}
+# poimi_kaatuneet <loki>: enintaan 10 kaatuneen testin rivia (unittest FAIL:/ERROR:, TAP not ok, vitest/jest FAIL ja kaatumismerkit);
+# varikoodit pois, rivit enintaan 200 merkkia, kaksoiskappaleet pois, salaisuuden nakoiset rivit pois.
+poimi_kaatuneet() {
+  ESC=$(printf '\033')
+  MERKIT=$(printf '\342\234\227|\303\227|\342\234\225')   # U+2717, U+00D7, U+2715 (tavuina, tiedosto pysyy ASCII:na)
+  sed "s/${ESC}\[[0-9;]*[A-Za-z]//g" "$1" | tr -d '\r' \
+    | grep -E '^[[:space:]]*(FAIL|ERROR): |^[[:space:]]*FAIL[[:space:]]|^[[:space:]]*not ok |^[[:space:]]*('"$MERKIT"') ' \
+    | cut -c1-200 | awk '!n[$0]++' | head -n 10 \
+    | while IFS= read -r RIVI; do if printf '%s\n' "$RIVI" | salaisuus_epailys; then :; else printf '%s\n' "$RIVI"; fi; done || true
+}
+# talleta_patch: tallentaa agentin muutoksen (seuraamattomat mukaan) tiedostoon $UL.patch; tulostaa yhden tilarivin.
+# Ei tallenneta, jos diff ylittaa 200 kt tai lisatyissa riveissa on salaisuusepailys.
+talleta_patch() {
+  git add -N . >/dev/null 2>&1 || true
+  if ! git diff > "$TMP/muutos.patch" 2>/dev/null; then echo "patch ohitettu: git diff epaonnistui"; return 0; fi
+  KOKO=$(wc -c < "$TMP/muutos.patch" | tr -d ' ')
+  if [ "$KOKO" -eq 0 ]; then echo "patch ohitettu: ei muutosta"; return 0; fi
+  if [ "$KOKO" -gt 204800 ]; then echo "patch ohitettu: yli 200 kt ($KOKO tavua)"; return 0; fi
+  if grep '^+' "$TMP/muutos.patch" | grep -v '^+++' | salaisuus_epailys; then echo "patch ohitettu: salaisuusepailys"; return 0; fi
+  mv -f "$TMP/muutos.patch" "$UL.patch" && echo "patch tallennettu: $(basename "$UL.patch") ($KOKO tavua)" || echo "patch ohitettu: tallennus epaonnistui"
+}
 # Python-testien ajaja: discover kuten ennen, mutta kieltaytyy sarjasta, jonka moduuli on kloonin ulkopuolelta.
 PY_TESTAA='import os, sys, unittest
 juuri = os.path.realpath(".")
@@ -162,6 +191,8 @@ except Exception:
 SYY=""
 PR=""
 TESTIT="ei ajettu"
+KAATUNEET=""
+PATCH_TILA=""
 MUUTOKSET=$(git status --porcelain --untracked-files=all)
 
 if [ -n "$OHITETTU" ]; then
@@ -194,12 +225,15 @@ else
       if [ ! -f package.json ] && [ "${LKM:-0}" -eq 0 ]; then
         TESTIT="punainen (ei testeja kloonista)"
         SYY="ei testeja kloonista: PR:aa ei avattu"
+        PATCH_TILA=$(talleta_patch)
       else
         TESTIT="vihrea${LKM:+, $LKM testia} ($(tail -n 3 "$TMP/testit.log" | tr '\n' ' ' | cut -c1-120))"
       fi
     else
       TESTIT="punainen ($(tail -n 3 "$TMP/testit.log" | tr '\n' ' ' | cut -c1-120))"
       SYY="testit punaisella agentin muutosten jalkeen: PR:aa ei avattu"
+      KAATUNEET=$(poimi_kaatuneet "$TMP/testit.log")
+      PATCH_TILA=$(talleta_patch)
     fi
   fi
 fi
@@ -248,6 +282,12 @@ fi
   if [ -n "$PR" ]; then echo "- PR: $PR"; else echo "- PR: ei avattu"; fi
   if [ -n "$SYY" ]; then echo "- Syy: $SYY"; fi
   echo "- Testit: $TESTIT"
+  if [ -n "$PATCH_TILA" ]; then echo "- Muutos: $PATCH_TILA"; fi
+  if [ -n "$KAATUNEET" ]; then
+    echo
+    echo "## Kaatuneet testit"
+    printf '%s\n' "$KAATUNEET" | sed 's/^[[:space:]]*/- /'
+  fi
   echo
   echo "## Muutetut tiedostot"
   if [ -n "$MUUTOKSET" ]; then printf '%s\n' "$MUUTOKSET" | head -n 40; else echo "(ei muutoksia)"; fi
