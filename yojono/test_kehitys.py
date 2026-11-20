@@ -280,7 +280,7 @@ class Ajo(Pohja):
         self.assertIn(".github/workflows/a.yml", self.raportti("ominaisuus"))
         self.assertEqual(self.kutsut(), "")
 
-    def js_repo(self, npm_test_koodi):
+    def js_repo(self, npm_test_koodi, tuloste=""):
         """Lisaa lahderepoon package.json:n ja tekee PATH-hakemiston, jossa on tekonpm (kirjaa argumentit)."""
         r = self.lahde / REPO
         kirjoita(r / "package.json", '{"name": "koe", "scripts": {"test": "x"}}\n')
@@ -290,7 +290,8 @@ class Ajo(Pohja):
         kirjoita(bin_ / "npm", '#!/bin/sh\necho "$@" >> "' + str(self.perus.parent / "npm.kutsut") + '"\n'
                  'echo "cache=$npm_config_cache logs=$npm_config_logs_dir" >> "' + str(self.perus.parent / "npm.ymp") + '"\n'
                  'if [ "$1" = "install" ]; then mkdir -p node_modules/better-sqlite3; fi\n'
-                 'if [ "$1" = "test" ]; then exit ' + str(npm_test_koodi) + '; fi\nexit 0\n', True)
+                 'if [ "$1" = "test" ]; then cat "' + str(bin_ / "tuloste.txt") + '"; exit ' + str(npm_test_koodi) + '; fi\nexit 0\n', True)
+        kirjoita(bin_ / "tuloste.txt", tuloste)
         return dict(PATH=str(bin_) + os.pathsep + os.environ["PATH"])
 
     def test_js_repo_asentaa_riippuvuudet_ja_ajaa_npm_test(self):
@@ -325,6 +326,53 @@ class Ajo(Pohja):
         self.pr_kutsu()
         self.aja(REPO, "1.00", "readme", **env)
         self.assertIn("punainen", self.raportti())
+        self.assertEqual(self.kutsut(), "")
+
+    # npm-repojen testirivi: maara luetaan vitestin ja node:testin tulosteesta, varikoodit pois
+    VITEST = ("\x1b[1m\x1b[30m\x1b[46m RUN \x1b[49m\x1b[39m\x1b[22m \x1b[36mv5.1.0\x1b[39m\n\n"
+              "\x1b[2m Test Files \x1b[22m \x1b[1m\x1b[32m1 passed\x1b[39m\x1b[22m\x1b[90m (1)\x1b[39m\n"
+              "\x1b[2m      Tests \x1b[22m \x1b[1m\x1b[32m%d passed\x1b[39m\x1b[22m\x1b[90m (%d)\x1b[39m\n"
+              "\x1b[2m   Duration \x1b[22m 146ms\n")
+    NODETEST = "TAP version 13\n1..%d\n# tests %d\n# suites 0\n# pass %d\n# fail 0\n# skipped 0\n# duration_ms 61.0\n"
+
+    def _npm_ajo(self, koodi, tuloste):
+        env = self.js_repo(koodi, tuloste)
+        self.agentti_skripti('echo "uusi rivi" >> README.md')
+        self.pr_kutsu()
+        r = self.aja(REPO, "1.00", "readme", **env)
+        return r, self.raportti()
+
+    def test_npm_vitest_maara_luetaan_ja_varikoodit_pois(self):
+        r, rap = self._npm_ajo(0, self.VITEST % (7, 7))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("vihrea, 7 testia", rap)
+        self.assertNotIn("\x1b", rap)
+        self.assertIn(REPO, self.kutsut())
+
+    def test_npm_node_test_maara_luetaan(self):
+        r, rap = self._npm_ajo(0, self.NODETEST % (5, 5, 5))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("vihrea, 5 testia", rap)
+
+    def test_npm_nolla_testia_on_punainen_eika_avaa_prta(self):
+        r, rap = self._npm_ajo(0, self.NODETEST % (0, 0, 0))
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("punainen (ei testeja kloonista)", rap)
+        self.assertNotIn("vihrea", rap)
+        self.assertEqual(self.kutsut(), "")
+
+    def test_npm_tuntematon_muoto_jaa_vihreaksi_maara_ei_tiedossa(self):
+        r, rap = self._npm_ajo(0, "\x1b[33mkaikki hyvin\x1b[39m\nvalmis\n")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("vihrea (maara ei tiedossa:", rap)
+        self.assertNotIn("\x1b", rap)
+        self.assertNotIn("testia", rap)
+        self.assertIn(REPO, self.kutsut())
+
+    def test_npm_punainen_rivi_ilman_varikoodeja(self):
+        r, rap = self._npm_ajo(1, "\x1b[31mFAIL\x1b[39m jokin\n")
+        self.assertIn("punainen (FAIL jokin", rap)
+        self.assertNotIn("\x1b", rap)
         self.assertEqual(self.kutsut(), "")
 
     def test_pr_kutsun_virhe_antaa_koodin_1_ja_syyn(self):
