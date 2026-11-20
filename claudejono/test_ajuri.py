@@ -856,6 +856,23 @@ class OmaKayttaja(unittest.TestCase):
             self.assertNotIn(kielletty, alaenv)
         self.assertNotIn("/root", alaenv["PATH"])
 
+    def test_git_tekija_on_kiintea_bottitunnus(self):
+        _, alaenv, _ = ajuri.lapsen_ajo("k", {"CLAUDEJONO_KAYTTAJA": "claudejono"}, "/opt/agentscope")
+        for avain in ("GIT_AUTHOR_NAME", "GIT_COMMITTER_NAME"):
+            self.assertEqual(alaenv[avain], "agenttifirma-bot")
+        for avain in ("GIT_AUTHOR_EMAIL", "GIT_COMMITTER_EMAIL"):
+            self.assertEqual(alaenv[avain], "agenttifirma-bot@users.noreply.github.com")
+
+    def test_rootin_git_arvot_eivat_paady_lapsen_ymparistoon(self):
+        env = {"CLAUDEJONO_KAYTTAJA": "claudejono", "GIT_AUTHOR_NAME": "Tony", "GIT_AUTHOR_EMAIL": "tony@example.org",
+               "GIT_COMMITTER_NAME": "Tony", "GIT_COMMITTER_EMAIL": "tony@example.org", "GIT_DIR": "/root/.git",
+               "GIT_CONFIG_GLOBAL": "/root/.gitconfig"}
+        _, alaenv, _ = ajuri.lapsen_ajo("k", env, "/opt/agentscope")
+        self.assertEqual({k: v for k, v in alaenv.items() if k.startswith("GIT_")}, ajuri.GIT_TEKIJA)
+        for v in alaenv.values():
+            self.assertNotIn("Tony", v)
+            self.assertNotIn("tony@example.org", v)
+
     def test_root_ja_virheellinen_nimi_hylataan(self):
         for nimi in ("root", "a b", "../x", "Claude"):
             with self.assertRaises(ajuri.JonoVirhe):

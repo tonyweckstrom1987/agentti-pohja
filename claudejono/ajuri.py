@@ -467,6 +467,12 @@ def claude_komento(kehote, env, malli=None):
 
 
 RUNUSER = "/usr/sbin/runuser"
+# Tehtavaajon commitit tehdaan aina bottitunnuksella. Arvot ovat kiinteat: rootin tai ajurin ymparistosta ei vieda
+# GIT_*-arvoja lapselle, jotta commitit eivat voi mennda Tonyn tai muun nimiin eika eristysraja laajene.
+GIT_TEKIJA = {
+    "GIT_AUTHOR_NAME": "agenttifirma-bot", "GIT_AUTHOR_EMAIL": "agenttifirma-bot@users.noreply.github.com",
+    "GIT_COMMITTER_NAME": "agenttifirma-bot", "GIT_COMMITTER_EMAIL": "agenttifirma-bot@users.noreply.github.com",
+}
 
 
 def kaistan_tyohak(tyohak, kaista=1):
@@ -490,6 +496,7 @@ def lapsen_ajo(kehote, env, tyohak, kaista=1, malli=None, lisaliput=()):
     koti = env.get("CLAUDEJONO_KOTI", f"/var/lib/{kayttaja}")
     alaenv = {"PATH": "/usr/local/bin:/usr/bin:/bin", "HOME": koti, "USER": kayttaja, "LOGNAME": kayttaja,
               "LANG": env.get("LANG", "C.UTF-8")}
+    alaenv.update(GIT_TEKIJA)      # kiinteasti bottitunnus; env:n GIT_*-arvoja ei lueta
     # Absoluuttinen polku: Popen etsii komennon lapsen PATHista, jossa ei ole /usr/sbin:ia (vika 30.10.2026).
     return [RUNUSER, "-u", kayttaja, "--", *kom], alaenv, str(kaistan_tyohak(tyohak, kaista))
 
