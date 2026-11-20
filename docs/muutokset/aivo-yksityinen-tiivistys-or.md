@@ -1,0 +1,1 @@
+- aivo: yksityisen alueen tiivistys myös OpenRouter-taustapäällä (ZDR pakotettu, avoin malli, 10 tiivistystä/vrk ja yhteinen 10 €/vrk katto); yksityisen tilan chat lukee yksityiset tiivistelmät kehotteeseen asetuksella AIVO_YKSITYISET_TIIVISTELMAT_KAYTOSSA=1 (enintään 60 kt); ohje ajastimesta aivo-tiivista-yksityinen

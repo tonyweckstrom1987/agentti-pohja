@@ -1,0 +1,2 @@
+- Aivo: mallivertailun ajotyökalu `aivo/mallivertailu.py` ja synteettinen testisarja (20 tehtävää). Kutsut kulkevat `openrouter_kulut.kutsu`n kautta, ZDR ja `data_collection=deny` pakotettuina. Työkalua ei ole kytketty palveluun.
+- Rakennetestit: `mallivertailu.py` lisätty kahden OpenRouter-tuontitestin sallittujen listaan. Uudet testit varmistavat, ettei työkalu rakenna runkoa itse eikä kutsu verkkoa muuten kuin `kutsu`n kautta, ja ettei tuotannon koodi käytä lippua `yksityinen_chat=False`.

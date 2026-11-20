@@ -1,8 +1,8 @@
 """Aivon keskustelumuistin tiivistyksen komentorivi: valitsee muistialueen ja antaa ajon alueen omalle moduulille.
 
-Kaytto:  python3 -m aivo.tiivista --alue yksityinen [--kuiva] [--juuri KANSIO] [--malli-url URL]
+Kaytto:  python3 -m aivo.tiivista --alue yksityinen [--kuiva] [--juuri KANSIO] [--malli-url URL] [--taustapaa loopback|openrouter]
          python3 -m aivo.tiivista --alue tyokalu [--kuiva] [--juuri KANSIO]
-Yksityisen alueen ajo on moduulissa aivo.tiivista_yksityinen (paikallinen malli, vain loopback) ja tyokalualueen ajo
+Yksityisen alueen ajo on moduulissa aivo.tiivista_yksityinen (loopback tai OpenRouter ZDR:lla) ja tyokalualueen ajo
 moduulissa aivo.tiivista_tyokalu (tyokalutilan socket). Moduuli tuodaan vasta valinnan jalkeen: tyokalualueen ajo ei lataa
 yksityisen alueen moduulia."""
 import argparse

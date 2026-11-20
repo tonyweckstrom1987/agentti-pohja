@@ -1,0 +1,1 @@
+- aivo: virheellisen tiedostonimen ehdotus ei enää piilota mallin tekstiä sulkevan tagin jälkeen; ei-merkkijonotunnus hylkäysreitillä palauttaa 400 eikä katkaise yhteyttä (#352:n jatko)

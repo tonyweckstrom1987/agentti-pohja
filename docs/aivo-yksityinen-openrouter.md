@@ -9,10 +9,11 @@ Tämä ohje on Tonylle. Rajattu ulkoinen mallipalvelu (A728). Tonyn sha-sidottu 
 - Yksityisellä tilalla on kaksi taustapäätä. Oletus on edelleen paikallinen mallipalvelin (loopback). Uusi vaihtoehto on OpenRouterin avoin malli: `--yksityinen-taustapaa openrouter`.
 - Muisti, keskustelut, ydinohjeet ja ehdotukset pysyvät kontissa 122. OpenRouterille lähtee vain kulloinenkin kehote (ydinohjeet, muistista valitut otteet ja keskusteluhistoria).
 - Jokainen kutsu kulkee `openrouter_kulut.kutsu`n kautta. Se tarkistaa yhteisen päiväkatkaisimen (10 €/vrk, sama kirjanpito ja sama katto kuin ajurilla, #309; yksityisellä tilalla ei ole omaa kulutilaa), rakentaa pyynnön `openrouter_zdr.rakenna_runko`lla (ZDR ja `data_collection=deny` pakotettuina) ja kirjaa kulun. Kuljetin kieltäytyy lähettämästä, jos ZDR puuttuu rungosta.
-- Mallin pitää kuulua avoimiin perheisiin (`AVOIMET_MALLIT` tiedostossa `aivo/openrouter_zdr.py`). Suljetut mallit, `:free`-versiot ja `:online`-liitteet hylätään. Oletusmallia ei ole.
+- Mallin pitää olla täsmälleen listalla `AVOIMET_MALLIT` tiedostossa `aivo/openrouter_zdr.py`. Lista on tarkka luettelo mallitunnisteista, ei etuliitteitä, ja jokaisen rivin kommentissa on mallin `hugging_face_id`. Suljetut mallit (esim. `qwen/qwen3.7-max`) ja kaikki liitteet (`:free`, `:batch`, `:online`, `:nitro` ja muut) hylätään. Oletusmallia ei ole.
 - Avain luetaan tiedostosta, jonka omistaa palvelun käyttäjä ja jonka oikeudet ovat 0600. Ympäristömuuttujaa ei lueta. Avain luetaan joka kutsulla, joten sen voi vaihtaa ilman uudelleenkäynnistystä.
 - Puuttuva tai väärin suojattu avain antaa selkeän virheen (HTTP 502 ja teksti "OpenRouter-avain puuttuu…"), eikä päiväkattovarausta kirjata.
 - Työkalutila ei käytä tätä taustapäätä. Testit tarkistavat sen.
+- Yksityisen alueen keskustelujen tiivistys käyttää samaa taustapäätä, kun `AIVO_YKSITYINEN_TAUSTAPAA=openrouter` (sama malli ja avain). Tiivistyksellä on lisäksi oma raja, 10 kutsua vuorokaudessa, ja sen kulut lasketaan samaan 10 €/vrk kattoon. Katso `docs/aivo-yksityinen.md`, kohta Keskustelujen tiivistys.
 - Kehote kertoo mallille totuudenmukaisesti, että kehote kulkee OpenRouterin kautta nollasäilytyksellä. Sivun valinnan teksti kertoo taustapään: loopback-tilassa "Yksityinen (oma malli, ei verkkoa)" ja OpenRouter-tilassa "Yksityinen (avoin malli OpenRouterissa, ZDR: ei tallennusta)".
 
 ## Suositeltu malli ja kustannusarvio
@@ -26,7 +27,7 @@ Hinnat on haettu OpenRouterin julkisesta mallilistasta ja ZDR-päätepisteiden l
 
 Suomen kieltä ei ole mitattu. Valitse malli Tonyn oman kokeilun mukaan.
 
-Oletukset: yksi OpenRouter-kutsu per Tonyn viesti, keskustelu on 20 viestiä, kurssi 0,92 €/$ (sama vakio kuin kulukirjanpidossa). Historia on enintään 12 viestiä. Tyypillinen kutsu on 6 000 tokenia sisään ja 350 ulos, raskas 14 000 sisään ja 700 ulos (muistiraja 16 000 merkkiä ja ydinohjeraja 20 000 merkkiä täynnä). Laskennassa käytetään ZDR-ylärajaa (0,20 / 0,825) Qwenille ja listahintaa Llamalle.
+Oletukset: yksi OpenRouter-kutsu per Tonyn viesti, keskustelu on 20 viestiä, kurssi 0,92 €/$ (sama vakio kuin kulukirjanpidossa). Historia oli laskelmaa tehtäessä enintään 12 viestiä; nyt raja on 40 (katso alla). Tyypillinen kutsu on 6 000 tokenia sisään ja 350 ulos, raskas 14 000 sisään ja 700 ulos (muistiraja 16 000 merkkiä ja ydinohjeraja 20 000 merkkiä täynnä). Laskennassa käytetään ZDR-ylärajaa (0,20 / 0,825) Qwenille ja listahintaa Llamalle.
 
 | Malli ja kuorma | Per keskustelu (20 viestiä) | Kuukausi, 20 viestiä/pv | Kuukausi, 50 viestiä/pv |
 |---|---|---|---|
@@ -34,6 +35,8 @@ Oletukset: yksi OpenRouter-kutsu per Tonyn viesti, keskustelu on 20 viestiä, ku
 | Qwen3 235B, raskas | 0,07 € | 2,15 € | 5,36 € |
 | Llama 3.3 70B, tyypillinen | 0,12 € | 3,49 € | 8,72 € |
 | Llama 3.3 70B, raskas | 0,23 € | 6,76 € | 16,90 € |
+
+Historiaraja on nyt 40 viestiä (`yksityinen_or.HISTORIA_YLARAJA`, 19.11.2026). Taulukon 20 viestin keskustelussa koko keskustelu kulkee silloin mukana, ja syöte kasvaa keskustelun loppua kohti. Pahin yksittäinen kutsu (40 täyttä viestiä, muisti ja ydinohjeet täynnä) on noin 55 000–80 000 tokenia sisään, Qwenillä ZDR-ylärajalla noin 0,01–0,02 € kutsulta. Päiväkatto ei muutu.
 
 Päiväkatto 10 €/vrk on huomattavasti suurempi kuin yksityisen tilan odotettu kulu (alle 0,6 €/vrk raskaimmassakin laskelmassa). Virheellinen tai aikakatkaistu kutsu kirjataan varovaisesti 0,50 $:n kuluna, joten toistuvat virheet näkyvät kirjanpidossa.
 
@@ -52,7 +55,7 @@ Ota ensin snapshot kontista 122. Käyttäjänimi `aivo-yksityinen` on sama kuin 
 
    Tiedoston pitää olla `-rw-------` ja omistajan `aivo-yksityinen`. Luo avain OpenRouterissa omalla, vain tätä käyttöä varten tehdyllä avaimella ja aseta sille tarvittaessa kulutuskatto OpenRouterin puolella.
 
-3. **Palvelun asetukset.** Lisää `aivo-chat.service`-tiedoston `ExecStart`-riville: `--yksityinen-taustapaa openrouter --openrouter-malli qwen/qwen3-235b-a22b-2507` (toinen valitsin: `--openrouter-avain-tiedosto`). Lisää `/var/lib/claude-jono` kohtaan `ReadWritePaths`, koska `ProtectSystem=strict` estää kirjoituksen muuten. Kontin 122 pitää päästä HTTPS-yhteydellä osoitteeseen `openrouter.ai`. Palomuuria ei muuteta tämän muutoksen mukana, joten tarkista saanti itse.
+3. **Palvelun asetukset.** Lisää `aivo-chat.service`-tiedoston `ExecStart`-riville: `--yksityinen-taustapaa openrouter --openrouter-malli qwen/qwen3-235b-a22b-2507` (toinen valitsin: `--openrouter-avain-tiedosto`). Useamman mallin lista annetaan valitsimella `--openrouter-mallit` tai muuttujalla `AIVO_OPENROUTER_MALLIT` (pilkuin erotettu, ensimmäinen on oletus); katso `aivo-yksityinen.md`, osio "Mallin valinta". Usean mallin yhdistelmä (tarkastus, rinnakkais tai reititys) valitaan valitsimella `--yksityinen-yhdistelma` ja roolit valitsimella `--yksityinen-roolit`; katso osio "Usean mallin yhdistelmät". Oletus on yksi malli. Lisää `/var/lib/claude-jono` kohtaan `ReadWritePaths`, koska `ProtectSystem=strict` estää kirjoituksen muuten. Kontin 122 pitää päästä HTTPS-yhteydellä osoitteeseen `openrouter.ai`. Palomuuria ei muuteta tämän muutoksen mukana, joten tarkista saanti itse.
 
 4. **Uudelleenkäynnistys ja testi.**
 

@@ -1,0 +1,1 @@
+- aivo: yksityisen tilan kehotteen uusi sääntö 6 (ei työkaluja, ei lupauksia taustatyöstä eikä kestoarvioita), sääntö 2 ottaa keskustelun aiemmat viestit huomioon, ja OpenRouter-taustapää vie historiasta 40 viestiä (paikallinen 12); ohje yksityisen tiivistyksen ajastimesta

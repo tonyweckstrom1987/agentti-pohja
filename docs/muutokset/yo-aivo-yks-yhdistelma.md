@@ -1,0 +1,1 @@
+- aivo: yksityisen tilan usean mallin yhdistelmät (AIVO_YKSITYINEN_YHDISTELMA: yksi, tarkastus, rinnakkais, reititys; roolit AIVO_YKSITYINEN_ROOLIT), enintään 4 kutsua ja 3 mallia per viesti, kokonaisaikaraja ja paluu yhden mallin vastaukseen; oletus on yksi malli

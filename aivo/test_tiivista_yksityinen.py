@@ -488,18 +488,45 @@ class RakenneTesti(unittest.TestCase):
         tuodut = _tuodut(_moduulin_puu(self.MODUULI))
         for kielletty in ("subprocess", "os.system", "socket", "http", "http.client", "requests", "aivo.chat",
                           "aivo.tyokalualue", "aivo.tyokalu_kaares", "aivo.openrouter_kulut", "aivo.openrouter_zdr",
-                          "aivo.yksityinen_or", "aivo.drive"):
+                          "aivo.drive"):
             self.assertNotIn(kielletty, tuodut)
         self.assertNotIn("subprocess", _tunnisteet(_moduulin_puu(self.MODUULI)))
+
+    def test_openrouter_vain_yksityinen_or_moduulin_kautta_ja_vasta_valinnan_jalkeen(self):
+        """Ainoa OpenRouter-reitti on aivo.yksityinen_or (ZDR, avoin malli, kulukatto). Se tuodaan vain funktiossa
+        tee_or_kysyja (ei moduulin ylatasolla), joten loopback-ajo ei lataa sita."""
+        puu = _moduulin_puu(self.MODUULI)
+        ylataso = set()
+        for n in puu.body:
+            if isinstance(n, (ast.Import, ast.ImportFrom)):
+                ylataso |= {a.name for a in n.names} | {getattr(n, "module", "") or ""}
+        self.assertFalse([x for x in ylataso if "yksityinen_or" in x or "openrouter" in x], ylataso)
+        tuojat = []
+        for f in (n for n in ast.walk(puu) if isinstance(n, ast.FunctionDef)):
+            for n in ast.walk(f):
+                if isinstance(n, ast.ImportFrom) and any("yksityinen_or" in a.name for a in n.names):
+                    tuojat.append(f.name)
+        self.assertEqual(tuojat, ["tee_or_kysyja"])
+        src = inspect_lahde(self.MODUULI).split("def tee_or_kysyja")[1].split("\ndef ")[0]
+        self.assertIn("kysy_tiivistys", src)
+        for kielletty in ("kysy_openrouterilta", "tee_kuljetin", "lue_avain", "openrouter_kulut", "rakenna_runko"):
+            self.assertNotIn(kielletty, src)
 
     def test_ei_viittaa_clauden_openrouterin_eika_litellmin_nimiin(self):
         puu = _moduulin_puu(self.MODUULI)
         for t in _tunnisteet(puu):
             for k in ("claude", "openrouter", "litellm", "kysy_claudelta", "tyokalu"):
                 self.assertNotIn(k, t.lower(), t)
+        # OpenRouter saa esiintya vain taustapaan nimena ja chatin kanssa yhteisissa asetusnimissa (ei osoitetta).
+        sallitut = {"openrouter", "--openrouter-malli", "--openrouter-avain-tiedosto", "AIVO_OPENROUTER_MALLI",
+                    "AIVO_OPENROUTER_AVAIN", "avoin malli, sama kuin chatissa (AIVO_OPENROUTER_MALLI)"}
         for v in _vakiot(puu):
-            for k in ("claude", "openrouter", "litellm", "/var/lib/aivo/", "aivo/kirjasto"):
+            for k in ("claude", "litellm", "/var/lib/aivo/", "aivo/kirjasto", "openrouter.ai", "http"):
+                if k == "http" and v.startswith("http://127.0.0.1"):
+                    continue
                 self.assertNotIn(k, v.lower(), v[:40])
+            if "openrouter" in v.lower():
+                self.assertIn(v, sallitut)
 
     def test_verkkokutsu_on_vain_paikallisessa_mallifunktiossa(self):
         puu = _moduulin_puu(self.MODUULI)

@@ -13,7 +13,7 @@ Saannot:
     pyynnot; muut pyynnot eivat kulje taman funktion kautta, joten niihin ei koske mikaan.
   * `yksityinen_chat=True` (muutettu avoimesti Tonyn paatoksella A984; aiemmin A728: ei koskaan): sallitaan vain, kun
     (a) ZDR ja data_collection=deny on pakotettu (rakenne ei salli muuta: ohitusyritys -> ZdrVirhe) ja (b) malli on
-    avoin malli listalta AVOIMET_MALLIT. Muuten ZdrVirhe. Arvon pitaa olla tasmalleen True tai False. Lippu ei
+    avoin malli tarkalta listalta AVOIMET_MALLIT. Muuten ZdrVirhe. Arvon pitaa olla tasmalleen True tai False. Lippu ei
     poista muita saantoja: katto, avain ja ZDR pysyvat ennallaan. Lippu kuuluu antaa aina yksityisen tilan kutsuissa
     (aivo/yksityinen_or.py), jotta saantoa ei voi kiertaa jattamalla se pois silta, missa sita tarvitaan.
   * Tata moduulia ei ole kytketty mihinkaan ajoon.
@@ -28,33 +28,80 @@ from typing import Any, Iterable, Mapping
 
 OSOITE = "https://openrouter.ai/api/v1/chat/completions"
 
-# Avoimet mallit (painot julkaistu). Etuliite, joka alkaa tasmalleen naista, kelpaa; suljetut saman valmistajan
-# mallit (esim. qwen-max, mistral-large) eivat. Uuden perheen lisays vaatii koodimuutoksen ja Tonyn luvan.
+# Avoimet mallit (A984): TARKKA lista OpenRouterin mallitunnisteita, ei etuliitteita. Kommentissa on mallin
+# `hugging_face_id` OpenRouterin mallilistasta (/api/v1/models, haettu 19.11.2026): kentta kertoo, etta painot on
+# julkaistu. Listalla on vain malleja, joilla on seka `hugging_face_id` etta ZDR-endpoint (/api/v1/endpoints/zdr).
+# Miksi tarkka lista eika perhesaanto: sama perhe sisaltaa seka avoimia etta suljettuja malleja, eika nimesta voi
+# paatella kumpi on kyseessa (esim. qwen/qwen3.8-27b on avoin, qwen/qwen3.8-max-0902 ja qwen/qwen3.7-flash suljettuja,
+# mutta "-flash" ei aina tarkoita suljettua). Etuliite `qwen/qwen3` paasti lapi 14 suljettua mallia. Tarkka lista
+# hylkaa myos tulevat suljetut variantit ilman erillista saantoa. Uuden mallin tai perheen lisays vaatii
+# koodimuutoksen ja Tonyn luvan.
 AVOIMET_MALLIT = (
-    "meta-llama/llama-3",
-    "meta-llama/llama-4",
-    "qwen/qwen3",
-    "qwen/qwen2.5",
-    "qwen/qwq",
-    "google/gemma-2",
-    "google/gemma-3",
-    "mistralai/mistral-small",
-    "mistralai/mistral-nemo",
-    "mistralai/mixtral-",
-    "deepseek/deepseek-chat",
-    "deepseek/deepseek-r1",
+    "deepseek/deepseek-chat",                      # deepseek-ai/DeepSeek-V3
+    "deepseek/deepseek-chat-v3-0324",              # deepseek-ai/DeepSeek-V3-0324
+    "deepseek/deepseek-chat-v3.1",                 # deepseek-ai/DeepSeek-V3.1
+    "deepseek/deepseek-r1-0528",                   # deepseek-ai/DeepSeek-R1-0528
+    "google/gemma-2-27b-it",                       # google/gemma-2-27b-it
+    "google/gemma-3-12b-it",                       # google/gemma-3-12b-it
+    "google/gemma-3-27b-it",                       # google/gemma-3-27b-it
+    "google/gemma-3-4b-it",                        # google/gemma-3-4b-it
+    "meta-llama/llama-3.1-70b-instruct",           # meta-llama/Meta-Llama-3.1-70B-Instruct
+    "meta-llama/llama-3.1-8b-instruct",            # meta-llama/Meta-Llama-3.1-8B-Instruct
+    "meta-llama/llama-3.2-1b-instruct",            # meta-llama/Llama-3.2-1B-Instruct
+    "meta-llama/llama-3.2-3b-instruct",            # meta-llama/Llama-3.2-3B-Instruct
+    "meta-llama/llama-3.3-70b-instruct",           # meta-llama/Llama-3.3-70B-Instruct
+    "meta-llama/llama-4-maverick",                 # meta-llama/Llama-4-Maverick-17B-128E-Instruct
+    "meta-llama/llama-4-scout",                    # meta-llama/Llama-4-Scout-17B-16E-Instruct
+    "mistralai/mistral-nemo",                      # mistralai/Mistral-Nemo-Instruct-2407
+    "mistralai/mistral-small-24b-instruct-2501",   # mistralai/Mistral-Small-24B-Instruct-2501
+    "mistralai/mistral-small-2603",                # mistralai/Mistral-Small-4-119B-2603
+    "mistralai/mistral-small-3.1-24b-instruct",    # mistralai/Mistral-Small-3.1-24B-Instruct-2503
+    "mistralai/mistral-small-3.2-24b-instruct",    # mistralai/Mistral-Small-3.2-24B-Instruct-2506
+    "mistralai/mixtral-8x22b-instruct",            # mistralai/Mixtral-8x22B-Instruct-v0.1
+    "qwen/qwen2.5-vl-72b-instruct",                # Qwen/Qwen2.5-VL-72B-Instruct
+    "qwen/qwen3-14b",                              # Qwen/Qwen3-14B
+    "qwen/qwen3-235b-a22b-2507",                   # Qwen/Qwen3-235B-A22B-Instruct-2507
+    "qwen/qwen3-235b-a22b-thinking-2507",          # Qwen/Qwen3-235B-A22B-Thinking-2507
+    "qwen/qwen3-30b-a3b",                          # Qwen/Qwen3-30B-A3B
+    "qwen/qwen3-30b-a3b-instruct-2507",            # Qwen/Qwen3-30B-A3B-Instruct-2507
+    "qwen/qwen3-32b",                              # Qwen/Qwen3-32B
+    "qwen/qwen3-coder",                            # Qwen/Qwen3-Coder-480B-A35B-Instruct
+    "qwen/qwen3-coder-30b-a3b-instruct",           # Qwen/Qwen3-Coder-30B-A3B-Instruct
+    "qwen/qwen3-coder-next",                       # Qwen/Qwen3-Coder-Next
+    "qwen/qwen3-next-80b-a3b-instruct",            # Qwen/Qwen3-Next-80B-A3B-Instruct
+    "qwen/qwen3-vl-235b-a22b-instruct",            # Qwen/Qwen3-VL-235B-A22B-Instruct
+    "qwen/qwen3-vl-30b-a3b-instruct",              # Qwen/Qwen3-VL-30B-A3B-Instruct
+    "qwen/qwen3-vl-8b-instruct",                   # Qwen/Qwen3-VL-8B-Instruct
+    "qwen/qwen3.5-122b-a10b",                      # Qwen/Qwen3.5-122B-A10B
+    "qwen/qwen3.5-27b",                            # Qwen/Qwen3.5-27B
+    "qwen/qwen3.5-35b-a3b",                        # Qwen/Qwen3.5-35B-A3B
+    "qwen/qwen3.5-397b-a17b",                      # Qwen/Qwen3.5-397B-A17B
+    "qwen/qwen3.5-9b",                             # Qwen/Qwen3.5-9B
+    "qwen/qwen3.6-27b",                            # Qwen/Qwen3.6-27B
+    "qwen/qwen3.6-35b-a3b",                        # Qwen/Qwen3.6-35B-A3B
+    "qwen/qwen3.8-2.4t-a95b",                      # Qwen/Qwen3.8-2.4T-A95B
+    "qwen/qwen3.8-27b",                            # Qwen/Qwen3.8-27B
 )
-_MALLI_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*/[a-z0-9][a-z0-9._-]*(?::[a-z0-9_-]+)?$")
-KIELLETYT_LIITTEET = (":free", ":online", ":nitro", ":floor", ":exacto")
+_MALLI_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*/[a-z0-9][a-z0-9._-]*$")
+# OpenRouterin malliliitteet (docs: guides/routing/model-variants, luettu 19.11.2026). Tarkka lista hylkaa jo kaikki
+# liitteet; tama lista on lisavarmistus ja dokumentaatio. Liitteita voi ketjuttaa (esim. ":nitro:exacto"), joten
+# tarkistus etsii liitetta mista kohdasta tahansa.
+#   :free     oma endpoint-joukko ja omat ehdot; tietojen kayttoa ei ole dokumentoitu
+#   :batch    eraajo Batch API:n kautta omilla endpointeilla; ZDR-endpointteja ei ole listalla
+#   :thinking, :extended  vanhentuneet katalogivariantit, jotka vaihtavat endpointin
+#   :online   lisaa verkkohaun (ulkoinen kutsu)
+#   :nitro, :floor, :exacto  muuttavat reititysta ja sallivat priority- ja flex-tason endpointit
+KIELLETYT_LIITTEET = (":free", ":batch", ":thinking", ":extended", ":online", ":nitro", ":floor", ":exacto")
+_SALLITUT = frozenset(AVOIMET_MALLIT)
 
 
 def avoin_malli(malli: Any) -> bool:
-    """Tosi vain, jos malli on avointen perheiden listalla eika siina ole kiellettya liitetta."""
-    if not isinstance(malli, str) or not _MALLI_RE.match(malli):
+    """Tosi vain, jos malli on tasmalleen listalla AVOIMET_MALLIT (ei etuliitetta, ei liitetta)."""
+    if not isinstance(malli, str) or not _MALLI_RE.fullmatch(malli):
         return False
-    if any(malli.endswith(l) for l in KIELLETYT_LIITTEET):
+    if any(l in malli for l in KIELLETYT_LIITTEET):
         return False
-    return malli.startswith(AVOIMET_MALLIT)
+    return malli in _SALLITUT
 
 
 class ZdrVirhe(ValueError):

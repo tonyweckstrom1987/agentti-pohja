@@ -1,0 +1,1 @@
+- aivo: OpenRouter-kulut näkyvät chat-sivulla (GET /api/kulut, yläpalkin päivän kulu ja 80 %:n varoitus, erittely malleittain ja käyttötarkoituksittain; vain luku, katkaisin ennallaan)

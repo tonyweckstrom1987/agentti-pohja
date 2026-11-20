@@ -1,6 +1,7 @@
 """Testit aivo/yksityinen_or.py:lle (yksityisen tilan OpenRouter-taustapaa). Ei verkkoa, ei oikeita avaimia."""
 import ast
 import http.client
+import io
 import json
 import os
 import tempfile
@@ -269,14 +270,19 @@ class TyokalutilaTesti(Pohja):
             self.assertNotIn(sana, kaares.lower())
 
     def test_vain_yksityinen_moduuli_ja_chat_tuovat_openrouter_koodia(self):
-        sallitut = {"yksityinen_or.py", "openrouter_kulut.py", "openrouter_zdr.py", "chat.py"}
+        # mallivertailu.py: erillinen ajotyokalu synteettiselle datalle (Tony 19.11.2026), ei kytketty palveluun.
+        sallitut = {"yksityinen_or.py", "openrouter_kulut.py", "openrouter_zdr.py", "chat.py", "mallivertailu.py"}
+        # yksityisen alueen tiivistys saa tuoda vain yksityinen_or-moduulin (ZDR, avoin malli, katto), ei muuta
+        vain_yksityinen_or = {"tiivista_yksityinen.py"}
         for p in sorted(AIVO.glob("*.py")):
             if p.name.startswith("test_") or p.name in sallitut:
                 continue
             for n in ast.walk(ast.parse(p.read_text(encoding="utf-8"))):
                 if isinstance(n, (ast.Import, ast.ImportFrom)):
                     nimet = [a.name for a in n.names] + [getattr(n, "module", "") or ""]
-                    self.assertFalse([x for x in nimet if "yksityinen_or" in x or "openrouter" in x], p.name)
+                    self.assertFalse([x for x in nimet if "openrouter" in x], p.name)
+                    if p.name not in vain_yksityinen_or:
+                        self.assertFalse([x for x in nimet if "yksityinen_or" in x], p.name)
 
     def test_tyokalutilan_viesti_ei_kutsu_openrouteria(self):
         r = self.d
@@ -391,6 +397,31 @@ class KaynnistysTesti(unittest.TestCase):
             for m in (None, "openai/gpt-4o", MALLI + ":free"):
                 with self.assertRaises(chat.ChatVirhe):
                     self.tila(d, taustapaa="openrouter", or_malli=m)
+
+    def test_suljettu_qwen_ja_batch_estavat_kaynnistyksen(self):
+        """AIVO_OPENROUTER_MALLI suljetulla qwen3.x-mallilla tai :batch-liitteella: palvelu ei kaynnisty."""
+        with tempfile.TemporaryDirectory() as d:
+            for m in ("qwen/qwen3.7-max", "qwen/qwen3.8-max-0902", "qwen/qwen3.6-plus", "qwen/qwen3-coder-flash",
+                      "qwen/qwen3-235b-a22b-2507:batch"):
+                with self.subTest(m=m), self.assertRaises(chat.ChatVirhe):
+                    self.tila(d, taustapaa="openrouter", or_malli=m)
+
+    def test_suljettu_ymparistomuuttuja_estaa_mainin(self):
+        """main() lukee AIVO_OPENROUTER_MALLI:n ja palauttaa 1 ennen kuin palvelin kaynnistyy."""
+        with tempfile.TemporaryDirectory() as d:
+            salasana = Path(d) / "salasana"
+            salasana.write_text(chat.tiivista_salasana("oikea-salasana-123"))
+            os.chmod(salasana, 0o600)
+            yks = Path(d) / "y"
+            yks.mkdir(mode=0o700)
+            ymp = {"AIVO_OPENROUTER_MALLI": "qwen/qwen3.7-max", "AIVO_YKSITYINEN_TAUSTAPAA": "openrouter"}
+            with mock.patch.dict(os.environ, ymp), mock.patch.object(chat, "kaynnista") as k, \
+                    mock.patch("sys.stderr", new_callable=io.StringIO) as err:
+                rc = chat.main(["palvele", "--salasana-tiedosto", str(salasana), "--kirjasto", d, "--data", d,
+                                "--yksityinen-data", str(yks)])
+            self.assertEqual(rc, 1)
+            k.assert_not_called()
+            self.assertIn("avoin malli", err.getvalue())
 
     def test_avain_ei_ole_kaynnistyksen_edellytys(self):
         with tempfile.TemporaryDirectory() as d:

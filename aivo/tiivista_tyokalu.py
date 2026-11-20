@@ -169,7 +169,7 @@ def ehdokkaat(alue_, nyt, yritykset):
     lista = []
     for nimi in sorted(os.listdir(chat)):
         kid = nimi[:-6]
-        if not nimi.endswith(".jsonl") or not ID_RE.match(kid):
+        if not nimi.endswith(".jsonl") or not ID_RE.fullmatch(kid):
             continue
         try:
             viestit = tiivistelma.lue_keskustelu(chat / nimi)

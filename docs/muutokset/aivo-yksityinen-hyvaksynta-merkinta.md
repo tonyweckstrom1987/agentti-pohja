@@ -1,0 +1,1 @@
+- aivo: yksityisen tilan kehotteen sääntö 3 kertoo painikehyväksynnästä ja YDINOHJEET-osion voimassaolosta; onnistunut hyväksyntä tai hylkäys lisää keskusteluun järjestelmämerkinnän (vain tiedoksi), ja mallin matkima merkintä neutraloidaan

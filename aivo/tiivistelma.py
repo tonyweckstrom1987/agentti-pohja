@@ -7,7 +7,8 @@ Tama moduuli EI kutsu mallia eika verkkoa (vain stdlib; AST-testi valvoo). Se va
   * tallentaa tiivistelmat (kansio 0700, tiedostot 0600) ja antaa Tonille komennot lista/nayta/poista/korjaa.
 
 Tiivistelma on DATAA, ei ohjeita: mikaan tassa ei suorita tai tulkitse sisaltoa kaskyna.
-Lahdekeskustelu on aivo/chat.py:n jsonl (rivi: {"aika","rooli","teksti","lahteet"}; rooli "tony" tai "aivo").
+Lahdekeskustelu on aivo/chat.py:n jsonl (rivi: {"aika","rooli","teksti","lahteet"}; rooli "tony", "aivo" tai
+"jarjestelma" = palvelimen merkinta yksityisessa tilassa, ei koskaan Tonyn sanoja).
 
 Kaytto: python3 -m aivo.tiivistelma --kansio KANSIO lista | nayta TUNNUS | poista TUNNUS | korjaa TUNNUS KOHTA TEKSTI
 """
@@ -95,7 +96,7 @@ def lue_keskustelu(polku):
             d = json.loads(r)
         except ValueError:
             raise TiivistelmaVirhe("keskustelun rivi ei ole JSON:ia")
-        if (not isinstance(d, dict) or d.get("rooli") not in ("tony", "aivo") or not isinstance(d.get("teksti"), str)
+        if (not isinstance(d, dict) or d.get("rooli") not in ("tony", "aivo", "jarjestelma") or not isinstance(d.get("teksti"), str)
                 or not isinstance(d.get("aika"), str)):
             raise TiivistelmaVirhe("keskustelun rivin muoto on virheellinen")
         viestit.append({"rooli": d["rooli"], "teksti": d["teksti"], "aika": d["aika"]})
@@ -188,7 +189,7 @@ def jasenna(raaka, viestit):
     _tarkista_kentat(d, YLAKENTAT, (), "tiivistelma")
     if d["versio"] != VERSIO or not _on_int(d["versio"]):
         raise TiivistelmaVirhe("tuntematon versio")
-    if not isinstance(d["keskustelu"], str) or not KID_TARKISTUS.match(d["keskustelu"]):
+    if not isinstance(d["keskustelu"], str) or not KID_TARKISTUS.fullmatch(d["keskustelu"]):
         raise TiivistelmaVirhe("keskustelun tunniste on virheellinen")
     a, b = d["alku"], d["loppu"]
     if not (_on_int(a) and _on_int(b)) or not 0 <= a <= b < len(viestit):
@@ -231,7 +232,7 @@ def _kansio(kansio, luo=False):
 
 
 def _polku(kansio, tunnus):
-    if not isinstance(tunnus, str) or not TUNNUS_RE.match(tunnus):
+    if not isinstance(tunnus, str) or not TUNNUS_RE.fullmatch(tunnus):
         raise TiivistelmaVirhe("virheellinen tiivistelman tunnus")
     return Path(kansio) / (tunnus + ".json")
 
@@ -310,17 +311,17 @@ def luettele(kansio):
         nimet = sorted(f.name[:-5] for f in _kansio(kansio).iterdir() if f.name.endswith(".json"))
     except OSError as e:
         raise TiivistelmaVirhe("kansiota ei voi lukea (%s)" % type(e).__name__)
-    return [n for n in nimet if TUNNUS_RE.match(n)]
+    return [n for n in nimet if TUNNUS_RE.fullmatch(n)]
 
 
 def katettu_loppu(kansio, kid):
     """Suurin viestin indeksi, jonka tiivistelma on keskustelulle olemassa TAI jonka Tony on poistanut (-1: ei mitaan).
     Poistettua aluetta ei tiivisteta uudelleen. Lukuvirhe => TiivistelmaVirhe (turvallinen epaonnistuminen)."""
-    if not isinstance(kid, str) or not KID_TARKISTUS.match(kid):
+    if not isinstance(kid, str) or not KID_TARKISTUS.fullmatch(kid):
         raise TiivistelmaVirhe("keskustelun tunniste on virheellinen")
     suurin = -1
     for n in luettele(kansio):
-        m = TUNNUS_RE.match(n)
+        m = TUNNUS_RE.fullmatch(n)
         if m and m.group(1) == kid:
             suurin = max(suurin, int(m.group(3)))
     loki = Path(kansio) / POISTETUT
@@ -340,7 +341,7 @@ def katettu_loppu(kansio, kid):
             if "keskustelu" in d and "loppu" in d:
                 rkid, rloppu = d["keskustelu"], int(d["loppu"])
             else:                                 # vanha tai kasin kirjoitettu rivi: johdetaan tunnuksesta
-                m = TUNNUS_RE.match(d["tunnus"])
+                m = TUNNUS_RE.fullmatch(d["tunnus"])
                 rkid, rloppu = m.group(1), int(m.group(3))
             if rkid == kid:
                 suurin = max(suurin, rloppu)

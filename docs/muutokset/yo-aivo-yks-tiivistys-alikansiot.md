@@ -1,0 +1,1 @@
+- aivo: yksityisen tilan tiivistys tarkistaa vain käyttämänsä kansiot (chat, tiivistelmat, indeksi), joten ehdotukset/hylatyt/ ja ydinohjeet/.git eivät enää kaada sitä (AlueVirhe); kuiva-ajo kertoo puuttuvat kansiot nimeltä eikä luo mitään, ja ohjeessa on kansioiden luontikomento

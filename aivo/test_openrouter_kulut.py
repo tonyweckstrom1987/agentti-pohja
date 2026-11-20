@@ -16,6 +16,9 @@ TZ = ZoneInfo("Europe/Helsinki")
 NYT = datetime(2026, 11, 14, 12, 0, tzinfo=TZ)
 MSG = [{"role": "user", "content": "x"}]
 AIVO = Path(ok.__file__).resolve().parent
+# Saa tuoda openrouter_zdr:n (vain avoin_malli/KIELLETYT_LIITTEET lipun valintaan; Tony 19.11.2026).
+# Muut tarkistukset (ei rakenna_runko-kutsua, ei rajapinnan osoitetta) koskevat myos naita.
+ZDR_TUONTI_SALLITTU = {"mallivertailu.py"}
 # USD, joka ylittaa katon hiukan (10.87 * 0.92 = 10.0004 EUR); tasaraja testataan erikseen tarkalla kertoimella
 USD_KATTO = 10.87
 
@@ -289,7 +292,7 @@ class RakenneTesti(unittest.TestCase):
                     self.assertNotIn("openrouter.ai", n.value, p.name)
                 if isinstance(n, ast.Attribute) and n.attr == "rakenna_runko":
                     self.fail(p.name + " kutsuu rakenna_runko suoraan")
-                if isinstance(n, (ast.Import, ast.ImportFrom)):
+                if isinstance(n, (ast.Import, ast.ImportFrom)) and p.name not in ZDR_TUONTI_SALLITTU:
                     nimet = [a.name for a in n.names] + [getattr(n, "module", "") or ""]
                     self.assertFalse([x for x in nimet if "openrouter_zdr" in x], p.name)
 

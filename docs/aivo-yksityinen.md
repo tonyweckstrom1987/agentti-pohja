@@ -111,7 +111,165 @@ Yksityisen tilan päätös kirjataan vain yksityiseen muistiin (tiedosto 0600) e
 
 ## Keskustelujen tiivistys (komento)
 
-Komento `python3 -m aivo.tiivista --alue yksityinen` tiivistää yksityisen alueen keskustelut paikallisella mallilla. Se käyttää samaa loopback-osoitetta kuin chat (`--malli-url` tai `AIVO_MALLI_URL`, oletus `http://127.0.0.1:8081`) eikä hyväksy mitään muuta osoitetta. Keskustelu tiivistetään vasta, kun sen viimeisestä viestistä on 30 minuuttia. Pitkä keskustelu pilkotaan osiin, ja jokainen osa tallentuu omaksi tiivistelmäkseen kansioon `tiivistelmat`. Valinta `--kuiva` listaa tiivistettävät alueet ilman mallikutsua. Ajastusta tai systemd-yksikköä ei ole vielä; komentoa ajetaan käsin `aivo-yksityinen`-käyttäjänä.
+Komento `python3 -m aivo.tiivista --alue yksityinen` tiivistää yksityisen alueen keskustelut. Keskustelu tiivistetään vasta, kun sen viimeisestä viestistä on 30 minuuttia. Pitkä keskustelu pilkotaan osiin, ja jokainen osa tallentuu omaksi tiivistelmäkseen kansioon `tiivistelmat`. Valinta `--kuiva` listaa tiivistettävät alueet ilman mallikutsua.
+
+Mallin lähde valitaan samalla asetuksella kuin chatissa: `AIVO_YKSITYINEN_TAUSTAPAA` (tai `--taustapaa`), oletus `loopback`.
+
+- **loopback**: paikallinen malli samassa loopback-osoitteessa kuin chatissa (`--malli-url` tai `AIVO_MALLI_URL`, oletus `http://127.0.0.1:8081`). Muuta osoitetta ei hyväksytä. Kulukattoa ei ole, koska paikallinen malli ei maksa mitään.
+- **openrouter**: OpenRouterin avoin malli nollasäilytyksellä (ZDR). Malli on sama kuin chatissa (`AIVO_OPENROUTER_MALLI`), ja avain luetaan samasta tiedostosta (`AIVO_OPENROUTER_AVAIN`, oletus `/var/lib/aivo-yksityinen/openrouter-avain`). Kutsu kulkee vain funktion `yksityinen_or.kysy_tiivistys` ja sitä kautta `openrouter_kulut.kutsu`n läpi. Pyynnössä on aina `provider.zdr=true` ja `data_collection=deny`, suljettu malli hylätään ennen kutsua, ja kulut kirjataan tiedostoon `/var/lib/claude-jono/openrouter-kulut.jsonl` tehtävän tunnisteella `aivo-yksityinen-tiivistys`. Muita verkkokohteita ei ole.
+
+Kulurajat OpenRouter-taustapäällä:
+
+- Enintään 10 tiivistyskutsua vuorokaudessa (Europe/Helsinki), kuten työkalutilassa. Kutsu varataan ennen lähetystä. Kun raja täyttyy, ajo lopettaa ja kirjaa rivin `lopetus: paivakatto 10/10 taynna`.
+- Kulut lasketaan samaan konttikohtaiseen 10 €/vrk päiväkattoon kuin chatin kutsut (A1005). Jos katto on täynnä, kutsua ei tehdä, ajo lopettaa (`lopetus: kulukatto taynna`) eikä yrityskertoja kulu.
+
+Tiivistys tarkistaa vain kansiot, joita se käyttää: `chat` (luku) sekä `tiivistelmat` ja `indeksi` (kirjoitus). Niiden pitää olla palvelun käyttäjän omia, oikeuksiltaan 0700 eikä niissä saa olla linkkejä, alikansioita eikä toisen käyttäjän tiedostoja. Muuten ajo pysähtyy virheeseen `alueen tarkistus epaonnistui (AlueVirhe)`. Muita yksityisen alueen kansioita tiivistys ei avaa eikä tarkista. Siksi hylättyjen ehdotusten kansio `ehdotukset/hylatyt/` ja ydinohjeiden git-repo (`ydinohjeet/.git`) eivät estä tiivistystä.
+
+Keskustelun sisältö ei päädy lokiin (`indeksi/tiivista.log`), kulukirjanpitoon eikä virheviesteihin. Lokissa on vain keskustelun tunnus, viestien numerot ja virheen tyyppi.
+
+### Tiivistelmät yksityisen tilan kehotteeseen
+
+Chat liittää yksityisen alueen tiivistelmät yksityisen tilan kehotteeseen vain, kun palvelulla on asetus `AIVO_YKSITYISET_TIIVISTELMAT_KAYTOSSA=1` (tai valitsin `--yksityiset-tiivistelmat-kaytossa`). Oletuksena ominaisuus on pois päältä. Kansio on oletuksena `--yksityinen-data`-kansion viereinen `tiivistelmat` (eli `/var/lib/aivo-yksityinen/tiivistelmat`), ja sen voi vaihtaa asetuksella `AIVO_YKSITYISET_TIIVISTELMAT`.
+
+- Mekanismi ja yläraja ovat samat kuin työkalutilassa (`aivo/tiivistelmat_kehote.py`, enintään 60 kt). Kysymykseen osuvat ja uusimmat tiivistelmät tulevat ensin.
+- Erottelu: työkalutila lukee vain kansion `AIVO_TIIVISTELMAT` (oletus `/var/lib/aivo/tiivistelmat`), ja yksityinen tila lukee vain yksityisen alueen kansion. Palvelu ei käynnisty, jos molemmat asetukset osoittavat samaan kansioon.
+- Paikallisella mallilla 60 kt pidentää kehotteen käsittelyä selvästi (katso Keskusteluhistoria mallille). Kytkin on tarkoitettu ensisijaisesti OpenRouter-taustapäälle.
+
+Käyttöönotto: lisää `aivo-chat.service`-tiedostoon rivi `Environment=AIVO_YKSITYISET_TIIVISTELMAT_KAYTOSSA=1` ja käynnistä palvelu uudelleen (`systemctl daemon-reload && systemctl restart aivo-chat`).
+
+### Tiivistyksen ajastin (ohje, ei asennettu)
+
+Repossa ei ole tälle valmista yksikköä, eikä tämä muutos asenna mitään. Tony luo tiedostot itse, jos haluaa ajastuksen. Malli on sama kuin työkalutilan `aivo-tiivista.timer` (`docs/aivo-chat.md`). Alla on kaksi vaihtoehtoa: OpenRouter-taustapää (kontti, jossa chat käyttää OpenRouteria) ja paikallinen malli.
+
+Ajastimen käyttäjän pitää olla sama kuin `aivo-chat.service`-palvelun `User=` (kontissa `aivo`). Syy: yksityiset kansiot ja avaintiedosto tarkistetaan palvelun käyttäjän omiksi (0700 ja 0600). Tarkista käyttäjä: `systemctl show -p User aivo-chat`.
+
+1. **Kuiva-ajo** (ei mallikutsua). Kuiva-ajo ei luo kansioita. Tuoreessa asennuksessa kansioita `tiivistelmat` ja `indeksi` ei vielä ole, joten luo ne ensin palvelun käyttäjälle (kontissa `aivo`, vaihda tarvittaessa):
+
+   ```
+   install -d -m 700 -o aivo -g aivo /var/lib/aivo-yksityinen/tiivistelmat /var/lib/aivo-yksityinen/indeksi
+   runuser -u aivo -- env PYTHONPATH=/opt/agentti-pohja AIVO_YKSITYINEN_TAUSTAPAA=openrouter python3 -m aivo.tiivista --alue yksityinen --kuiva
+   ```
+
+   Odotettu tulos: rivit `tiivistettaisiin <keskustelun tunnus> viestit 0-N` tai ei mitään, jos tiivistettävää ei ole. Jos kansiot puuttuvat, ajo päättyy paluuarvoon 1 ja virheeseen `kuiva-ajo ei luo kansioita; puuttuu: tiivistelmat, indeksi`, eikä mitään luoda. Kansiota `siirrot` tiivistys ei tarvitse. Varsinainen ajo (ilman `--kuiva`) luo puuttuvat käyttämänsä kansiot itse (0700).
+
+2. **Yksikkö** `/etc/systemd/system/aivo-tiivista-yksityinen.service` (OpenRouter-taustapää):
+
+   ```
+   [Unit]
+   Description=Aivon keskustelujen tiivistys (yksityinen tila, OpenRouter ZDR)
+
+   [Service]
+   Type=oneshot
+   User=aivo
+   WorkingDirectory=/opt/agentti-pohja
+   Environment=PYTHONPATH=/opt/agentti-pohja
+   Environment=AIVO_YKSITYINEN_TAUSTAPAA=openrouter
+   Environment=AIVO_OPENROUTER_MALLI=qwen/qwen3-235b-a22b-2507
+   ExecStart=/usr/bin/python3 -m aivo.tiivista --alue yksityinen
+   NoNewPrivileges=true
+   ProtectSystem=strict
+   ProtectHome=yes
+   ReadWritePaths=/var/lib/aivo-yksityinen /var/lib/claude-jono
+   PrivateTmp=true
+   ```
+
+   Käytä samaa mallia kuin `aivo-chat.service`-tiedostossa (`--openrouter-malli` tai `AIVO_OPENROUTER_MALLI`). `/var/lib/claude-jono` on mukana `ReadWritePaths`-rivillä, koska kulukirjanpito ja päiväkatto ovat siellä. Ilman sitä jokainen kutsu estyy (fail closed). Kaksi ajoa yhtä aikaa on turvallista: toinen ajo huomaa lukon (`tiivista.lukko`) ja päättyy.
+
+   **Paikallinen malli:** jätä pois rivit `AIVO_YKSITYINEN_TAUSTAPAA` ja `AIVO_OPENROUTER_MALLI` sekä `/var/lib/claude-jono`, lisää `[Unit]`-osioon `After=aivo-malli.service` ja `[Service]`-osioon rivit `IPAddressDeny=any` ja `IPAddressAllow=127.0.0.0/8`. Ne rajaavat ajon loopbackiin kuten mallipalvelimen. Käyttäjä on se, joka omistaa `/var/lib/aivo-yksityinen`-kansion.
+
+3. **Ajastin** `/etc/systemd/system/aivo-tiivista-yksityinen.timer` (15 minuutin välein):
+
+   ```
+   [Unit]
+   Description=Aivon yksityisen tilan tiivistys 15 minuutin valein
+
+   [Timer]
+   OnBootSec=10min
+   OnUnitActiveSec=15min
+
+   [Install]
+   WantedBy=timers.target
+   ```
+
+4. **Käyttöönotto ja tarkistus:**
+
+   ```
+   systemctl daemon-reload && systemctl enable --now aivo-tiivista-yksityinen.timer
+   systemctl list-timers aivo-tiivista-yksityinen.timer
+   journalctl -u aivo-tiivista-yksityinen --since "20 min ago" --no-pager
+   ```
+
+   Odotettu tulos: ajastin näkyy listassa, ja journaalissa on rivejä `tiivistetty: …` tai ei rivejä, jos tiivistettävää ei ollut. Rivi `epaonnistui: … (TiivistaVirhe)` tai `virhe: …` kertoo yleensä, ettei malli vastannut tai avainta ei voitu lukea. Kulut näkyvät viikkoraportissa: `python3 -m aivo.openrouter_kulut viikko`.
+
+## Keskusteluhistoria mallille
+
+Yksityisen tilan kutsuun liitetään keskustelun viimeiset viestit. Raja riippuu taustapäästä:
+
+| Taustapää | Viestejä enintään | Vakio | Peruste |
+|---|---|---|---|
+| Paikallinen malli (loopback) | 12 | `yksityinen.HISTORIA_YLARAJA` | i5-8400 käsittelee pitkän kehotteen hitaasti, ja vastauksen aikaraja on 900 s. Pidempi historia ylittäisi aikarajan. |
+| OpenRouter | 40 | `yksityinen_or.HISTORIA_YLARAJA` | Etämalli käsittelee pitkän kehotteen sekunneissa. Raja on sama kuin työkalutilassa (`chat.HISTORIA_YLARAJA`). |
+
+OpenRouter-taustapään pahin tapaus: 20 Tonyn viestiä (enintään 4 000 merkkiä kukin), 20 vastausta (enintään 700 tokenia kukin), muisti 16 000 merkkiä, ydinohjeet 20 000 merkkiä ja kehote noin 3 000 merkkiä. Yhteensä noin 160 000 merkkiä eli alle 80 000 tokenia, vaikka arvioitaisiin varovasti 2 merkkiä tokenia kohti. Suositusmallin `qwen/qwen3-235b-a22b-2507` konteksti on 262 144 tokenia, joten kehote mahtuu. Jos vaihdat mallin, tarkista, että sen konteksti on vähintään 100 000 tokenia.
+
+Kehotteen sääntö 2 kertoo mallille, että keskustelun aiemmat viestit ovat käytettävissä, ja sääntö 6 kieltää lupaamasta taustatyötä tai arvioimasta kestoa: yksityisessä tilassa ei ole työkaluja, verkkoa eikä taustaprosesseja.
+
+## Mallin valinta (OpenRouter-taustapää)
+
+OpenRouter-taustapäässä mallin voi valita keskustelukohtaisesti. Sallitut mallit annetaan palvelun asetuksena:
+
+- `AIVO_OPENROUTER_MALLIT` (tai `--openrouter-mallit`) on pilkuin erotettu lista, esimerkiksi `qwen/qwen3-235b-a22b-2507,meta-llama/llama-3.3-70b-instruct`. Ensimmäinen on oletus.
+- Jokaisen mallin pitää läpäistä `avoin_malli()`. Jos yksikin on suljettu malli, `:free`-versio, tyhjä kohta tai sama malli kahdesti, palvelu ei käynnisty. Listassa voi olla enintään 10 mallia.
+- Vanha `AIVO_OPENROUTER_MALLI` (tai `--openrouter-malli`) toimii edelleen yhden mallin listana. Jos molemmat on annettu, `AIVO_OPENROUTER_MALLIT` voittaa.
+
+Käyttöliittymä:
+
+- Yksityisessä tilassa otsikkorivillä näkyy mallivalitsin, kun listassa on vähintään kaksi mallia. Yhden mallin listalla ja paikallisella taustapäällä valitsinta ei näytetä.
+- Valinta tallentuu keskustelun metatietoihin (tiedosto `<keskustelu>.meta.json` keskustelun vieressä, oikeudet 600). Valinnan voi vaihtaa kesken keskustelun: seuraava viesti käyttää uutta mallia ja tallentaa sen.
+- Jokaisen vastauksen alla on pieni teksti "Malli: …", ja keskustelutiedoston Aivon rivillä on kenttä `malli`.
+- Työkalutilassa valitsinta ei ole, eikä työkalutila hyväksy kenttää `malli` (400).
+
+Palvelin hyväksyy vain listalla olevan mallin. Selaimen lähettämä muu arvo (myös avoin malli, joka ei ole listalla) saa vastauksen 400, eikä viestiä silloin tallenneta. Kaikki mallit kulkevat saman `openrouter_kulut.kutsu`n kautta: kulukirjanpito, päiväkatto ja ZDR-pakotus ovat kaikille malleille yhteiset.
+
+Rajapinta: `GET /api/mallit` palauttaa sallitut mallit (`{"mallit": [...]}`; paikallisella taustapäällä tyhjä lista). `POST /api/uusi` ja `POST /api/viesti` hyväksyvät valinnaisen kentän `malli`, ja vastaus kertoo käytetyn mallin kentässä `malli`.
+
+## Usean mallin yhdistelmät (OpenRouter-taustapää)
+
+Yksityisen tilan vastauksen voi tuottaa useamman mallin yhteistyönä. Yhdistelmä valitaan asetuksella, ja sen voi vaihtaa keskustelukohtaisesti mallivalitsimesta. Oletus on `yksi`, eli toiminta on sama kuin ennen.
+
+Mallivertailu (19-50) ja yhdistelmävertailu (19-54) ovat vielä ajamatta, joten parasta yhdistelmää ei ole mitattu. Siksi kaikki kolme yhdistelmää on toteutettu asetuksina, ja oletus on yksi malli.
+
+| Yhdistelmä | Kutsut järjestyksessä | Roolit |
+|---|---|---|
+| `yksi` | keskustelun malli | – |
+| `tarkastus` | vastaaja kirjoittaa luonnoksen, tarkastaja kirjoittaa lopullisen vastauksen | `vastaaja`, `tarkastaja` |
+| `rinnakkais` | kaksi vastaajaa samanaikaisesti, kokoaja yhdistää | `vastaaja`, `vastaaja2`, `kokoaja` |
+| `reititys` | reititin luokittelee viestin (kevyt tai vaativa), valittu malli vastaa | `reititin`, `kevyt`, `vaativa` |
+
+Asetukset:
+
+- `AIVO_YKSITYINEN_YHDISTELMA` (tai `--yksityinen-yhdistelma`): oletusyhdistelmä uusille keskusteluille. Tuntematon arvo estää käynnistyksen. Paikallisella taustapäällä vain `yksi` kelpaa.
+- `AIVO_YKSITYINEN_ROOLIT` (tai `--yksityinen-roolit`): esimerkiksi `vastaaja:qwen/qwen3-235b-a22b-2507,tarkastaja:meta-llama/llama-3.3-70b-instruct`. Jokaisen roolin mallin pitää olla `AIVO_OPENROUTER_MALLIT`-listalla, joten se on jo läpäissyt `avoin_malli()`-tarkistuksen. Tuntematon rooli, sama rooli kahdesti tai listalta puuttuva malli estää käynnistyksen. Puuttuva rooli käyttää keskustelun mallia.
+
+Rajat (koodin vakioita, `aivo/yhdistelma.py`):
+
+- Enintään 4 mallikutsua per viesti (`MAX_KUTSUT_VIESTI`). Laskuri estää ylimääräisen kutsun ennen kuin mallia kutsutaan.
+- Enintään 3 eri mallia per yhdistelmä (`MAX_MALLEJA`).
+- Kokonaisaikaraja 240 s per viesti (`AIKARAJA_S`). Jokainen osakutsu saa aikarajaksi enintään jäljellä olevan ajan, eikä uutta kutsua aloiteta, kun aika on lopussa.
+- Jokainen osakutsu kulkee `yksityinen_or._kysy_viestit`-funktion ja `openrouter_kulut.kutsu`n kautta: ZDR on pakotettu, kulu kirjataan ja päiväkatto (A1005) koskee jokaista kutsua. Kun katto täyttyy, seuraavia kutsuja ei tehdä.
+- Jos osakutsu epäonnistuu, palataan yhden mallin vastaukseen (tarkastuksessa luonnos, rinnakkaisessa ensimmäinen onnistunut vastaus, reitityksessä kevyt malli), ja vastauksen alla näkyy merkintä. Jos yhtään vastausta ei saatu, näytetään virhe kuten yhden mallin tilassa.
+
+Merkinnät: ehdotus-, valinta-, luovutus- ja päätösmerkinnät (`[[EHDOTUS …]]`, `[[VALINNAT: …]]`, `[[LUOVUTUS]]`, `[[PAATOS n]]`) tulevat lopulliseen vastaukseen vain ensisijaisen vastaajan luonnoksesta sanasta sanaan. Tarkastaja ja kokoaja eivät näe niitä syötteessään, ja niiden kirjoittamat merkinnät poistetaan. Näin tarkastaja ei voi lisätä, muuttaa eikä pudottaa ehdotuksia. `[[VALINNAT: …]]` siirretään aina vastauksen loppuun.
+
+Käyttöliittymä:
+
+- Mallivalitsimessa ovat mallit ja niiden perässä vaihtoehdot "Yhdistelmä: tarkastus" ja niin edelleen. Mallin valinta tarkoittaa yhdistelmää `yksi`. Valinta tallentuu keskustelun metatietoihin (`yhdistelma`-kenttä).
+- Yhdistelmän vastauksen alla on pieni teksti "Mallit: a, b · kutsuja: 2". Mahdollinen paluumerkintä näkyy sen alla.
+- Linkki "Näytä luonnos" näyttää tarkastajan saaman luonnoksen tai rinnakkaiset vastaukset A ja B. Teksti asetetaan `textContent`-ominaisuudella. Luonnosta ei tallenneta keskustelutiedostoon.
+
+Rajapinta: `GET /api/mallit` palauttaa OpenRouter-taustapäällä myös kentät `yhdistelmat` ja `yhdistelma` (oletus). `POST /api/uusi` ja `POST /api/viesti` hyväksyvät kentän `yhdistelma`. Muu arvo saa vastauksen 400, eikä viestiä silloin tallenneta. Työkalutila ei hyväksy kenttää (400). Yhdistelmän vastaus sisältää kentät `yhdistelma`, `mallit`, `kutsuja` sekä tarvittaessa `luonnos` ja `merkinta`. Keskustelutiedoston Aivon rivillä ovat `yhdistelma`, `mallit`, `kutsuja` ja `merkinta`.
+
+Kulut: tarkastus ja reititys tekevät 2 kutsua ja rinnakkais 3 kutsua viestiä kohden. Tarkastajan ja kokoajan syöte sisältää luonnoksen, joten se on yhden mallin kutsua pidempi.
 
 ## Rajat ja avoimet asiat
 

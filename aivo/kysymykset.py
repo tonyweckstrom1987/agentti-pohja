@@ -107,7 +107,7 @@ def _tunniste(aihe):
 
 def _yleinen(m):
     return (m["kentat"].get("luokka", "").lower() == "yleinen"
-            and all(AIHE_SALLITTU.match(k) and not on_arka(k)
+            and all(AIHE_SALLITTU.fullmatch(k) and not on_arka(k)
                     for k in (m["kentat"]["aihe"], m["kentat"].get("avain") or m["kentat"]["aihe"])))
 
 
