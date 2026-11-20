@@ -1,0 +1,11 @@
+# Mallitiedosto, ei asenna mitaan. Kopioi Aivon kontissa: /etc/systemd/system/agenttidata-pull.timer. Vienti (CT115) on :07,:22,:37,:52, joten pull 5 min myohemmin.
+[Unit]
+Description=Aivo: agenttidata-kopion paivitys 15 min valein
+
+[Timer]
+OnCalendar=*:12,27,42,57
+Persistent=false
+Unit=agenttidata-pull.service
+
+[Install]
+WantedBy=timers.target

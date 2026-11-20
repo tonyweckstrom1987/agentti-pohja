@@ -1,0 +1,21 @@
+# Mallitiedosto, ei asenna mitaan. Kopioi Aivon kontissa (kontti 122): /etc/systemd/system/agenttidata-pull.service. Ohje: docs/agenttidata.md
+[Unit]
+Description=Aivo: agenttidata-kopion paivitys (vain luku, deploy-avain)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=aivo
+Group=aivo
+UMask=0077
+# Vain luku -avain; osoitteen portti (22 tai Gitean oma) kuten ohjeen askeleessa 8.
+Environment=GIT_SSH_COMMAND=ssh -i /var/lib/aivo/.ssh/agenttidata -o IdentitiesOnly=yes -o BatchMode=yes -o UserKnownHostsFile=/var/lib/aivo/.ssh/known_hosts_agenttidata
+ExecStart=/usr/bin/git -C /var/lib/aivo/agenttidata pull --ff-only --quiet
+TimeoutStartSec=2min
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/var/lib/aivo
+RestrictSUIDSGID=yes
