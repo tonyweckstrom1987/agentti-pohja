@@ -7,7 +7,7 @@ BUDJETTI="${2:-1.00}"
 BASE="${YOJONO_PERUS:-/var/lib/yojono}"
 CLAUDE="${YOJONO_CLAUDE:-/root/.local/bin/claude}"
 PYTHON="${YOJONO_PYTHON:-/opt/agentscope/bin/python}"
-DOCS="${YOJONO_DOCS:-/opt/agenttifirma-docs}"
+DOCS="${YOJONO_DOCS:-/var/lib/claude-jono/docs}"
 set -a; . "${YOJONO_ENV:-/etc/yojono/env}"; set +a
 export CLAUDE_CONFIG_DIR="$BASE/claude"
 mkdir -p "$BASE/tyo" "$BASE/raportit"

@@ -9,6 +9,7 @@ import unittest
 from pathlib import Path
 
 SKRIPTI = Path(__file__).resolve().parent / "ideoi.sh"
+OLETUS_DOCS = "/var/lib/claude-jono/docs"
 
 CLAUDE_STUB = """#!/bin/sh
 pwd > "$STUB_LOKI/claude-cwd"
@@ -76,6 +77,22 @@ class IdeoiTesti(unittest.TestCase):
         r = self.aja("agentti-pohja")
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("clone --depth 1 https://github.com/tonyweckstrom1987/agentti-pohja", self.git_kutsut())
+        self.assertFalse((self.loki / "claude-cwd").exists())
+
+    def test_oletuspolku_on_claude_jonon_docs_kopio(self):
+        # Oletus kiinteana: ei vanhaa polkua, ja YOJONO_DOCS ohittaa sen (testit ylla).
+        teksti = SKRIPTI.read_text()
+        self.assertIn('DOCS="${YOJONO_DOCS:-/var/lib/claude-jono/docs}"', teksti)
+        self.assertNotIn("/opt/agenttifirma-docs", teksti)
+
+    @unittest.skipIf(os.path.isdir(OLETUS_DOCS), "isannalla oletuspolku on olemassa: ei ajeta oikeaa hakemistoa")
+    def test_oletuspolku_kaytossa_ilman_ohitusta(self):
+        env = dict(os.environ, PATH=f"{self.bin}:{os.environ['PATH']}", STUB_LOKI=str(self.loki), YOJONO_PERUS=str(self.perus),
+                   YOJONO_CLAUDE=str(self.t / "claude"), YOJONO_PYTHON=sys.executable, YOJONO_ENV=str(self.t / "env"))
+        env.pop("YOJONO_DOCS", None)
+        r = subprocess.run(["sh", str(SKRIPTI), "agenttifirma", "0.10"], capture_output=True, text=True, env=env, timeout=60)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("dokumenttihakemistoa ei ole: " + OLETUS_DOCS, r.stderr)
         self.assertFalse((self.loki / "claude-cwd").exists())
 
     def test_dokumenttikopiota_ei_muuteta(self):
