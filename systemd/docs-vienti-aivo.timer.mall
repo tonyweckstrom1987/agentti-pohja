@@ -1,0 +1,13 @@
+# Mallitiedosto, ei asenna mitaan. Kopioi CT115:ssa: /etc/systemd/system/docs-vienti-aivo.timer.
+# Kerran tunnissa (minuutti 45, ei samaan aikaan docs-vienti.timerin kanssa; koodin lukko estaa lisaksi paallekkaiset ajot).
+# docs-vienti-aivo.service on Wants=/After= docs-pull.service, joten pull ajetaan ensin ja kopio on tuore.
+[Unit]
+Description=Docs-vienti (aivo) kerran tunnissa
+
+[Timer]
+OnCalendar=*:45
+Persistent=false
+Unit=docs-vienti-aivo.service
+
+[Install]
+WantedBy=timers.target

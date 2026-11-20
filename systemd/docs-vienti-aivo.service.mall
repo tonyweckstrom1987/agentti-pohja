@@ -1,0 +1,37 @@
+# Mallitiedosto, ei asenna mitaan. Kopioi CT115:ssa: /etc/systemd/system/docs-vienti-aivo.service. Ohje: docs/agenttidata.md
+[Unit]
+Description=Docs-vienti (aivo): kompassi.md ja faktat.md Gitean repoon tony/agenttidata
+# Wants= + After=: docs-pull kaynnistyy samalla ja vienti odottaa sen valmistumista (pelkka After= ei kaynnistaisi sita eika takaisi jarjestysta).
+Wants=network-online.target docs-pull.service
+After=network-online.target docs-pull.service
+
+[Service]
+Type=oneshot
+# Oma kayttaja ilman kirjautumista (ohje docs/agenttidata.md, askel 5): ei rootina. Avain /etc/docs-vienti/avain kuuluu talle kayttajalle (0600).
+User=docs-vienti
+Group=docs-vienti
+WorkingDirectory=/opt/agentti-pohja
+Environment=PYTHONDONTWRITEBYTECODE=1
+# Pakolliset: DOCS_VIENTI_OSOITE=ssh://git@<Gitean IP>[:portti]/tony/agenttidata.git ja DOCS_VIENTI_ISANTA=<Gitean IP> (ei salaisuuksia; koodi sallii vain taman yhden isannan).
+EnvironmentFile=/etc/docs-vienti/asetukset.env
+# Ensin kuiva-ajo omalla kasin: python3 -m agentti.docs_vienti --aivo --kuiva. Vie vain claude-jono/kompassi.md ja faktat.md; tulokset hoitaa docs-vienti.service.
+ExecStart=/usr/bin/python3 -B -m agentti.docs_vienti --aivo
+TimeoutStartSec=5min
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ReadWritePaths=/var/lib/docs-vienti
+ReadOnlyPaths=/opt/agenttifirma-docs /etc/docs-vienti
+# Verkko: vain Gitean yksi osoite (kaksinkertainen raja koodin tarkistuksen kanssa). Korvaa <GITEA-IP> ennen asennusta; jos jaa paikalleen, yksikko ei kaynnisty.
+IPAddressDeny=any
+IPAddressAllow=<GITEA-IP>
+RestrictAddressFamilies=AF_INET AF_UNIX
+CapabilityBoundingSet=
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+UMask=0077
