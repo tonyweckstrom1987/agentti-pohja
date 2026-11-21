@@ -1,0 +1,1 @@
+- aivo: yksityisen tilan ohjeeseen selvennys käyttäjistä: chat-palvelun perusasennuksen käyttäjä on `aivo` (aivo-chat.md), ja `aivo-yksityinen` otetaan käyttöön vasta tämän ohjeen kohdassa 4.

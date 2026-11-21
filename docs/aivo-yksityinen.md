@@ -54,6 +54,8 @@ Skripti kysyy viisi yleistä kysymystä (git, testaus, tietoturva, taivutus, sä
 
 Ota ensin snapshot, jos asennat konttiin. Käyttäjänimet ovat ehdotus.
 
+**Käyttäjät kahdessa ohjeessa.** Chat-palvelun perusasennus on ohjeessa `aivo-chat.md`, ja siinä chat-palvelun käyttäjä on `aivo` (kohdat 1 ja 5). Tämä ohje olettaa, että se asennus on tehty ensin. Tämän ohjeen kohta 1 luo lisäksi käyttäjän `aivo-yksityinen`, ja kohta 4 vaihtaa chat-palvelun käyttäjäksi `aivo-yksityinen`. Jos `aivo-chat.md`:n asennus on tekemättä, tee se ensin äläkä aja tämän ohjeen komentoja sen tilalla. Tarkista tilanne ennen aloitusta ja kohdan 4 jälkeen: `systemctl show aivo-chat -p User`.
+
 1. **Käyttäjät.** `aivo-yksityinen` ajaa chat-palvelua ja mallia. `aivo-tyokalu` ajaa työkalutilan `claude`-kutsun. Ne ovat eri käyttäjiä, jotta työkalutila ei pääse lukemaan yksityisiä kansioita tiedosto-oikeuksilla.
 
    ```
