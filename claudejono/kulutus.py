@@ -22,13 +22,37 @@ def _luku(d, avain):
     return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
 
 
-def claude_luvut(stdout):
-    """{tokenit_in, tokenit_out, cache_luku, cache_kirjoitus, usd, api_ms, malli_todellinen} Clauden JSON-tulosteesta. Lukukelvoton -> {}."""
+def tulosolio(stdout):
+    """Clauden loppuolio (type=result) tulosteesta: joko yksi JSON-olio (--output-format json) tai JSON-rivit
+    (--output-format stream-json, viimeinen result-rivi). Muu tai lukukelvoton -> None."""
+    if isinstance(stdout, (bytes, bytearray)):
+        try:
+            stdout = bytes(stdout).decode("utf-8")
+        except UnicodeDecodeError:
+            return None
     try:
         d = json.loads(stdout)
     except (ValueError, TypeError):
-        return {}
-    if not isinstance(d, dict):
+        d = None
+    if isinstance(d, dict) and d.get("type", "result") == "result":
+        return d
+    if (d is not None and not isinstance(d, dict)) or not isinstance(stdout, str):
+        return None
+    loppu = None
+    for rivi in stdout.splitlines():
+        try:
+            o = json.loads(rivi)
+        except ValueError:
+            continue
+        if isinstance(o, dict) and o.get("type") == "result":
+            loppu = o
+    return loppu
+
+
+def claude_luvut(stdout):
+    """{tokenit_in, tokenit_out, cache_luku, cache_kirjoitus, usd, api_ms, malli_todellinen} Clauden JSON-tulosteesta. Lukukelvoton -> {}."""
+    d = tulosolio(stdout)
+    if d is None:
         return {}
     u = d.get("usage") if isinstance(d.get("usage"), dict) else {}
     ulos = {}
