@@ -1,0 +1,1 @@
+- Testit: `test_paivita_ajurit` ei enää riipu siitä, ajetaanko sarja rootina. Tekaistu `id` kertoo oletuksena ei-root-uid:n, ja root-haara (oletustestikäyttäjä claudejono) testataan erikseen simuloidulla uid 0:lla. Rootina 24 kaatumista → 0.

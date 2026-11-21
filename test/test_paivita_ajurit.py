@@ -61,6 +61,15 @@ exec @GIT@ "$@"
 CHOWN = r'''#!/usr/bin/env bash
 echo "$*" >> "$SIM/chown.log"
 '''
+# Tekaistu id: `id -u` kertoo SIM/uid:n (oletus 1000 eli ei-root), joten skriptin root-haara (TESTIKAYTTAJA=claudejono)
+# ei riipu siita, ajetaanko testit rootina. SIM/ei_kayttajaa: `id [-u --] <nimi>` epaonnistuu kuin kayttajaa ei olisi.
+ID = r'''#!/usr/bin/env bash
+if [ "$*" = "-u" ]; then cat "$SIM/uid" 2>/dev/null || echo 1000; exit 0; fi
+if [ -f "$SIM/ei_kayttajaa" ] && [ "${!#}" = "$(cat "$SIM/ei_kayttajaa")" ]; then
+  echo "id: '${!#}': no such user" >&2; exit 1
+fi
+exec @ID@ "$@"
+'''
 
 
 def testikayttaja():
@@ -91,7 +100,8 @@ class PaivitaAjuritTesti(unittest.TestCase):
         self.sim.mkdir(); self.opt.mkdir()
         (self.sim / "systemctl").write_text(SYSTEMCTL); (self.sim / "systemctl").chmod(0o755)
         (self.sim / "bin").mkdir()
-        for nimi, sisalto in (("mv", MV.replace("@MV@", shutil.which("mv"))), ("runuser", RUNUSER), ("chown", CHOWN), ("git", GIT.replace("@GIT@", shutil.which("git")))):
+        for nimi, sisalto in (("mv", MV.replace("@MV@", shutil.which("mv"))), ("runuser", RUNUSER), ("chown", CHOWN), ("git", GIT.replace("@GIT@", shutil.which("git"))),
+                             ("id", ID.replace("@ID@", shutil.which("id") or "/usr/bin/id"))):
             (self.sim / "bin" / nimi).write_text(sisalto); (self.sim / "bin" / nimi).chmod(0o755)
         (self.sim / "timers").write_text("claude-jono@1.timer loaded active waiting x\nyojono.timer loaded active waiting y\n")
         self.src = self.tmp / "src"; self.src.mkdir()
@@ -416,13 +426,17 @@ class PaivitaAjuritTesti(unittest.TestCase):
 
     def test_oletuksena_ei_runuseria_kun_ei_roottina(self):
         self.commit({"claudejono/ajuri.py": "VERSIO = 2\n"}, "v2")
-        # Testi asettaa ehdon itse: `id -u` (ilman muita argumentteja) kertoo ei-root-uid:n, vaikka testi ajettaisiin rootina.
-        idpolku = self.sim / "bin" / "id"
-        oikea_id = shutil.which("id") or "/usr/bin/id"  # which palauttaa None, jos PATH on tyhja tai id puuttuu
-        idpolku.write_text('#!/usr/bin/env bash\n[ "$*" = "-u" ] && { echo 1000; exit 0; }\nexec @ID@ "$@"\n'.replace("@ID@", oikea_id))
-        idpolku.chmod(0o755)
+        # Ehto tulee tekaistusta id:sta (setUp): `id -u` kertoo ei-root-uid:n, vaikka testi ajettaisiin rootina.
         self.assertEqual(self.aja().returncode, 0)
         self.assertFalse((self.sim / "runuser.log").exists())
+
+    def test_rootina_oletustestikayttaja_on_claudejono(self):
+        # Root-haara simuloidaan: uid 0, ei PAIVITA_TESTIKAYTTAJAa, claudejonoa ei ole -> pysahtyy ennen muutoksia.
+        self.commit({"claudejono/ajuri.py": "VERSIO = 2\n"}, "v2")
+        (self.sim / "uid").write_text("0\n"); (self.sim / "ei_kayttajaa").write_text("claudejono")
+        r = self.aja()
+        self.assertEqual(r.returncode, 2, r.stdout)
+        self.assertIn("testikayttajaa claudejono ei ole", r.stdout); self.assertEnnallaan()
 
     def test_testikayttajaa_ei_ole_estaa_ennen_muutoksia(self):
         self.commit({"claudejono/ajuri.py": "VERSIO = 2\n"}, "v2")
