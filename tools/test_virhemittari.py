@@ -126,6 +126,56 @@ class LaskeTesti(unittest.TestCase):
         self.assertEqual([v[1] for v, _ in rivit], [45, 46, 47])
 
 
+class ValmisRikkiTesti(unittest.TestCase):
+    TULOS = "# Tulos: %s\n\n- Tila: VALMIS\n- Aika: 2026-11-04T10:00+02:00\n\nTehty.\n"
+    RIKKI = "- Tarkastaja: opus\n- Toimii k\u00e4yt\u00f6ss\u00e4: ei\n- Todiste: journalctl: Traceback\n"
+
+    def test_valmis_joka_todettiin_toimimattomaksi_lasketaan(self):
+        nyt = datetime.date(2026, 11, 5)
+        tulokset = [("2026-11-02-01-a.md", self.TULOS % "a"), ("2026-11-02-02-b.md", self.TULOS % "b")]
+        rivit, t = vm.laske("", tulokset, nyt, tarkastukset={"2026-11-02-01-a.md": self.RIKKI,
+                                                                "2026-11-02-02-b.md": self.RIKKI.replace(": ei", ": kyll\u00e4")})
+        self.assertEqual(t["valmis_rikki"], 1)
+        self.assertEqual(sum(r["valmis_rikki"] for _, r in rivit), 1)
+        self.assertEqual(sum(r["luokat"]["1"] for _, r in rivit), 1)
+
+    def test_ilman_tarkastuksia_ei_muutosta(self):
+        _, t = vm.laske("", [("2026-11-02-01-a.md", self.TULOS % "a")], datetime.date(2026, 11, 5))
+        self.assertEqual((t["valmis_rikki"], t["ajot"]), (0, 0))
+
+    def test_osiossa_sarake(self):
+        rivit, t = vm.laske("", [("2026-11-02-01-a.md", self.TULOS % "a")], datetime.date(2026, 11, 5),
+                            tarkastukset={"2026-11-02-01-a.md": self.RIKKI})
+        self.assertIn("VALMIS, my\u00f6hemmin toimimaton", "\n".join(vm.muodosta_osio(rivit, t, datetime.date(2026, 11, 5))))
+
+    def test_main_polku_tiedostonimi_ja_otsikko_eroavat(self):
+        """Oikea data: tiedosto 2026-11-02-01-a.md, otsikko '# Tulos: a'. main() ei saa hukata tarkastusta."""
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            (d / "tulokset").mkdir()
+            (d / "virheloki.md").write_text(LOKI, encoding="utf-8")
+            (d / "tulokset" / "2026-11-02-01-a.md").write_text(self.TULOS % "a", encoding="utf-8")
+            (d / "tulokset" / "2026-11-02-01-a.tarkastus.md").write_text(self.RIKKI, encoding="utf-8")
+            (d / "tulostaulu.md").write_text("# T\n\n## Virhemittari\nvanha\n", encoding="utf-8")
+            ulos = d / "ulos.md"
+            self.assertEqual(vm.main(["--docs", tmp, "--nyt", "2026-11-05", "--ulos", str(ulos)]), 0)
+            osio = ulos.read_text(encoding="utf-8")
+            self.assertIn("n\u00e4ist\u00e4 VALMIS: 1)", osio)
+
+    def test_main_tarkastustiedosto_ei_ole_tulos(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            (d / "tulokset").mkdir()
+            (d / "virheloki.md").write_text(LOKI, encoding="utf-8")
+            (d / "tulokset" / "2026-11-02-01-a.md").write_text(self.TULOS % "a", encoding="utf-8")
+            # Tarkastustiedosto, jossa on (virheellisesti) myos Tila-rivi: ei saa laskea omaksi tuloksekseen.
+            (d / "tulokset" / "2026-11-02-01-a.tarkastus.md").write_text(self.TULOS % "a" + self.RIKKI, encoding="utf-8")
+            (d / "tulostaulu.md").write_text("# T\n\n## Virhemittari\nvanha\n", encoding="utf-8")
+            ulos = d / "ulos.md"
+            self.assertEqual(vm.main(["--docs", tmp, "--nyt", "2026-11-05", "--ulos", str(ulos)]), 0)
+            self.assertIn("1 tulostiedostoa", ulos.read_text(encoding="utf-8"))
+
+
 class OsioTesti(unittest.TestCase):
     def test_korvaa_vain_osion_rungon(self):
         taulu = "# T\n\n## Muu\na\n\n## Virhemittari (x)\nvanha\n| a |\n\n## Kirjaukset\nb\n"
