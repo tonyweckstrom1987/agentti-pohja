@@ -25,6 +25,7 @@ from aivo import tiivistelma
 from aivo.alue import AlueVirhe, tarkista_hakemisto
 
 INDEKSI_NIMI = "tiivistelmat.sqlite"
+KAYTETYT_ALIKANSIOT = ("tiivistelmat", "indeksi")   # rakennus lukee ja kirjoittaa vain nama; muut jaavat tarkistamatta
 PALA_TAVOITE = 1000          # merkkia; pilkonta sanarajalla
 PALA_MIN = 800
 PALA_MAX = 1500
@@ -109,7 +110,7 @@ def rakenna(alue):
     """Rakentaa alueen indeksin tyhjasta uudelleen alueen tiivistelmista (atomisesti: valiaikainen tiedosto ja os.replace).
     Palauttaa (tiivistelmia, paloja). Lukuvirhe yksittaisessa tiivistelmassa ohitetaan, muu virhe keskeyttaa."""
     try:
-        alue.valmista()
+        alue.valmista(alikansiot=KAYTETYT_ALIKANSIOT)
         indeksikansio = tarkista_hakemisto(alue.polku("indeksi"))
         tkansio = alue.polku("tiivistelmat")
     except AlueVirhe as e:

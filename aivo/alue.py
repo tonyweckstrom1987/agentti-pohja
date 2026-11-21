@@ -118,12 +118,20 @@ class Alue:
             return False
         return True
 
-    def valmista(self, luo=True):
-        """Luo ja tarkistaa juuren seka kaikki alikansiot (omistaja, 0700, ei linkkeja) ja niiden tiedostot (0600).
+    def valmista(self, luo=True, alikansiot=None):
+        """Luo ja tarkistaa juuren seka alikansiot (omistaja, 0700, ei linkkeja) ja niiden tiedostot (0600).
+        alikansiot=None: kaikki alueen alikansiot. Muuten vain annetut (osajoukko; vieras nimi => AlueVirhe), jotta
+        kayttaja voi rajata tarkistuksen kansioihin, joita se oikeasti lukee tai kirjoittaa.
         Palauttaa {alikansio: Path}."""
+        if alikansiot is None:
+            valitut = self.alikansiot
+        else:
+            valitut = tuple(alikansiot)
+            if not valitut or any(a not in self.alikansiot for a in valitut):
+                raise AlueVirhe("alikansio ei kuulu alueeseen %s" % self.nimi)
         tarkista_hakemisto(self.juuri, luo=luo)
         tulos = {}
-        for a in self.alikansiot:
+        for a in valitut:
             p = tarkista_hakemisto(self.polku(a), luo=luo)
             tarkista_tiedostot(p, salli_git=a in self.git_alikansiot)
             tulos[a] = p

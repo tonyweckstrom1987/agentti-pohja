@@ -1,0 +1,1 @@
+- aivo: haun indeksin rakennus (aivo.haku.rakenna) tarkistaa vain käyttämänsä kansiot (tiivistelmat, indeksi), joten ehdotukset/hylatyt/ ja ydinohjeet/.git eivät enää kaada sitä yksityisellä alueella; linkit ja vieras omistaja hylätään niissä edelleen
