@@ -792,6 +792,46 @@ def julkaise(repo, polut, viesti=None):
         return _tyonna(repo)
 
 
+ELONMERKKI = "elonmerkki.md"
+ELONMERKKI_VALI_S = 2 * 3600   # ulkoinen valvoja halyttaa, jos CT115 on ollut 3 h hiljaa; 2 h jattaa tunnin varan
+
+
+def viimeisin_oma_commit(repo):
+    """Taman koneen viimeisimman commitin aika (epoch) tai None. Tunnistus git-asetuksen user.emailin mukaan;
+    ilman sita kaytetaan elonmerkkitiedoston omaa historiaa."""
+    sposti = git(repo, "config", "user.email", check=False).stdout.strip()
+    rajaus = [f"--committer={sposti}", "HEAD"] if sposti else ["HEAD", "--", f"{JONO}/{ELONMERKKI}"]
+    arvo = git(repo, "log", "-1", "--format=%ct", *rajaus, check=False).stdout.strip()
+    return int(arvo) if arvo.isdigit() else None
+
+
+def elonmerkki(repo, tila_viesti, nyt=None, vali_s=ELONMERKKI_VALI_S):
+    """Hiljainen jono (ei tuloksia eika uusia tehtavia) pushaa claude-jono/elonmerkki.md:n enintaan kerran vali_s:ssa.
+    Ulkoinen valvoja (pilvi-istunto) erottaa nain hiljaisen jonon sammuneesta palvelimesta: 21.11.2026 kaistat 1-2
+    olivat 4 h hiljaa (jonossa vain Aivo-tehtavia, 'jono riittaa'), mika nayttaa ulospain samalta kuin sahkokatko.
+    Palauttaa True, jos elonmerkki pushattiin. Virhe ei kaada ajoa (elonmerkki on sivutoiminto)."""
+    nyt = nyt or datetime.now().astimezone()
+    try:
+        edellinen = viimeisin_oma_commit(repo)
+        if edellinen is not None and 0 <= nyt.timestamp() - edellinen < vali_s:
+            return False
+        tila_viesti = "".join(c if 32 <= ord(c) < 127 or c in "\u00e4\u00f6\u00c4\u00d6" else "?" for c in str(tila_viesti))[:200]
+        p = Path(repo) / JONO / ELONMERKKI
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text("# Elonmerkki (CT115, claude-jono)\n\n"
+                     "Ajuri kirjoittaa taman, kun jono on ollut hiljaa (ei tuloksia eika tehtavia) vahintaan "
+                     f"{vali_s // 3600} h. Ulkoinen valvoja lukee commitin ajan.\n\n"
+                     f"- Aika: {nyt.isoformat(timespec='minutes')}\n- Kaistan 1 tila: {tila_viesti}\n", encoding="utf-8")
+        return bool(julkaise(repo, [p], "claude-jono: elonmerkki"))
+    except (JonoVirhe, OSError, subprocess.SubprocessError) as virhe:
+        # likainen tyopuu estaisi seuraavan pull --rebasen: palautetaan tiedosto (tai poistetaan uusi)
+        git(repo, "reset", "-q", "--", f"{JONO}/{ELONMERKKI}", check=False)
+        if git(repo, "checkout", "-q", "--", f"{JONO}/{ELONMERKKI}", check=False).returncode != 0:
+            (Path(repo) / JONO / ELONMERKKI).unlink(missing_ok=True)
+        print(f"claude-jono: elonmerkki epaonnistui: {type(virhe).__name__}", file=sys.stderr, flush=True)
+        return False
+
+
 def auto_tanaan(repo, pvm):
     teht = Path(repo) / JONO / "tehtavat"
     return sum(1 for p in teht.glob(f"{pvm}-*-auto-*.md")) if teht.is_dir() else 0
@@ -1347,7 +1387,10 @@ def main(argv=None):
         except Exception:
             laheta_telegram = None
         try:
-            print(aja(repo, tyohak, laheta=laheta_telegram, kaista=a.kaista, aivo_arvioija=aivo_arvioija()))
+            viesti = aja(repo, tyohak, laheta=laheta_telegram, kaista=a.kaista, aivo_arvioija=aivo_arvioija())
+            print(viesti)
+            if a.kaista == 1 and isinstance(viesti, str) and viesti.startswith("jono"):
+                elonmerkki(repo, viesti)   # hiljainen jono: ulkoinen valvoja nakee, etta palvelin on paalla
         except Exception as virhe:  # kaikki kaatumiset halytetaan (vika 30.10.: FileNotFoundError jai hiljaiseksi 20 h)
             kuvaus = f"{type(virhe).__name__}: {str(virhe)[:200]}"
             print(f"claude-jono virhe: {kuvaus}", file=sys.stderr)
