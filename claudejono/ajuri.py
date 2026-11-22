@@ -816,6 +816,22 @@ def viimeisin_oma_commit(repo):
     return int(arvo) if arvo.isdigit() else None
 
 
+AJURIN_HAKEMISTO = Path(__file__).resolve().parent.parent
+
+
+def ajurin_versio(hakemisto=None):
+    """Ajurin oman checkoutin lyhyt commit (esim. 627a708) tai 'tuntematon'. Ulkoinen valvoja vertaa sita mainiin:
+    22.11.2026 #376 ja #380 olivat mainissa, mutta CT115:n /opt/agentti-pohja oli 18.11. versiossa, ja jono oli hiljaa
+    3,5 h. safe.directory=*: hakemisto on usein rootin, ajo claudejonon (muuten git kieltaytyy 'dubious ownership')."""
+    try:
+        r = subprocess.run(["git", "-c", "safe.directory=*", "-C", str(hakemisto or AJURIN_HAKEMISTO),
+                            "rev-parse", "--short=7", "HEAD"], capture_output=True, text=True, check=False, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return "tuntematon"
+    arvo = r.stdout.strip()
+    return arvo if r.returncode == 0 and re.fullmatch(r"[0-9a-f]{7,40}", arvo) else "tuntematon"
+
+
 def _siisti(teksti, pituus=200):
     return "".join(c if 32 <= ord(c) < 127 or c in "\u00e4\u00f6\u00c4\u00d6" else "?" for c in str(teksti))[:pituus]
 
@@ -837,7 +853,8 @@ def elonmerkki(repo, tila_viesti, nyt=None, vali_s=ELONMERKKI_VALI_S):
         p.write_text(f"# Elonmerkki ({kone}, claude-jono)\n\n"
                      "Ajuri kirjoittaa taman, kun jono on ollut hiljaa (ei tuloksia eika tehtavia) vahintaan "
                      f"{vali_s // 3600} h. Ulkoinen valvoja lukee commitin ajan.\n\n"
-                     f"- Aika: {nyt.isoformat(timespec='minutes')}\n- Kone: {kone}\n- Kaistan 1 tila: {tila_viesti}\n", encoding="utf-8")
+                     f"- Aika: {nyt.isoformat(timespec='minutes')}\n- Kone: {kone}\n- Ajurin versio: {ajurin_versio()}\n"
+                     f"- Kaistan 1 tila: {tila_viesti}\n", encoding="utf-8")
         return bool(julkaise(repo, [p], "claude-jono: elonmerkki"))
     except (JonoVirhe, OSError, subprocess.SubprocessError) as virhe:
         # likainen tyopuu estaisi seuraavan pull --rebasen: palautetaan tiedosto (tai poistetaan uusi)

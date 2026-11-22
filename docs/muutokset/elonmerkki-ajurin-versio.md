@@ -1,0 +1,1 @@
+- claudejono: elonmerkki.md kertoo ajurin oman checkoutin commitin (`- Ajurin versio: <sha>`), jotta ulkoinen valvoja näkee, onko palvelimen ajuri jäljessä mainista. 22.11.2026 #376 ja #380 olivat mainissa, mutta palvelimen ajuri oli 18.11. versiossa ja jono oli hiljaa 3,5 h.

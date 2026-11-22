@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from unittest import mock
 
 from claudejono import ajuri
-from claudejono.test_ajuri import Pohja, git
+from claudejono.test_ajuri import Pohja, git, git_ulos
 
 
 def origin_log(pohja):
@@ -60,6 +60,23 @@ class Elonmerkki(Pohja):
         teksti = (self.repo / "claude-jono" / "elonmerkki.md").read_text(encoding="utf-8")
         self.assertNotIn("\x1b", teksti)
         self.assertNotIn("\n# otsikko", teksti)
+
+    def test_ajurin_versio_elonmerkissa(self):
+        # ulkoinen valvoja vertaa versiota mainiin (22.11.2026: CT115:n ajurit 18.11. versiossa)
+        nyt = datetime.now().astimezone() + timedelta(hours=3)
+        with mock.patch.object(ajuri, "ajurin_versio", return_value="abc1234"):
+            self.assertTrue(ajuri.elonmerkki(self.repo, "jono riittaa", nyt=nyt))
+        teksti = (self.repo / "claude-jono" / "elonmerkki.md").read_text(encoding="utf-8")
+        self.assertIn("- Ajurin versio: abc1234\n", teksti)
+
+    def test_ajurin_versio_lukee_checkoutin(self):
+        odotettu = git_ulos(self.repo, "rev-parse", "--short=7", "HEAD")
+        self.assertEqual(ajuri.ajurin_versio(self.repo), odotettu)
+
+    def test_ajurin_versio_ei_gitia(self):
+        self.assertEqual(ajuri.ajurin_versio(self.repo / "ei-ole"), "tuntematon")
+        with mock.patch.object(ajuri.subprocess, "run", side_effect=OSError("ei gitia")):
+            self.assertEqual(ajuri.ajurin_versio(self.repo), "tuntematon")
 
     def test_konenimi_ajonaikaisesti(self):
         nyt = datetime.now().astimezone() + timedelta(hours=3)
