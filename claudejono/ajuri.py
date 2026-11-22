@@ -16,6 +16,7 @@ import os
 import posixpath
 import re
 import shutil
+import socket
 import stat
 import subprocess
 import sys
@@ -793,16 +794,30 @@ def julkaise(repo, polut, viesti=None):
 
 
 ELONMERKKI = "elonmerkki.md"
-ELONMERKKI_VALI_S = 2 * 3600   # ulkoinen valvoja halyttaa, jos CT115 on ollut 3 h hiljaa; 2 h jattaa tunnin varan
+ELONMERKKI_VALI_S = 2 * 3600   # ulkoinen valvoja halyttaa 3 h hiljaisuudesta; 2 h jattaa tunnin varan
+
+
+def _julkaistu_ref(repo):
+    """Etahaaran ref (upstream tai origin/<haara>), jotta pushaamaton paikallinen commit ei todista elonmerkkia; muuten HEAD."""
+    haara = git(repo, "rev-parse", "--abbrev-ref", "HEAD", check=False).stdout.strip()
+    for ref in ("@{u}", f"origin/{haara}" if haara and haara != "HEAD" else ""):
+        if ref and git(repo, "rev-parse", "-q", "--verify", f"{ref}^{{commit}}", check=False).returncode == 0:
+            return ref
+    return "HEAD"
 
 
 def viimeisin_oma_commit(repo):
-    """Taman koneen viimeisimman commitin aika (epoch) tai None. Tunnistus git-asetuksen user.emailin mukaan;
-    ilman sita kaytetaan elonmerkkitiedoston omaa historiaa."""
+    """Taman koneen viimeisimman julkaistun commitin aika (epoch) tai None. Tunnistus git-asetuksen user.emailin mukaan
+    tarkkana merkkijonona (<sposti>, ei regex); ilman sita kaytetaan elonmerkkitiedoston omaa historiaa."""
     sposti = git(repo, "config", "user.email", check=False).stdout.strip()
-    rajaus = [f"--committer={sposti}", "HEAD"] if sposti else ["HEAD", "--", f"{JONO}/{ELONMERKKI}"]
+    ref = _julkaistu_ref(repo)
+    rajaus = ["--fixed-strings", f"--committer=<{sposti}>", ref] if sposti else [ref, "--", f"{JONO}/{ELONMERKKI}"]
     arvo = git(repo, "log", "-1", "--format=%ct", *rajaus, check=False).stdout.strip()
     return int(arvo) if arvo.isdigit() else None
+
+
+def _siisti(teksti, pituus=200):
+    return "".join(c if 32 <= ord(c) < 127 or c in "\u00e4\u00f6\u00c4\u00d6" else "?" for c in str(teksti))[:pituus]
 
 
 def elonmerkki(repo, tila_viesti, nyt=None, vali_s=ELONMERKKI_VALI_S):
@@ -815,13 +830,14 @@ def elonmerkki(repo, tila_viesti, nyt=None, vali_s=ELONMERKKI_VALI_S):
         edellinen = viimeisin_oma_commit(repo)
         if edellinen is not None and 0 <= nyt.timestamp() - edellinen < vali_s:
             return False
-        tila_viesti = "".join(c if 32 <= ord(c) < 127 or c in "\u00e4\u00f6\u00c4\u00d6" else "?" for c in str(tila_viesti))[:200]
+        tila_viesti = _siisti(tila_viesti)
+        kone = _siisti(socket.gethostname() or "tuntematon", 64)
         p = Path(repo) / JONO / ELONMERKKI
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text("# Elonmerkki (CT115, claude-jono)\n\n"
+        p.write_text(f"# Elonmerkki ({kone}, claude-jono)\n\n"
                      "Ajuri kirjoittaa taman, kun jono on ollut hiljaa (ei tuloksia eika tehtavia) vahintaan "
                      f"{vali_s // 3600} h. Ulkoinen valvoja lukee commitin ajan.\n\n"
-                     f"- Aika: {nyt.isoformat(timespec='minutes')}\n- Kaistan 1 tila: {tila_viesti}\n", encoding="utf-8")
+                     f"- Aika: {nyt.isoformat(timespec='minutes')}\n- Kone: {kone}\n- Kaistan 1 tila: {tila_viesti}\n", encoding="utf-8")
         return bool(julkaise(repo, [p], "claude-jono: elonmerkki"))
     except (JonoVirhe, OSError, subprocess.SubprocessError) as virhe:
         # likainen tyopuu estaisi seuraavan pull --rebasen: palautetaan tiedosto (tai poistetaan uusi)

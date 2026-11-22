@@ -29,7 +29,7 @@ class Elonmerkki(Pohja):
         self.assertFalse((self.repo / "claude-jono" / "elonmerkki.md").exists())
 
     def test_toisen_kirjoittajan_commit_ei_estaa(self):
-        # Tonyn tai muun istunnon commit ei todista, etta CT115 on paalla
+        # Tonyn tai muun istunnon commit ei todista, etta tama kone on paalla
         git(self.repo, "config", "user.email", "toinen@t")
         (self.repo / "muu.md").write_text("x\n", encoding="utf-8")
         git(self.repo, "add", "muu.md")
@@ -60,6 +60,38 @@ class Elonmerkki(Pohja):
         teksti = (self.repo / "claude-jono" / "elonmerkki.md").read_text(encoding="utf-8")
         self.assertNotIn("\x1b", teksti)
         self.assertNotIn("\n# otsikko", teksti)
+
+    def test_konenimi_ajonaikaisesti(self):
+        nyt = datetime.now().astimezone() + timedelta(hours=3)
+        with mock.patch.object(ajuri.socket, "gethostname", return_value="kone-x\n# y"):
+            self.assertTrue(ajuri.elonmerkki(self.repo, "jono tyhja", nyt=nyt))
+        teksti = (self.repo / "claude-jono" / "elonmerkki.md").read_text(encoding="utf-8")
+        self.assertIn("# Elonmerkki (kone-x?# y, claude-jono)", teksti)
+        self.assertIn("- Kone: kone-x?# y", teksti)
+        self.assertNotIn("CT115", teksti)
+
+    def test_pushaamaton_oma_commit_ei_estaa(self):
+        # julkaise kaatui commitin jalkeen ennen pushia: paikallinen commit ei nay originissa, joten uusi yritys tehdaan
+        (self.repo / "paikallinen.md").write_text("x\n", encoding="utf-8")
+        git(self.repo, "add", "paikallinen.md")
+        git(self.repo, "commit", "-q", "-m", "pushaamaton")
+        nyt = datetime.now().astimezone() + timedelta(hours=3)
+        with mock.patch.dict("os.environ", {"GIT_COMMITTER_DATE": nyt.isoformat()}):
+            git(self.repo, "commit", "-q", "--amend", "--no-edit")
+        self.assertTrue(ajuri.elonmerkki(self.repo, "jono tyhja", nyt=nyt + timedelta(minutes=5)))
+        self.assertIn("claude-jono: elonmerkki", origin_log(self))
+
+    def test_sposti_ei_ole_regex_eika_osajono(self):
+        # t.t -sposti ei saa tunnistaa committeja osoitteesta tXt tai xt.t (regex / osajono)
+        for vieras in ("tXt@t", "xt.t@t"):
+            git(self.repo, "config", "user.email", vieras)
+            (self.repo / f"{vieras}.md").write_text("x\n", encoding="utf-8")
+            git(self.repo, "add", f"{vieras}.md")
+            git(self.repo, "commit", "-q", "-m", vieras)
+            git(self.repo, "push", "-q", "origin", "HEAD:main")
+        git(self.repo, "fetch", "-q", "origin")
+        git(self.repo, "config", "user.email", "t.t@t")
+        self.assertIsNone(ajuri.viimeisin_oma_commit(self.repo))
 
     def test_polku_on_sallittu(self):
         self.assertTrue(ajuri.sallittu_polku("claude-jono/elonmerkki.md"))
