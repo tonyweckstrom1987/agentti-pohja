@@ -1,0 +1,1 @@
+- tools/mutantit: testi vartioi LISATESTIT-taulukkoa: ei toistuvia avaimia (konfliktin ratkaisu liittämällä molemmat rivit jättäisi vain jälkimmäisen), jokainen moduuli ja testitiedosto on olemassa (testimoduulit() ohittaa puuttuvat hiljaa) eikä rivillä ole samaa testitiedostoa kahdesti.

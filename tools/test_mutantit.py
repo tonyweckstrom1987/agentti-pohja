@@ -320,5 +320,49 @@ class PaaTesti(unittest.TestCase):
         self.assertEqual(self.kutsu("agentti/mod.py"), 2)
 
 
+class LisatestitTaulukkoTesti(unittest.TestCase):
+    """Vartija LISATESTIT-taulukolle: virheellinen rivi pudottaisi testitiedoston mutanttiajosta ilman virheilmoitusta."""
+
+    def _taulukko(self, lahde=None):
+        if lahde is None:
+            with open(mu.__file__, encoding="utf-8") as f:
+                lahde = f.read()
+        for solmu in ast.walk(ast.parse(lahde)):
+            if isinstance(solmu, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "LISATESTIT" for t in solmu.targets):
+                return solmu.value
+        self.fail("LISATESTIT-sijoitusta ei loydy")
+
+    @staticmethod
+    def _toistuvat_avaimet(sanakirja):
+        nahdyt, toistuvat = set(), []
+        for avain in sanakirja.keys:
+            arvo = ast.literal_eval(avain)
+            if arvo in nahdyt:
+                toistuvat.append(arvo)
+            nahdyt.add(arvo)
+        return toistuvat
+
+    def test_ei_toistuvia_avaimia(self):
+        # Kaksi saman avaimen rivia (esim. konfliktin ratkaisu liittamalla molemmat puolet) jattaa vain jalkimmaisen.
+        self.assertEqual(self._toistuvat_avaimet(self._taulukko()), [])
+
+    def test_vartija_havaitsee_toistuvan_avaimen(self):
+        lahde = 'LISATESTIT = {\n    "aivo/a.py": ["aivo/test_x.py"],\n    "aivo/a.py": ["aivo/test_y.py"],\n}\n'
+        self.assertEqual(self._toistuvat_avaimet(self._taulukko(lahde)), ["aivo/a.py"])
+
+    def test_moduulit_ja_testitiedostot_ovat_olemassa(self):
+        # testimoduulit() suodattaa puuttuvat polut hiljaa, joten kirjoitusvirhe poistaisi testin ajosta.
+        puuttuvat = []
+        for moduuli, testit in mu.LISATESTIT.items():
+            for polku in [moduuli] + list(testit):
+                if not os.path.isfile(os.path.join(mu.JUURI, polku)):
+                    puuttuvat.append(polku)
+        self.assertEqual(puuttuvat, [])
+
+    def test_ei_toistuvia_testitiedostoja_rivilla(self):
+        toistuvat = {m: t for m, t in mu.LISATESTIT.items() if len(t) != len(set(t))}
+        self.assertEqual(toistuvat, {})
+
+
 if __name__ == "__main__":
     unittest.main()
