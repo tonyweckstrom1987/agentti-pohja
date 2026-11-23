@@ -103,7 +103,9 @@ else
   CT_ID=""
   i=$ALKU_ID
   while [ "$i" -le "$LOPPU_ID" ]; do
-    if ! printf '%s\n' "$KAYTOSSA" | grep -qx "$i"; then CT_ID=$i; break; fi
+    # here-string eika putki: pipefailin kanssa grep -q:n aikainen lopetus voi antaa printf:lle SIGPIPEn (141),
+    # jolloin kaytossa oleva ID tulkittaisiin vapaaksi
+    if ! grep -qx "$i" <<< "$KAYTOSSA"; then CT_ID=$i; break; fi
     i=$((i + 1))
   done
   [ -n "$CT_ID" ] || virhe "ei vapaata CT-ID:ta valilla $ALKU_ID-$LOPPU_ID (siivoa vanhat kloonit kasin)"
@@ -133,14 +135,15 @@ siivoa() {
   if [ "$KUIVA" = 1 ]; then exit "$rc"; fi
   LOPPU_EPOCH=$(date +%s)
   if [ "$KLOONATTU" = 1 ]; then
-    if "$PCT" status "$CT_ID" 2>/dev/null | grep -q running; then ct stop "$CT_ID" --timeout 20 >/dev/null 2>&1; fi
+    if grep -q running <<< "$("$PCT" status "$CT_ID" 2>/dev/null)"; then ct stop "$CT_ID" --timeout 20 >/dev/null 2>&1; fi
     # tuhoaminen vain jos kontti on varmasti taman ajon klooni: oikea nimi ja hiekkalaatikkosilta, ei isannan polkuja
     local conf
     conf="$("$PCT" config "$CT_ID" 2>/dev/null)"
     if [ "$SAILYTA" = 1 ]; then
       echo "# --sailyta: CT $CT_ID jatetaan (tuhoa kasin: $PCT destroy $CT_ID --purge 1)"
-    elif printf '%s\n' "$conf" | grep -qx "hostname: $NIMI" && printf '%s\n' "$conf" | grep -q "bridge=$SILTA" \
-         && ! printf '%s\n' "$conf" | grep -qE '^(mp[0-9]+|dev[0-9]+|lxc\.)'; then
+    # here-string eika putki: '! printf | grep -q' tulkitsisi SIGPIPEn (141) niin, ettei kiellettyja riveja ole
+    elif grep -qx "hostname: $NIMI" <<< "$conf" && grep -q "bridge=$SILTA" <<< "$conf" \
+         && ! grep -qE '^(mp[0-9]+|dev[0-9]+|lxc\.)' <<< "$conf"; then
       if ct destroy "$CT_ID" --purge 1 >/dev/null; then echo "# klooni $CT_ID tuhottu"; else rc=5; fi
       rm -f "${FW_HAKEMISTO:?}/${CT_ID:?}.fw"
     else
@@ -199,10 +202,10 @@ ct snapshot "$CT_ID" ennen
 ct start "$CT_ID"
 if [ "$KUIVA" = 0 ]; then
   for _ in $(seq 1 30); do
-    if "$PCT" status "$CT_ID" | grep -q running; then break; fi
+    if grep -q running <<< "$("$PCT" status "$CT_ID")"; then break; fi
     sleep 1
   done
-  "$PCT" status "$CT_ID" | grep -q running || { echo "aja-kokeilu.sh: kontti ei kaynnistynyt" >&2; exit 1; }
+  grep -q running <<< "$("$PCT" status "$CT_ID")" || { echo "aja-kokeilu.sh: kontti ei kaynnistynyt" >&2; exit 1; }
 fi
 
 # 4. kokeilun kuvaus sisaan (lisatiedostot kokeilut/NIMI.d/ mukaan)

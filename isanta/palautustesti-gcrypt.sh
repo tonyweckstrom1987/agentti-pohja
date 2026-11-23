@@ -128,7 +128,7 @@ if ! flock -n 9; then loki "toinen ajo kaynnissa, ohitetaan"; ONNISTUI=1; exit 0
 
 # Kohteen on oltava crypt-tyyppinen: muuten luettaisiin salaamatonta dataa tai vaaraa kohdetta.
 KOHDE_NIMI="${REMOTE%%:*}"
-"$RCLONE" listremotes --long 2>/dev/null | grep -qE "^${KOHDE_NIMI}:[[:space:]]+crypt\$" \
+grep -qE "^${KOHDE_NIMI}:[[:space:]]+crypt\$" <<< "$("$RCLONE" listremotes --long 2>/dev/null)" \
   || vika "kohde $KOHDE_NIMI ei ole crypt-tyyppinen"
 
 # 1) Uusin arkisto. lsf: "koko;polku" (crypt-kohde kertoo purkautuneen koon). Nimen aikaleima jarjestaa.

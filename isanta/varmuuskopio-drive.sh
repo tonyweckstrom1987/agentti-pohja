@@ -120,7 +120,7 @@ PUUTTUVAT=""
 for id in $VAADITUT_KONTIT; do
   [[ "$id" =~ ^[0-9]+$ ]] || { loki "VAADITUT_KONTIT ei kelpaa: $id"; exit 1; }
   # Vain varsinainen arkisto kelpaa (pelkka .log epaonnistuneesta ajosta ei riita).
-  printf '%s\n' "${TIEDOSTOT[@]:-}" | grep -qE "^vzdump-(lxc|qemu)-$id-[0-9_-]+\.(tar|vma)(\.(zst|gz|lzo))?\$" \
+  grep -qE "^vzdump-(lxc|qemu)-$id-[0-9_-]+\.(tar|vma)(\.(zst|gz|lzo))?\$" <<< "$(printf '%s\n' "${TIEDOSTOT[@]:-}")" \
     || PUUTTUVAT="$PUUTTUVAT $id"
 done
 
@@ -148,7 +148,7 @@ BASE=("$RCLONE" --bwlimit "$BWLIMIT" --log-file "$LOKI" --log-level NOTICE --sta
 # Salaus ennen siirtoa: kohteen on oltava rclone crypt -tyyppinen. Pelkka Drive-kohde veisi
 # dumpit selkokielisina, joten silloin ei siirreta mitaan. (listremotes ei tulosta salaisuuksia.)
 KOHDE_NIMI="${REMOTE%%:*}"
-if ! "$RCLONE" listremotes --long 2>/dev/null | grep -qE "^${KOHDE_NIMI}:[[:space:]]+crypt\$"; then
+if ! grep -qE "^${KOHDE_NIMI}:[[:space:]]+crypt\$" <<< "$("$RCLONE" listremotes --long 2>/dev/null)"; then
   loki "kohde $KOHDE_NIMI ei ole crypt-tyyppinen, ei siirreta eika haeta salaamatonta dataa"; exit 1
 fi
 
