@@ -87,14 +87,19 @@ class RajatutTesti(unittest.TestCase):
                              ("aivo/agenttidata_kehote.py", "data ulos"), ("aivo/openrouter_kulut.py", "kulukatot"),
                              ("aivo/taustaajo.py", "kulukatot"), ("aivo/kulut_nakyma.py", "kulukatot"),
                              ("systemd/aivo-agentit.service.mall", "oikeudet"),
-                             ("systemd/aivo-chat.service.mall", "oikeudet"), ("docs/aivo-agentit.md", "oikeudet")):
+                             ("systemd/aivo-chat.service.mall", "oikeudet"), ("docs/aivo-agentit.md", "oikeudet"),
+                             ("aivo/chat.py", "data ulos"), ("aivo/tiivista_yksityinen.py", "data ulos"),
+                             ("aivo/drive.py", "data ulos"), ("aivo/yhdistelma.py", "kulukatot"),
+                             ("aivo/mallivertailu.py", "kulukatot"), ("aivo/agentti_ajuri.py", "kulukatot"),
+                             ("aivo/agentti/malli.py", "kulukatot"), ("docs/aivo-chat.md", "oikeudet"),
+                             ("docs/aivo-yksityinen.md", "oikeudet"), ("docs/aivo-yksityinen-openrouter.md", "oikeudet")):
             ok, syyt = am.arvioi(PR, [tied(nimi)], OK)
             self.assertFalse(ok, nimi)
             self.assertTrue(any(luokka in s and "aivo" in s for s in syyt), (nimi, syyt))
 
     def test_aivon_testit_ja_muu_aivo_kelpaavat(self):
         for nimi in ("aivo/test_luovutus.py", "aivo/test_taustaajo.py", "aivo/test_openrouter_kulut.py",
-                     "aivo/chat.py", "aivo/agentti/silmukka.py", "docs/aivo-chat.md"):
+                     "aivo/test_chat.py", "aivo/kalenteri.py", "aivo/agentti/silmukka.py", "docs/aivo-drive.md"):
             ok, syyt = am.arvioi(PR, [tied(nimi)], OK)
             self.assertTrue(ok, (nimi, syyt))
 

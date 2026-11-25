@@ -117,7 +117,7 @@ def pr_tiedot(d):
     return {"draft": bool(d.get("draft")), "head_repo": (head.get("repo") or {}).get("full_name"),
             "base_repo": (base.get("repo") or {}).get("full_name"), "labels": [l.get("name") for l in d.get("labels") or []],
             "author": (d.get("user") or {}).get("login"), "head_ref": head.get("ref"), "head_sha": head.get("sha"),
-            "base_ref": base.get("ref")}
+            "base_ref": base.get("ref"), "title": d.get("title") or "", "body": d.get("body") or ""}
 
 
 def seurattavat_repot(env):

@@ -56,11 +56,13 @@ RAJATUT = [
     (re.compile(r"^action\.ya?ml\Z|^dist/"), "julkaistu Action"),
     (re.compile(r"(^|/)\.\.(/|\Z)|^/"), "polku"),
     # Aivo (Tonyn paatos A1063: datan lahto pilveen, kulukatot ja oikeudet ovat aina Tonyn). Testitiedostot sallittuja.
-    (re.compile(r"^aivo/(?!(.*/)?test_[a-z0-9_]+\.py\Z)(luovutus[a-z0-9_]*|yksityinen[a-z0-9_]*|openrouter_zdr|vuotovartija[a-z0-9_]*|agenttidata[a-z0-9_]*)\.py\Z"),
+    (re.compile(r"^aivo/(?!(.*/)?test_[a-z0-9_]+\.py\Z)(luovutus[a-z0-9_]*|yksityinen[a-z0-9_]*|openrouter_zdr|vuotovartija[a-z0-9_]*|agenttidata[a-z0-9_]*|chat|tiivista_yksityinen|drive)\.py\Z"),
      "data ulos (aivo)"),
-    (re.compile(r"^aivo/(?!(.*/)?test_[a-z0-9_]+\.py\Z)(openrouter_kulut|taustaajo|[a-z0-9_]*kulu[a-z0-9_]*)\.py\Z"),
+    (re.compile(r"^aivo/(?!(.*/)?test_[a-z0-9_]+\.py\Z)(openrouter_kulut|taustaajo|[a-z0-9_]*kulu[a-z0-9_]*|yhdistelma|mallivertailu|agentti_ajuri)\.py\Z"),
      "kulukatot (aivo)"),
-    (re.compile(r"^systemd/aivo[^/]*\.mall\Z|^docs/aivo-agentit\.md\Z"), "oikeudet (aivo)"),
+    (re.compile(r"^aivo/agentti/malli\.py\Z"), "kulukatot (aivo)"),
+    (re.compile(r"^systemd/aivo[^/]*\.mall\Z|^docs/aivo-(agentit|chat|yksityinen|yksityinen-openrouter)\.md\Z"),
+     "oikeudet (aivo)"),
 ]
 # PR:n otsikossa tai kuvauksessa tama sana estaa automergen (tehtavan RAJATTU-merkinta).
 RAJATTU_SANA = re.compile(r"\bRAJATTU\b")

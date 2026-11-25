@@ -532,3 +532,14 @@ class TilaTesti(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PrTiedotRajattuSanaTesti(unittest.TestCase):
+    def test_otsikon_ja_kuvauksen_rajattu_sana_nakyy_rakenteessa(self):
+        d = {"draft": False, "title": "aivo: muutos", "body": "RAJATTU: odottaa Tonyn kyllaa.",
+             "head": {"repo": {"full_name": "o/r"}, "ref": "yo/x", "sha": "a" * 40},
+             "base": {"repo": {"full_name": "o/r"}, "ref": "main"}, "labels": [], "user": {"login": "o"}}
+        pr = tk.pr_tiedot(d)
+        self.assertEqual(pr["body"], "RAJATTU: odottaa Tonyn kyllaa.")
+        syyt = automerge.rakenne_syyt(pr, [{"filename": "docs/a.md", "changes": 1, "patch": "@@ -1 +1 @@\n-a\n+b"}])
+        self.assertIn("otsikossa tai kuvauksessa RAJATTU", syyt)
