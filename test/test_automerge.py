@@ -80,6 +80,32 @@ class RajatutTesti(unittest.TestCase):
             self.assertFalse(ok, repo)
             self.assertTrue(any(s.startswith("rajattu repo") for s in syyt), syyt)
 
+    def test_aivon_rajatut_polut(self):
+        for nimi, luokka in (("aivo/luovutus.py", "data ulos"), ("aivo/luovutuspaketti.py", "data ulos"),
+                             ("aivo/yksityinen.py", "data ulos"), ("aivo/yksityinen_or.py", "data ulos"),
+                             ("aivo/openrouter_zdr.py", "data ulos"), ("aivo/vuotovartija.py", "data ulos"),
+                             ("aivo/agenttidata_kehote.py", "data ulos"), ("aivo/openrouter_kulut.py", "kulukatot"),
+                             ("aivo/taustaajo.py", "kulukatot"), ("aivo/kulut_nakyma.py", "kulukatot"),
+                             ("systemd/aivo-agentit.service.mall", "oikeudet"),
+                             ("systemd/aivo-chat.service.mall", "oikeudet"), ("docs/aivo-agentit.md", "oikeudet")):
+            ok, syyt = am.arvioi(PR, [tied(nimi)], OK)
+            self.assertFalse(ok, nimi)
+            self.assertTrue(any(luokka in s and "aivo" in s for s in syyt), (nimi, syyt))
+
+    def test_aivon_testit_ja_muu_aivo_kelpaavat(self):
+        for nimi in ("aivo/test_luovutus.py", "aivo/test_taustaajo.py", "aivo/test_openrouter_kulut.py",
+                     "aivo/chat.py", "aivo/agentti/silmukka.py", "docs/aivo-chat.md"):
+            ok, syyt = am.arvioi(PR, [tied(nimi)], OK)
+            self.assertTrue(ok, (nimi, syyt))
+
+    def test_rajattu_sana_otsikossa_tai_kuvauksessa_estaa(self):
+        for lisa in ({"title": "[yojono] aivo: RAJATTU muutos"}, {"body": "Kuvaus\n\nRAJATTU: odottaa Tonyn kyllaa."}):
+            ok, syyt = am.arvioi(dict(PR, **lisa), [tied("docs/a.md")], OK)
+            self.assertFalse(ok, lisa)
+            self.assertIn("otsikossa tai kuvauksessa RAJATTU", syyt)
+        ok, syyt = am.arvioi(dict(PR, title="rajattu pienella", body="ei rajattua"), [tied("docs/a.md")], OK)
+        self.assertTrue(ok, syyt)
+
     def test_rajat_ovat_kaikki_pr_kutsun_suojatut(self):
         # Mita pr_kutsu pitaa Tonyn polkuna, sita ei automergeta (aamupaketti ja autonomia luokittelevat samoin).
         from agentti import pr_kutsu

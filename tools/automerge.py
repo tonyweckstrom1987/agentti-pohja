@@ -10,7 +10,8 @@ Auto-merge kytketaan vain kun KAIKKI ehdot tayttyvat:
   - enintaan MAX_TIEDOSTOA tiedostoa ja MAX_RIVEJA muutettua rivia
   - repo ei ole rajattu (RAJATUT_REPOT) eika mikaan tiedosto (uusi tai vanha nimi) osu rajattuun luokkaan:
     tyonkulut (.github), automerge itse, oikeudet, kulukatot, palomuuri, salaisuudet, oikea raha (kauppatiimi),
-    julkaistu Action; poistot ja uudelleennimeamiset ovat sallittuja muualla
+    julkaistu Action, Aivon datan lahto, kulut ja oikeudet; poistot ja uudelleennimeamiset ovat sallittuja muualla
+  - otsikossa tai kuvauksessa ei ole sanaa RAJATTU
   - jokaisesta tiedostosta on patch, eika lisatyilla riveilla ole yksityista IP-osoitetta tai tailnet-nimea
   - riippumaton tarkastaja (TARKASTAJAT, claudejono.tarkastaja isannalla) on hyvaksynyt TAMAN head-commitin:
     viimeisin tarkastajan kommentti, jonka merkki koskee head-SHA:ta, on paatos HYVAKSYTTY
@@ -54,7 +55,15 @@ RAJATUT = [
                 re.IGNORECASE), "salaisuudet"),
     (re.compile(r"^action\.ya?ml\Z|^dist/"), "julkaistu Action"),
     (re.compile(r"(^|/)\.\.(/|\Z)|^/"), "polku"),
+    # Aivo (Tonyn paatos A1063: datan lahto pilveen, kulukatot ja oikeudet ovat aina Tonyn). Testitiedostot sallittuja.
+    (re.compile(r"^aivo/(?!(.*/)?test_[a-z0-9_]+\.py\Z)(luovutus[a-z0-9_]*|yksityinen[a-z0-9_]*|openrouter_zdr|vuotovartija[a-z0-9_]*|agenttidata[a-z0-9_]*)\.py\Z"),
+     "data ulos (aivo)"),
+    (re.compile(r"^aivo/(?!(.*/)?test_[a-z0-9_]+\.py\Z)(openrouter_kulut|taustaajo|[a-z0-9_]*kulu[a-z0-9_]*)\.py\Z"),
+     "kulukatot (aivo)"),
+    (re.compile(r"^systemd/aivo[^/]*\.mall\Z|^docs/aivo-agentit\.md\Z"), "oikeudet (aivo)"),
 ]
+# PR:n otsikossa tai kuvauksessa tama sana estaa automergen (tehtavan RAJATTU-merkinta).
+RAJATTU_SANA = re.compile(r"\bRAJATTU\b")
 # Repokohtaiset lisarajaukset. kauppatiimi: oikean rahan lukot (sama kuin agentti/pr_kutsu.REPON_SUOJATUT).
 REPON_RAJATUT = {
     "kauppatiimi": [(re.compile(r"(^|/)(riskivahti\.py|salkku\.py|kirjanpito\.py|asetukset\.py|rajat\.py|config\.py|k7\.py)\Z|\.(service|timer|db|sqlite3?)(\.malli)?\Z|^data/|key"),
@@ -117,6 +126,8 @@ def rakenne_syyt(pr, tiedostot):
         syyt.append("base ei ole main eika master")
     if OPT_OUT in (pr.get("labels") or []):
         syyt.append("tunniste " + OPT_OUT)
+    if RAJATTU_SANA.search((pr.get("title") or "") + "\n" + (pr.get("body") or "")):
+        syyt.append("otsikossa tai kuvauksessa RAJATTU")
     if repo_nimi in RAJATUT_REPOT:
         syyt.append("rajattu repo: " + RAJATUT_REPOT[repo_nimi])
     if pr.get("head_repo") != pr.get("base_repo"):
@@ -173,6 +184,8 @@ def hae_pr(repo, numero):
         "head_ref": (d.get("head") or {}).get("ref"),
         "head_sha": (d.get("head") or {}).get("sha"),
         "base_ref": (d.get("base") or {}).get("ref"),
+        "title": d.get("title") or "",
+        "body": d.get("body") or "",
     }
 
 
