@@ -212,8 +212,13 @@ class AjoTesti(Kansiot):
                          "liitteet": [{"nimi": "aineisto/a.md", "sisalto": "rivi\n"}, {"nimi": "b.txt", "sisalto": "x"}]})
         self.assertEqual(self.aja()["tila"], am.VALMIS)
         k = self.p(aj.TULOKSET, T1)
-        self.assertEqual(stat.S_IMODE(os.lstat(k).st_mode), 0o2750)
-        self.assertEqual(stat.S_IMODE(os.lstat(os.path.join(k, "aineisto")).st_mode), 0o2750)
+        ryhma = os.lstat(self.p(aj.TULOKSET)).st_gid
+        for kansio in (k, os.path.join(k, "aineisto")):
+            st = os.lstat(kansio)
+            self.assertEqual(stat.S_IMODE(st.st_mode) & 0o777, 0o750)
+            self.assertEqual(st.st_gid, ryhma)             # ryhma periytyy tulokset/-kansiosta (chat lukee)
+            if sys.platform.startswith("linux"):
+                self.assertTrue(st.st_mode & stat.S_ISGID)  # Linux: setgid periytyy ilman chmodia
         for osa, sisalto in (("aineisto/a.md", "rivi\n"), ("b.txt", "x")):
             p = os.path.join(k, osa)
             self.assertEqual(stat.S_IMODE(os.lstat(p).st_mode), 0o640)
@@ -367,6 +372,35 @@ class AjoTesti(Kansiot):
         os.symlink(os.path.join(kt, "openrouter-kulut.jsonl"), os.path.join(kt, "openrouter-kulut.lock"))
         self.assertEqual(len(aj.tarkista_kulukirjanpito(kt)), 1)
 
+    def test_kulukirjanpito_ei_aukea_kirjoitettavaksi(self):
+        # 25.11.2026: os.access sanoi kylla, mutta O_CREAT-avaus esti (fs.protected_regular sticky-kansiossa)
+        kt = self.kulutila()
+        alkuperainen = os.open
+
+        def esta(polku, liput, *a):
+            if str(polku).endswith("openrouter-kulut.lock") and liput & os.O_CREAT:
+                raise PermissionError(13, "Permission denied")
+            return alkuperainen(polku, liput, *a)
+        with mock.patch.object(aj.os, "open", side_effect=esta):
+            virheet = aj.tarkista_kulukirjanpito(kt)
+        self.assertEqual(len(virheet), 1)
+        self.assertIn("ei aukea kirjoitettavaksi (PermissionError)", virheet[0])
+
+    def test_tiedostokopio_ei_kayta_setgid_chmodia(self):
+        # yksikon RestrictSUIDSGID=yes estaa setuid/setgid-bitin asettamisen (EPERM)
+        self.jonoon(T1, {"versio": 1, "teksti": "abcd", "liitteet": [{"nimi": "aineisto/a.md", "sisalto": "rivi\n"}]})
+        alkuperainen = os.chmod
+
+        def suoja(polku, tila, *a, **k):
+            if tila & (stat.S_ISUID | stat.S_ISGID):
+                raise PermissionError(1, "Operation not permitted")
+            return alkuperainen(polku, tila, *a, **k)
+        with mock.patch.object(aj.os, "chmod", side_effect=suoja), \
+                mock.patch("sys.stdout", new_callable=io.StringIO) as ulos:
+            self.assertEqual(self.aja()["tila"], am.VALMIS)
+        self.assertNotIn("tiedostojen kopio epaonnistui", ulos.getvalue())
+        self.assertTrue(os.path.isfile(self.p(aj.TULOKSET, T1, "aineisto", "a.md")))
+
     def test_omat_kulutiedostot_hylataan(self):
         kt = self.kulutila()
         self._euid_estin.stop()
@@ -493,6 +527,9 @@ class YksikkoTesti(unittest.TestCase):
         polku, _, valinnat = tfs[0].partition(":")
         self.assertEqual(polku, ok.OLETUS_TILA)
         self.assertNotIn("ro", valinnat.split(","))
+        # ei sticky-bittia: fs.protected_regular estaisi O_CREAT-avauksen chatin omistamiin kulutiedostoihin
+        tilat = [v.split("=", 1)[1] for v in valinnat.split(",") if v.startswith("mode=")]
+        self.assertEqual(tilat, ["0777"])
         # oikeasta kansiosta liitetaan vain kolme kulutiedostoa samaan paikkaan (ei kansioita, ei muita tiedostoja)
         sidotut = " ".join(self.arvot("BindPaths")).split()
         self.assertEqual(sorted(sidotut), sorted(os.path.join(ok.OLETUS_TILA, n)

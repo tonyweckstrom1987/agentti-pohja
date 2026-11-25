@@ -36,7 +36,9 @@ CapabilityBoundingSet=
 # Oikeaan kansioon /var/lib/claude-jono ja sen muihin tiedostoihin palvelu ei paase. Kulutiedostoja ei saa korvata
 # uusilla (rename) palvelun ollessa kaynnissa: liitos pysyy vanhassa tiedostossa (ohje kohta 7).
 ReadWritePaths=/var/lib/aivo-agentit
-TemporaryFileSystem=/var/lib/claude-jono:mode=1777,size=1M
+# mode=0777 ilman sticky-bittia: sticky-kansiossa fs.protected_regular estaa O_CREAT-avauksen vieraan kayttajan
+# tiedostoon (kulukirjanpidon lukko ja rivit), mika esti kaikki kutsut 25.11.2026. Kansio on palvelun oma tmpfs.
+TemporaryFileSystem=/var/lib/claude-jono:mode=0777,size=1M
 BindPaths=/var/lib/claude-jono/openrouter-kulut.jsonl /var/lib/claude-jono/openrouter-katto.jsonl /var/lib/claude-jono/openrouter-kulut.lock
 # Toinen lukko tiedosto-oikeuksien lisaksi: muisti, keskustelut, ydinohjeet ja tyokalutila eivat nay.
 InaccessiblePaths=-/var/lib/aivo-yksityinen -/var/lib/aivo -/var/lib/aivo-tyokalu

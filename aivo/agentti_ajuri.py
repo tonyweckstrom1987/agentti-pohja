@@ -137,6 +137,14 @@ def tarkista_kulukirjanpito(tila=None):
         elif os.lstat(p).st_uid == _palvelun_uid():
             # kirjanpito kuuluu chatin kayttajalle; ajuri kirjoittaa siihen vain ryhman kautta (ohje kohta 3)
             virheet.append("kulukirjanpito: %s kuuluu palvelun kayttajalle (pitaa kuulua chatin kayttajalle)" % nimi)
+        else:
+            # Avataan samoin liputuksin kuin openrouter_kulut (O_CREAT). os.access ei nae esim. fs.protected_regular-
+            # estoa sticky-kansiossa (tmpfs mode=1777), joka esti kutsut 25.11.2026. Mitaan ei kirjoiteta.
+            liput = (os.O_RDWR if nimi == ok.LUKKO else os.O_WRONLY | os.O_APPEND) | os.O_CREAT
+            try:
+                os.close(os.open(p, liput, 0o644))
+            except OSError as e:
+                virheet.append("kulukirjanpito: %s ei aukea kirjoitettavaksi (%s)" % (nimi, type(e).__name__))
     return virheet
 
 
@@ -273,8 +281,17 @@ def kopioi_tiedostot(perus, tunnus, juuri, lista):
     if not TUNNUS_RE.fullmatch(tunnus):
         raise ValueError("tunnus")
     kohde = os.path.join(perus, TULOKSET, tunnus)
+    # Ei chmodia setgid-bitilla: yksikon RestrictSUIDSGID=yes estaa sen (EPERM). Uusi kansio perii setgid-bitin ja
+    # ryhman kansiosta tulokset/ (2750). UMask=0077 kavennettaisiin ryhman oikeudet, joten umask on taman ajan 027.
+    vanha_umask = os.umask(0o027)
+    try:
+        return _kopioi(kohde, juuri, lista)
+    finally:
+        os.umask(vanha_umask)
+
+
+def _kopioi(kohde, juuri, lista):
     os.mkdir(kohde, 0o750)
-    os.chmod(kohde, 0o2750)             # UMask=0077 ei saa kaventaa ryhman oikeuksia; setgid pitaa ryhman
     kopioidut = []
     for t in lista:
         osat = t["polku"].split("/")
@@ -283,7 +300,6 @@ def kopioi_tiedostot(perus, tunnus, juuri, lista):
             hak = os.path.join(hak, osa)
             if not os.path.lexists(hak):
                 os.mkdir(hak, 0o750)
-                os.chmod(hak, 0o2750)
         try:
             lfd = os.open(os.path.join(juuri, *osat), os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
         except OSError:

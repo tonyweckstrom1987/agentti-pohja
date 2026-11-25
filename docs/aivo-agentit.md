@@ -144,15 +144,16 @@ Odotettu: `600 aivo-agentti` ja koko yli 0.
 Tarkistus ajetaan kertaluonteisena palveluna samoilla kulukansion liitoksilla kuin yksikössä, koska ajurin käyttäjä ei pääse oikeaan kansioon `/var/lib/claude-jono`.
 
 ```
-systemd-run --wait --pipe --quiet -p User=aivo-agentti -p Group=aivo-agentti \
+systemd-run --wait --collect --unit=aivo-agentit-tarkistus -p User=aivo-agentti -p Group=aivo-agentti \
   -p "SupplementaryGroups=aivo-agentit aivo-kulut" -p WorkingDirectory=/opt/agentti-pohja \
   -p "Environment=PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/opt/agentti-pohja" \
-  -p "TemporaryFileSystem=/var/lib/claude-jono:mode=1777,size=1M" \
+  -p "TemporaryFileSystem=/var/lib/claude-jono:mode=0777,size=1M" \
   -p "BindPaths=/var/lib/claude-jono/openrouter-kulut.jsonl /var/lib/claude-jono/openrouter-katto.jsonl /var/lib/claude-jono/openrouter-kulut.lock" \
   /usr/bin/python3 -m aivo.agentti_ajuri tarkista --roolit qwen/qwen3-235b-a22b-2507
+journalctl -u aivo-agentit-tarkistus -n 20 --no-pager
 ```
 
-Odotettu: viimeinen rivi on `OK`. Tarkistus kattaa kansiot, kulukirjanpidon ja mallin. Jos riveillä on `VIRHE`, korjaa oikeudet kohdan 2 tai 3 mukaan. Palvelu tekee saman tarkistuksen käynnistyessään, ja virheen sattuessa se ei aja tehtäviä. Käytä samaa avointa mallia kuin chatissa; mallin pitää olla listalla `AVOIMET_MALLIT`.
+`--pipe` ei toimi `pct enter` -istunnossa (paluukoodi 208/STDIN), joten tuloste luetaan lokista. Odotettu: `Main processes terminated with: code=exited/status=0`, ja lokin viimeinen rivi on `OK`. Tarkistus kattaa kansiot, kulukirjanpidon ja mallin. Jos riveillä on `VIRHE`, korjaa oikeudet kohdan 2 tai 3 mukaan. Palvelu tekee saman tarkistuksen käynnistyessään, ja virheen sattuessa se ei aja tehtäviä. Käytä samaa avointa mallia kuin chatissa; mallin pitää olla listalla `AVOIMET_MALLIT`.
 
 ### 6. Asennus
 
