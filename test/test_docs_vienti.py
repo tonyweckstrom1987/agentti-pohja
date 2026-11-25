@@ -144,6 +144,17 @@ class SallitutPolut(Pohja):
         self.vie()
         self.assertEqual(self.etepolut(), ["tulokset/ok.md"])
 
+    def test_pohdinta_saa_olla_yli_perusrajan(self):
+        self.kirjoita("pohdinta-vastaukset.md", "a" * (dv.MAX_TAVUA + 10))
+        kopioitu, ohitetut = dv.valmista(self.lahde, self.tyo, False)
+        self.assertEqual(ohitetut, [])
+        self.assertTrue((self.tyo / "pohdinta-vastaukset.md").exists())
+
+    def test_pohdinta_yli_oman_rajan_ohitetaan(self):
+        self.kirjoita("pohdinta-vastaukset.md", "a" * (dv.YKSITTAISET_MAX_TAVUA + 1))
+        kopioitu, ohitetut = dv.valmista(self.lahde, self.tyo, False)
+        self.assertEqual([n for n, _ in ohitetut], ["pohdinta-vastaukset.md"])
+
     def test_poistunut_lahde_poistuu_kopiosta(self):
         a = self.kirjoita("tulokset/a.md", "a")
         self.kirjoita("tulokset/b.md", "b")

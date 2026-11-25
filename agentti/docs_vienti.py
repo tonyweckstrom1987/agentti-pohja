@@ -44,6 +44,9 @@ OLETUS_AVAIN = "/etc/docs-vienti/avain"
 SALLITTU_POLKU = "/tony/agenttidata.git"
 HAARA = "main"
 MAX_TAVUA = 200_000
+# pohdinta-vastaukset.md kasvaa koko ajan (yli 200 000 tavua 25.11.2026). Aivon lukija (aivo/agenttidata_kehote.py,
+# LUKU_YLARAJA) lukee siita vain lopun, joten raja on sama 4 Mt kuin lukijalla.
+YKSITTAISET_MAX_TAVUA = 4_000_000
 GIT_AIKARAJA_S = 120
 NIMI_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*\.md$")
 
@@ -143,8 +146,9 @@ def valmista(lahde, kohde, aivo=False):
     kopioitu, ohitetut = 0, []
     for suht, p in _lahteet(lahde, aivo):
         try:
-            if p.stat().st_size > MAX_TAVUA:
-                ohitetut.append((suht, "yli %d tavua" % MAX_TAVUA))
+            raja = YKSITTAISET_MAX_TAVUA if suht in YKSITTAISET else MAX_TAVUA
+            if p.stat().st_size > raja:
+                ohitetut.append((suht, "yli %d tavua" % raja))
                 continue
             teksti = p.read_text(encoding="utf-8", errors="replace")
         except OSError as virhe:

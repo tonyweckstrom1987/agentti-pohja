@@ -1,0 +1,1 @@
+- docs-vienti: pohdinta-vastaukset.md saa olla enintään 4 Mt (sama raja kuin Aivon lukijalla). Tiedosto kasvoi yli 200 000 tavun, ja vienti ohitti sen, joten Aivo ei nähnyt tuoreimpia päätöksiä.
