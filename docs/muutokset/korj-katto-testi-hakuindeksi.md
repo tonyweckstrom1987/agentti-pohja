@@ -1,0 +1,1 @@
+- Aivo-testit: päiväkaton lokitesti etsii kattorivin eikä oleta sitä viimeiseksi riviksi, koska tiivistys kirjaa nyt hakuindeksin rivin sen jälkeen (#456 + #449 yhdessä, mainin CI punainen).
