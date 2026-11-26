@@ -1,0 +1,1 @@
+test: test_pr_opit:n main-testit kayttavat paivaa ennen nykyhetkea; kiintea 2026-10-27 putosi 30 paivan ikkunasta 26.11. klo 12 (Suomen aikaa), jolloin kommenttien hakuvirhetesti kaatui kaikissa haaroissa.
