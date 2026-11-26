@@ -1,0 +1,1 @@
+- Testit: test_pr_opit:n kommenttien hakuvirhetesti käyttää nykyhetkeen sidottua päivää (kiinteä 2026-10-27 putosi 30 päivän ikkunasta 26.11., mainin CI punainen).
