@@ -162,14 +162,14 @@ class ChatTesti(Pohja):
         self.assertNotIn("reasoning", runko)
 
     def test_uusinta_kerran_pakollinen_malli(self):
-        teksti = self.kysy(UUSI, TYHJA, vastaus("Vastaus."))
+        teksti = self.kysy(UUSI, TYHJA, vastaus("Vastaus."), paattely_max=6_000)   # 75 % -> xhigh, uusinta low
         self.assertEqual(len(self.rungot), 2)
         self.assertEqual(self.rungot[1]["reasoning"], {"effort": "low", "exclude": True})
         self.assertEqual(self.rungot[1]["max_tokens"], 8_000)
         self.assertEqual(teksti, "Vastaus.")
         self.assertEqual(teksti.kutsuja, 2)
         loki = self.err.getvalue()
-        self.assertIn("uusinta kerran ilman paattelya (reasoning effort=low)", loki)
+        self.assertIn("uusinta kerran pienemmalla paattelytasolla (reasoning effort=low;", loki)
         self.assertNotIn("Vastaus.", loki)                                # ei sisaltoa journaliin
         self.assertNotIn("Mit\u00e4 tied\u00e4t", loki)
 
@@ -182,7 +182,7 @@ class ChatTesti(Pohja):
 
     def test_uusinta_vain_kerran(self):
         with self.assertRaises(yo.VastausKatkesi):
-            self.kysy(UUSI, TYHJA)                    # aina tyhja
+            self.kysy(UUSI, TYHJA, paattely_max=6_000)    # aina tyhja
         self.assertEqual(len(self.rungot), 2)
         self.assertIn("uusintakin katkesi", self.err.getvalue())
 
@@ -196,14 +196,14 @@ class ChatTesti(Pohja):
 
     def test_kutsuraja_estaa_uusinnan(self):
         with mock.patch.object(yhdistelma, "MAX_KUTSUT_VIESTI", 1), self.assertRaises(yo.VastausKatkesi):
-            self.kysy(UUSI, TYHJA)
+            self.kysy(UUSI, TYHJA, paattely_max=6_000)
         self.assertEqual(len(self.rungot), 1)
         self.assertIn("uusintaa ei tehty (kutsuraja)", self.err.getvalue())
 
     def test_paivakatto_estaa_uusinnan(self):
         kallis = vastaus("", "length", 50.0)          # yli 10 EUR/vrk katon: seuraava kutsu estetaan
         with self.assertRaises(yhdistelma.Katkaisu):
-            self.kysy(UUSI, kallis, vastaus())
+            self.kysy(UUSI, kallis, vastaus(), paattely_max=6_000)
         self.assertEqual(len(self.rungot), 1)
         self.assertEqual(ok.PAIVAKATTO_EUR, 10)
 
@@ -245,9 +245,9 @@ class OletuksenaPaattelevatTesti(Pohja):
 
     def test_valinnainen_malli_ilman_parametria_ja_uusintaa(self):
         for m in VALINNAISET:
-            if not openrouter_zdr.avoin_malli(m):
-                continue
             with self.subTest(malli=m):
+                if not openrouter_zdr.avoin_malli(m):
+                    self.skipTest("%s ei ole AVOIMET_MALLIT-listalla: chat ei voi kutsua sita" % m)
                 self.rungot.clear()
                 self.assertEqual(self.kysy(m, vastaus()), "Hei!")
                 [runko] = self.rungot
@@ -336,6 +336,63 @@ class TaustaJaTiivistysTesti(Pohja):
         lahde = Path(ty.__file__).read_text(encoding="utf-8")
         self.assertIn('tee_or_kysyja(a.or_malli, a.or_avain, paattely_max=env.get("AIVO_YKSITYINEN_PAATTELY_MAX"))',
                       lahde)              # main()-reitti: test_yksityinen_tiivistys_or (asetus valittyy)
+
+
+class EffortTasoTesti(Pohja):
+    """Effort-tasoja kayttava pakollisen paattelyn malli (UUSI): OpenRouter muuntaa reasoning.max_tokens-arvon
+    tasoksi. Uusinta tasolla low ei auta, jos ensimmainen kutsu oli jo todennakoisesti tasolla low (25 % -> low)."""
+
+    def test_oletusraja_vastaa_tasoa_low_eika_uusita(self):
+        with contextlib.suppress(yo.VastausKatkesi):
+            self.kysy(UUSI, TYHJA, vastaus("Vastaus."))
+        self.assertEqual(len(self.rungot), 1, "uusinta toisti saman pyynnon: %s"
+                         % [r.get("reasoning") for r in self.rungot])
+        self.assertEqual(self.rungot[0]["reasoning"], {"max_tokens": 2_000, "exclude": True})
+        self.assertEqual(yo.todennakoinen_taso(UUSI, 8_000, 2_000), "low")
+        loki = self.err.getvalue()
+        self.assertIn("uusintaa ei tehty: ensimmainen kutsu oli todennakoisesti jo tasolla low", loki)
+        self.assertNotIn("ilman paattelya", loki)
+
+    def test_suuri_raja_uusitaan_tasolla_low(self):
+        self.assertEqual(yo.todennakoinen_taso(UUSI, 8_000, 6_000), "xhigh")      # 75 %
+        self.assertEqual(yo.todennakoinen_taso(UUSI, 8_000, 4_000), "medium")     # 50 %
+        teksti = self.kysy(UUSI, TYHJA, vastaus("Vastaus."), paattely_max=6_000)
+        self.assertEqual(len(self.rungot), 2)
+        self.assertEqual(self.rungot[1]["reasoning"], {"effort": "low", "exclude": True})
+        self.assertEqual(teksti.kutsuja, 2)
+        loki = self.err.getvalue()
+        self.assertIn("uusinta kerran pienemmalla paattelytasolla (reasoning effort=low; ensimmainen todennakoisesti "
+                      "xhigh)", loki)
+        self.assertNotIn("ilman paattelya", loki)
+
+    def test_raja_tasojen_valissa(self):
+        # low 20 %, medium 50 %: lahin taso; tasapelissa pienempi (uusintaa ei tehda epavarmassa tilanteessa)
+        self.assertEqual(yo.todennakoinen_taso(UUSI, 8_000, 2_800), "low")        # 35 %
+        self.assertEqual(yo.todennakoinen_taso(UUSI, 8_000, 2_880), "medium")     # 36 %
+        self.assertIsNone(yo.todennakoinen_taso(QWEN35, 8_000, 2_000))            # tasoja ei kerrota
+        self.assertIsNone(yo.todennakoinen_taso(UUSI, 8_000, 0))
+
+    def test_ilman_paattelya_uusinta_sailyy(self):
+        self.kysy(Q27, TYHJA, vastaus())
+        self.assertEqual(self.rungot[1]["reasoning"], {"effort": "none", "exclude": True})
+        self.assertIn("uusinta kerran ilman paattelya (reasoning effort=none)", self.err.getvalue())
+        self.rungot.clear()
+        self.kysy(QWEN35, TYHJA, vastaus())
+        self.assertEqual(self.rungot[1]["reasoning"], {"enabled": False})
+
+
+class KehoteLokiTesti(Pohja):
+    def test_taustatyo_ja_tiivistys_kirjaavat_kehotteen(self):
+        with contextlib.redirect_stderr(self.err):
+            yo.kysy_taustatyo(UUSI, [{"role": "user", "content": "salainen sisalto"}], aikaraja_s=60,
+                              **self.yhteiset(vastaus()))
+        self.assertIn("vastaus enintaan 8000, paattely enintaan 2000", self.err.getvalue())
+        self.err = io.StringIO()
+        with contextlib.redirect_stderr(self.err):
+            yo.kysy_tiivistys("ohje", "salainen sisalto", malli=UUSI, **self.yhteiset(vastaus("{}")))
+        loki = self.err.getvalue()
+        self.assertIn("vastaus enintaan 1500, paattely enintaan 750", loki)
+        self.assertNotIn("salainen sisalto", loki)
 
 
 class LokiTesti(unittest.TestCase):

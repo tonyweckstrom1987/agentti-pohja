@@ -40,6 +40,7 @@ Ajuri lukee samat asetukset kuin chat:
 - `AIVO_OPENROUTER_MALLIT` (tai `AIVO_OPENROUTER_MALLI`): sallitut avoimet mallit.
 - `AIVO_YKSITYINEN_ROOLIT`: ajuri lukee vain roolit `keskustelija` ja `ajattelija`. Muut roolit se ohittaa. Puuttuva rooli käyttää listan ensimmäistä mallia. Roolin mallin pitää olla sallittujen listalla.
 - `AIVO_OPENROUTER_AVAIN`: sama avaintiedosto kuin chatilla (0600, palvelun käyttäjän oma).
+- `AIVO_YKSITYINEN_PAATTELY_MAX`: ajattelevan mallin päättelyn yläraja tokeneina (oletus 2 000, sallittu 0–6 000, 0 = reasoning-parametria ei lähetetä). Sama asetus kuin chatilla. Virheellinen arvo lopettaa ajon virheeseen. Taustaajo ei tee uusintaa, jos vastaus katkeaa päättelyyn. Katso `aivo-yksityinen-openrouter.md`, osio ”Päättelyn yläraja ja uusinta”.
 
 Ajuri toimii vain OpenRouter-taustapäällä. Jos `AIVO_YKSITYINEN_TAUSTAPAA=loopback`, se päättyy virheeseen.
 

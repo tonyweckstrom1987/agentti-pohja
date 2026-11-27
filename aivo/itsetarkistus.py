@@ -27,6 +27,10 @@ Saannot (koodi on laki; muutos vaatii Tonyn luvan):
     Jos tilaa ei ole, tarkistus ohitetaan; jos tilaa on vain yhdelle kutsulle, korjausta ei tehda.
   * Tarkistuksella on oma kokonaisaikaraja AIKARAJA_S (240 s, sama kuin yhdistelmalla); jokainen kutsu saa enintaan
     jaljella olevan ajan, ja kun aika loppuu, uutta kutsua ei aloiteta. [[AGENTTI]]-lohkot tulevat vain alkuperaisesta.
+  * Tilapainen palveluvirhe (virheen attribuutti `tilapainen`: HTTP 408/429/5xx, katkennut yhteys, virhe vastauksen
+    rungossa) => tarkastajan kutsu yritetaan kerran uudelleen, jos kutsuraja sallii. Uusinta lasketaan kutsurajaan,
+    ja paivakatto ja aikaraja tarkistetaan kuten muissakin kutsuissa. Aikakatkaisua ei yriteta uudelleen.
+    Epaonnistuneen tarkistuksen merkinta kertoo syyn luokan (virheen attribuutti `syy` ja luokan nimi).
   * Tarkastajan teksti on dataa: kohdista poistetaan [[ ]]-merkinnat ja ohjausmerkit ennen nayttoa ja korjauskehotetta.
 """
 from __future__ import annotations
@@ -269,7 +273,19 @@ def _syy(e: BaseException) -> str:
         return "aikaraja t\u00e4ynn\u00e4"
     if isinstance(e, TarkistusVirhe):
         return "tarkastajan vastaus ei kelvannut"
-    return "mallikutsu ep\u00e4onnistui"
+    # Kuljettimen virheluokat (yksityinen_or: Aikakatkaisu, HttpVirhe, YhteysVirhe, PalveluVirhe, TyhjaVastaus,
+    # VastausKatkesi) kertovat syyn attribuutissa `syy`. Moduuli ei tuo yksityinen_or:ia, joten luokka tunnistetaan
+    # attribuutista. Luokan nimi lisataan, jotta journalin rivi ja merkinta voidaan yhdistaa.
+    syy = getattr(e, "syy", None)
+    if isinstance(syy, str) and syy.strip():
+        return "%s; %s" % (_OHJAUS_RE.sub(" ", syy.strip())[:80], type(e).__name__)
+    return "mallikutsu ep\u00e4onnistui; %s" % type(e).__name__
+
+
+def _tilapainen(e: BaseException) -> bool:
+    """Tosi, jos virhe on tilapainen palveluvirhe (HTTP 408/429/5xx, katkennut yhteys, virhe vastauksen rungossa).
+    Aikakatkaisu ei ole: se kulutti jo ison osan tarkistuksen aikarajasta."""
+    return getattr(e, "tilapainen", False) is True
 
 
 def aja(vastaus: str, perusviestit: Sequence[Mapping[str, Any]], kysy: Callable[..., str], *,
@@ -302,8 +318,19 @@ def aja(vastaus: str, perusviestit: Sequence[Mapping[str, Any]], kysy: Callable[
                {"role": "user", "content": "L\u00c4HTEET:\n%s\n\nVASTAUS:\n%s" % (
                    lahteet(perusviestit, vastaus, LAHTEET_MAX_MERKKIA if lahteet_raja is None else lahteet_raja),
                    yhdistelma.neutraloi(vastaus)[:VASTAUS_MAX_MERKKIA])}]
+    def tarkasta() -> list[dict[str, str]]:
+        try:
+            return jasenna(kutsu(tarkastaja, viestit, TARKISTUS_MAX_TOKENIA))
+        except yhdistelma.Katkaisu:
+            raise
+        except YksityinenVirhe as e:
+            # yksi uusintayritys tilapaiseen palveluvirheeseen, vain jos kutsuraja sallii; paivakatto ja aikaraja
+            # tarkistetaan uudelleen kutsussa (openrouter_kulut.kutsu ja kutsu())
+            if not _tilapainen(e) or tulos.kutsuja >= vapaana:
+                raise
+            return jasenna(kutsu(tarkastaja, viestit, TARKISTUS_MAX_TOKENIA))
     try:
-        kohdat = jasenna(kutsu(tarkastaja, viestit, TARKISTUS_MAX_TOKENIA))
+        kohdat = tarkasta()
     except yhdistelma.Katkaisu:
         tulos.tila = OHITETTU
         tulos.merkinta = "tarkistus: ei tehty, p\u00e4iv\u00e4katto t\u00e4ynn\u00e4; vastaus n\u00e4ytet\u00e4\u00e4n tarkistamattomana"
@@ -317,7 +344,7 @@ def aja(vastaus: str, perusviestit: Sequence[Mapping[str, Any]], kysy: Callable[
         tulos.merkinta = "tarkistus: ei ristiriitoja l\u00e4hteisiin"
         return tulos
     tulos.tila = EPAVARMA
-    if vapaana < 2:
+    if tulos.kutsuja >= vapaana:        # uusintayritys kayttaa saman kutsurajan
         tulos.merkinta = "tarkistus: %s ep\u00e4varma; korjausta ei tehty (kutsuraja)" % _kpl(len(kohdat))
         return tulos
     havainnot = "\n".join("- %s: %s" % (k["kohta"], k["syy"]) for k in kohdat)

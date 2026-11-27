@@ -65,12 +65,19 @@ Saannot (koodi on laki):
     kutsuun reasoning.max_tokens (ja exclude), jos malli on taulukossa PAATTELY_TUKI. Raja on aina pienempi kuin
     max_tokens, joten vastaukselle jaa tilaa. Muut mallit kutsutaan ilman parametria. Sama raja koskee chattia,
     yhdistelman osakutsuja, vartijaa seka itsetarkistuksen tarkastajaa ja korjausta. Yhden mallin chat tekee enintaan
-    yhden uusinnan ilman paattelya (uusinnan_parametri), jos vastaus katkeaa silti ennen tekstia; uusinta kulkee saman
+    yhden uusinnan ilman paattelya tai pienemmalla tasolla (uusinnan_parametri), jos vastaus katkeaa silti ennen
+    tekstia. Effort-tason uusinta tehdaan vain, jos taso on pienempi kuin ensimmaisen kutsun todennakoinen taso
+    (todennakoinen_taso); muuten se olisi sama pyynto. Uusinta kulkee saman
     openrouter_kulut.kutsu-reitin kautta (paivakatto) ja lasketaan kutsurajaan (Vastausteksti.kutsuja ->
     itsetarkistuksen `kaytetyt`). Taustaajo (kysy_taustatyo) ja tiivistys (kysy_tiivistys) saavat saman rajan ilman
     uusintaa. Raja lahetetaan vain malleille, jotka paattelevat oletuksena (OLETUKSENA_PAATTELEVAT, yhteinen
     mallivertailun kanssa); valinnaisen paattelyn malleilla parametri kytkisi paattelyn paalle. Toteutuneen kutsun
-    lokiin kirjataan usage.completion_tokens_details.reasoning_tokens, jos OpenRouter ilmoittaa sen."""
+    lokiin kirjataan usage.completion_tokens_details.reasoning_tokens, jos OpenRouter ilmoittaa sen.
+  * Epaonnistunut kutsu (_kysy_viestit): stderriin (journal) yksi rivi `yksityinen_or: virhe tehtava .., malli ..,
+    luokka .., http .., koodi .., kesto .. s` (loki_virhe). Virheen vapaata tekstia ei kirjata, koska se voi sisaltaa
+    kehotteen osia; OpenRouterin error.code tai -type kirjataan vain siistittyna lyhyena tunnisteena. Virheluokat
+    (HttpVirhe, YhteysVirhe, PalveluVirhe, TyhjaVastaus, Aikakatkaisu, VastausKatkesi) ovat YksityinenVirheen
+    aliluokkia, ja niiden viestit ovat samat kuin ennen."""
 from __future__ import annotations
 
 import json
@@ -78,6 +85,7 @@ import os
 import re
 import stat
 import sys
+import time
 import urllib.error
 import urllib.request
 from datetime import datetime
@@ -192,6 +200,29 @@ PAATTELY_TUKI: dict[str, tuple[bool, tuple[str, ...] | None]] = {
 }
 
 
+# Effort-tason osuus max_tokens-rajasta. Lahde: OpenRouter, docs/use-cases/reasoning-tokens (osio Reasoning Effort
+# Level), luettu 27.11.2026: max ja xhigh noin 95 %, high 80 %, medium 50 %, low 20 %, minimal 10 %, none = ei paattelya.
+# Sama sivu: "For models that only support reasoning.effort, the reasoning.max_tokens value will be used to determine
+# the effort level" ja tukemattomasta tasosta "map your requested effort to the nearest supported level". Tarkkaa
+# muunnossaantoa max_tokens -> taso sivu ei kerro; todennakoinen_taso arvioi sen lahimpana osuutena.
+EFFORT_OSUUS: dict[str, float] = {"max": 0.95, "xhigh": 0.95, "high": 0.8, "medium": 0.5, "low": 0.2,
+                                  "minimal": 0.1, "none": 0.0}
+
+
+def todennakoinen_taso(malli: str, max_tokens: int, raja: int) -> str | None:
+    """Effort-tasoja kayttavan mallin todennakoinen taso, kun kutsu lahettaa reasoning.max_tokens = `raja` ja
+    max_tokens = `max_tokens`: mallin tuetuista tasoista se, jonka osuus (EFFORT_OSUUS) on lahinna raja/max_tokens;
+    tasapelissa pienempi taso. "none" ei ole ehdokas (raja > 0 pyytaa paattelya). None = malli ei kerro tasoja,
+    tai raja on 0. Arvio, ei OpenRouterin dokumentoima saanto (ks. EFFORT_OSUUS)."""
+    if not _paattelee_ja_tukee(malli) or raja < 1 or max_tokens < 1:
+        return None
+    tasot = [t for t in (PAATTELY_TUKI[malli][1] or ()) if t in EFFORT_OSUUS and t != "none"]
+    if not tasot:
+        return None
+    osuus = raja / max_tokens
+    return min(tasot, key=lambda t: (abs(EFFORT_OSUUS[t] - osuus), EFFORT_OSUUS[t]))
+
+
 def _paattelee_ja_tukee(malli: str) -> bool:
     """reasoning-kentta vain mallille, joka paattelee oletuksena ja tukee parametria (molemmat ehdot)."""
     return malli in PAATTELY_TUKI and malli in OLETUKSENA_PAATTELEVAT
@@ -222,12 +253,71 @@ avoin_malli = openrouter_kulut.avoin_malli
 
 class VastausKatkesi(YksityinenVirhe):
     """Vastaus katkesi pituusrajaan ennen yhtaan vastaustekstia (finish_reason "length", tyhja content)."""
+    syy = "vastaus katkesi pituusrajaan"
 
 
 class Aikakatkaisu(YksityinenVirhe):
     """Mallipalvelu ei vastannut kuljettimen aikarajassa (TimeoutError, myos URLError(reason=TimeoutError) yhteyden
     avauksessa). Aliluokka, jotta mallivertailu erottaa aikakatkaisun muista virheista; muut kutsujat nakevat sen
     YksityinenVirheena kuten ennen (sama viesti)."""
+    syy = "aikaraja: mallipalvelu ei vastannut ajoissa"
+
+
+# Virheen luokittelu journaliin ja itsetarkistuksen merkintaan. Aliluokkien viestit ovat samat kuin ennen, joten
+# kutsujat, jotka nayttavat str(e):n, eivat muutu. Attribuutit: `syy` (lyhyt teksti, ei sisaltoa), `http`
+# (HTTP-tila tai None), `koodi` (OpenRouterin error.code tai -type, siistitty, tai None) ja `tilapainen`
+# (uusintayritys voi auttaa: HTTP 408/429/5xx, katkennut yhteys tai palvelun virhe vastauksen rungossa).
+_KOODI_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,40}$")
+
+
+def _siisti_koodi(arvo: Any) -> str | None:
+    if isinstance(arvo, bool):
+        return None
+    if isinstance(arvo, int):
+        return str(arvo)
+    if isinstance(arvo, str) and _KOODI_RE.fullmatch(arvo):
+        return arvo
+    return None
+
+
+def _virheen_koodi(data: Any) -> str | None:
+    """OpenRouterin virherungon {"error": {"code": .., "type": ..}} koodi tai tyyppi. Ei viestia eika metadataa."""
+    virhe = data.get("error") if isinstance(data, Mapping) else None
+    if not isinstance(virhe, Mapping):
+        return None
+    return _siisti_koodi(virhe.get("code")) or _siisti_koodi(virhe.get("type"))
+
+
+class HttpVirhe(YksityinenVirhe):
+    """Mallipalvelu vastasi HTTP-virheella. Viesti on sama kuin ennen ("mallipalvelu hylkasi pyynnon (HTTP n)")."""
+
+    def __init__(self, http: int, koodi: str | None = None) -> None:
+        super().__init__("mallipalvelu hylkasi pyynnon (HTTP %s)" % http)
+        self.http = http
+        self.koodi = koodi
+        self.tilapainen = http in (408, 429) or http >= 500
+        self.syy = "palvelu ei vastannut (HTTP %s)" % http if self.tilapainen else "palvelu hylk\u00e4si pyynn\u00f6n (HTTP %s)" % http
+
+
+class YhteysVirhe(YksityinenVirhe):
+    """Yhteys katkesi tai vastaus ei ollut JSONia (muu OSError tai ValueError kuin aikakatkaisu)."""
+    tilapainen = True
+    syy = "yhteys mallipalveluun katkesi"
+
+
+class PalveluVirhe(YksityinenVirhe):
+    """HTTP 200, mutta rungossa on virhe eika vastausta (OpenRouter: palveluntarjoaja epaonnistui vastauksen aikana)."""
+    tilapainen = True
+
+    def __init__(self, viesti: str, koodi: str | None = None) -> None:
+        super().__init__(viesti)
+        self.koodi = koodi
+        self.syy = "palvelu palautti virheen" + (" (koodi %s)" % koodi if koodi else "")
+
+
+class TyhjaVastaus(YksityinenVirhe):
+    """Vastauksessa ei ollut tekstia (tyhja tai puuttuva content ilman pituusrajaa)."""
+    syy = "vastaus oli tyhj\u00e4"
 
 
 def vastauksen_teksti(data: Any) -> str:
@@ -238,13 +328,27 @@ def vastauksen_teksti(data: Any) -> str:
     except (KeyError, IndexError, TypeError):
         teksti = None
         if not katkesi_pituusrajaan(data):
-            raise YksityinenVirhe("OpenRouterin vastauksessa ei ollut tekstia") from None
+            koodi = _virheen_koodi(data)
+            if koodi is not None or (isinstance(data, Mapping) and isinstance(data.get("error"), Mapping)):
+                raise PalveluVirhe("OpenRouterin vastauksessa ei ollut tekstia", koodi) from None
+            raise TyhjaVastaus("OpenRouterin vastauksessa ei ollut tekstia") from None
     if teksti is None or (isinstance(teksti, str) and not teksti.strip()):
         if katkesi_pituusrajaan(data):
             raise VastausKatkesi(KATKESI_TYHJANA)
+        valinta = _valinta(data)
+        if isinstance(valinta.get("error"), Mapping):
+            raise PalveluVirhe("OpenRouter antoi tyhjan vastauksen", _virheen_koodi(valinta))
     if not isinstance(teksti, str) or not teksti.strip():
-        raise YksityinenVirhe("OpenRouter antoi tyhjan vastauksen")
+        raise TyhjaVastaus("OpenRouter antoi tyhjan vastauksen")
     return teksti.strip()
+
+
+def _valinta(data: Any) -> Mapping[str, Any]:
+    try:
+        v = data["choices"][0]
+    except (KeyError, IndexError, TypeError):
+        return {}
+    return v if isinstance(v, Mapping) else {}
 
 
 def tarkista_malli(malli: Any) -> str:
@@ -306,6 +410,14 @@ def _zdr_kunnossa(runko: Any) -> bool:
     return isinstance(prov, Mapping) and prov.get("zdr") is True and prov.get("data_collection") == "deny"
 
 
+def _http_virheen_koodi(e: Any) -> str | None:
+    """HTTP-virherungon error.code tai -type (enintaan 64 kt luetaan). Viestia ei lueta talteen."""
+    try:
+        return _virheen_koodi(json.loads(e.read(65_536)))
+    except Exception:  # noqa: BLE001 - runko puuttuu tai ei ole JSONia: koodia ei ole
+        return None
+
+
 def tee_kuljetin(avain: str, avaa: Callable[..., Any] | None = None,
                  aikaraja_s: float | None = None,
                  ylaraja_s: float = VASTAUS_AIKARAJA_S) -> Callable[[dict[str, Any]], Mapping[str, Any]]:
@@ -326,12 +438,13 @@ def tee_kuljetin(avain: str, avaa: Callable[..., Any] | None = None,
             with avaa(pyynto, timeout=aikaraja) as r:
                 data = json.loads(r.read(MAX_VASTAUS_TAVUA))
         except urllib.error.HTTPError as e:
+            koodi = _http_virheen_koodi(e)
             e.close()                               # vapauttaa virhevastauksen socketin
-            raise YksityinenVirhe("mallipalvelu hylkasi pyynnon (HTTP %s)" % e.code) from None
+            raise HttpVirhe(e.code, koodi) from None
         except (OSError, ValueError) as e:
             if isinstance(e, TimeoutError) or isinstance(getattr(e, "reason", None), TimeoutError):
                 raise Aikakatkaisu("mallipalvelu ei vastannut (%s)" % type(e).__name__) from None
-            raise YksityinenVirhe("mallipalvelu ei vastannut (%s)" % type(e).__name__) from None
+            raise YhteysVirhe("mallipalvelu ei vastannut (%s)" % type(e).__name__) from None
         if not isinstance(data, Mapping):
             raise YksityinenVirhe("OpenRouter antoi odottamattoman vastauksen")
         return data
@@ -370,6 +483,7 @@ def _kysy_viestit(
     tokenit = min(tokenit, kontekstiraja.vastausvaraus(malli, MAX_TOKENIA))   # pieni konteksti: vastaus ei vie kaikkea
     paattely = paattelyparametri(malli, paattelyraja(malli, tokenit, paattely_max))
     loki_kehote(malli, viestit, tokenit, paattely["max_tokens"] if paattely else 0)
+    alku = time.monotonic()
 
     def kutsu(reasoning: dict[str, Any] | None) -> Mapping[str, Any]:
         try:
@@ -384,27 +498,44 @@ def _kysy_viestit(
         loki_toteutunut(malli, vastaus)
         return vastaus
 
-    data = kutsu(paattely)
     try:
-        teksti = vastauksen_teksti(data)
-    except VastausKatkesi:
-        print("yksityinen_or: vastaus katkesi pituusrajaan ennen tekstia (max_tokens=%d, paattely enintaan %d)"
-              % (tokenit, paattely["max_tokens"] if paattely else 0), file=sys.stderr)
-        uusi = uusinnan_parametri(malli) if paattely else None
-        if uusi is None or uusinta is None:
-            raise
-        if not uusinta():
-            print("yksityinen_or: uusintaa ei tehty (kutsuraja)", file=sys.stderr)
-            raise
-        print("yksityinen_or: uusinta kerran ilman paattelya (reasoning %s), malli %s"
-              % (",".join("%s=%s" % kv for kv in sorted(uusi.items()) if kv[0] != "exclude"), str(malli)[:100]),
-              file=sys.stderr)
-        data = kutsu(uusi)
+        data = kutsu(paattely)
         try:
             teksti = vastauksen_teksti(data)
         except VastausKatkesi:
-            print("yksityinen_or: uusintakin katkesi pituusrajaan ennen tekstia", file=sys.stderr)
-            raise
+            print("yksityinen_or: vastaus katkesi pituusrajaan ennen tekstia (max_tokens=%d, paattely enintaan %d)"
+                  % (tokenit, paattely["max_tokens"] if paattely else 0), file=sys.stderr)
+            uusi = uusinnan_parametri(malli) if paattely else None
+            if uusi is None or uusinta is None:
+                raise
+            # Effort-tason uusinta vain, jos sen taso on pienempi kuin ensimmaisen kutsun todennakoinen taso. Muuten
+            # uusinta olisi kaytannossa sama pyynto ja maksaisi toisen kerran (katselmointi 27.11.2026; EFFORT_OSUUS).
+            ensin = todennakoinen_taso(malli, tokenit, paattely["max_tokens"])
+            taso = uusi.get("effort")
+            if ensin is not None and taso not in (None, "none") and EFFORT_OSUUS[taso] >= EFFORT_OSUUS[ensin]:
+                print("yksityinen_or: uusintaa ei tehty: ensimmainen kutsu oli todennakoisesti jo tasolla %s "
+                      "(paattely %d / %d tokenia), uusinta tasolla %s olisi sama pyynto, malli %s"
+                      % (ensin, paattely["max_tokens"], tokenit, taso, str(malli)[:100]), file=sys.stderr)
+                raise
+            if not uusinta():
+                print("yksityinen_or: uusintaa ei tehty (kutsuraja)", file=sys.stderr)
+                raise
+            kuvaus = ",".join("%s=%s" % kv for kv in sorted(uusi.items()) if kv[0] != "exclude")
+            if taso in (None, "none"):                         # effort none tai enabled False: paattely pois
+                print("yksityinen_or: uusinta kerran ilman paattelya (reasoning %s), malli %s"
+                      % (kuvaus, str(malli)[:100]), file=sys.stderr)
+            else:                                              # pakollinen paattely: vain pienempi taso
+                print("yksityinen_or: uusinta kerran pienemmalla paattelytasolla (reasoning %s; ensimmainen "
+                      "todennakoisesti %s), malli %s" % (kuvaus, ensin or "tuntematon", str(malli)[:100]), file=sys.stderr)
+            data = kutsu(uusi)
+            try:
+                teksti = vastauksen_teksti(data)
+            except VastausKatkesi:
+                print("yksityinen_or: uusintakin katkesi pituusrajaan ennen tekstia", file=sys.stderr)
+                raise
+    except YksityinenVirhe as e:
+        loki_virhe(tehtava, malli, e, time.monotonic() - alku)
+        raise
     if huomauta_katkeamisesta and katkesi_pituusrajaan(data):
         print("yksityinen_or: vastaus katkesi pituusrajaan (max_tokens=%d)" % tokenit, file=sys.stderr)
         return teksti + "\n\n" + KATKENNUT_HUOMAUTUS
@@ -423,6 +554,18 @@ def loki_kehote(malli: str, viestit: list[dict[str, Any]], max_tokens: int, paat
           "konteksti %(konteksti)d, vastaus enintaan %(max_tokens)d, paattely enintaan %(paattely)d), arvioitu hinta "
           "enintaan %(usd_arvio).4f USD" % tiedot + ", malli " + str(malli)[:100], file=sys.stderr)
     return tiedot
+
+
+def loki_virhe(tehtava: str, malli: str, e: BaseException, kesto_s: float) -> None:
+    """Kirjaa stderriin (journal) yhden rivin epaonnistuneesta mallikutsusta: tehtava, malli, poikkeuksen luokka,
+    HTTP-tila ja OpenRouterin virhekoodi (jos saatavilla) seka kesto. Ei virheen tekstia, koska se voi sisaltaa
+    kehotteen osia."""
+    http = getattr(e, "http", None)
+    koodi = _siisti_koodi(getattr(e, "koodi", None))
+    print("yksityinen_or: virhe tehtava %s, malli %s, luokka %s, http %s, koodi %s, kesto %.1f s"
+          % (str(tehtava)[:60], str(malli)[:100], type(e).__name__,
+             http if isinstance(http, int) and not isinstance(http, bool) else "-", koodi or "-",
+             max(0.0, float(kesto_s))), file=sys.stderr)
 
 
 def loki_toteutunut(malli: str, data: Any) -> None:
@@ -524,7 +667,9 @@ def paattelyparametri(malli: str, raja: int) -> dict[str, Any] | None:
 def uusinnan_parametri(malli: str) -> dict[str, Any] | None:
     """Uusintakutsun reasoning-kentta, kun vastaus katkesi paattelyyn: paattely pois, jos malli sallii
     (effort "none" tai enabled False), pakollisella mallilla effort "low", jos malli kertoo tukevansa sita.
-    None = uusinnasta ei olisi apua (malli ei tue parametria, tai paattely on pakollinen ilman tasoja)."""
+    None = uusinnasta ei olisi apua (malli ei tue parametria, tai paattely on pakollinen ilman tasoja).
+    _kysy_viestit ohittaa lisaksi effort-tason uusinnan, jos ensimmainen kutsu oli todennakoisesti jo samalla tai
+    pienemmalla tasolla (todennakoinen_taso)."""
     if not _paattelee_ja_tukee(malli):
         return None
     pakollinen, tasot = PAATTELY_TUKI[malli]
@@ -674,6 +819,7 @@ def kysy_tiivistys(
     laheta = tee_kuljetin(avain, avaa)
     viestit = [{"role": "system", "content": ohje}, {"role": "user", "content": data}]
     paattely = paattelyparametri(malli, paattelyraja(malli, TIIVISTYS_MAX_TOKENIA, paattely_max))
+    loki_kehote(malli, viestit, TIIVISTYS_MAX_TOKENIA, paattely["max_tokens"] if paattely else 0)
     try:
         vastaus = openrouter_kulut.kutsu(
             malli, viestit, laheta, tehtava=TIIVISTYS_TEHTAVA, nyt=nyt, tila=kulutila,
@@ -706,6 +852,7 @@ def kysy_taustatyo(
     avain = lue_avain(avain_tiedosto)                     # ennen varausta: puuttuva avain ei jata varausta
     laheta = tee_kuljetin(avain, avaa, aikaraja_s, ylaraja_s=TAUSTA_AIKARAJA_S)
     paattely = paattelyparametri(malli, paattelyraja(malli, MAX_TOKENIA, paattely_max))
+    loki_kehote(malli, viestit, MAX_TOKENIA, paattely["max_tokens"] if paattely else 0)
     try:
         vastaus = openrouter_kulut.kutsu(
             malli, viestit, laheta, tehtava=TAUSTA_TEHTAVA, nyt=nyt, tila=kulutila,
