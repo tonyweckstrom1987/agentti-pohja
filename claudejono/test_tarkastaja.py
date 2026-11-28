@@ -317,6 +317,43 @@ class KierrosTesti(unittest.TestCase):
         api = Feikki([pr_olio()], [tiedosto()], [])
         self.assertEqual(tk.kierros(self.env, "t", suorita=f, avaa=api)[0]["tulos"], "EN_TIEDA")
 
+    def test_en_tieda_saa_lokiin_syyn(self):
+        api = Feikki([pr_olio()], [tiedosto()], [], diff=b"x" * (tk.DIFF_MAX + 1))
+        tk.kierros(self.env, "t", suorita=self.suorita(), avaa=api)
+        rivi = self.lokirivit()[0]
+        self.assertEqual(sorted(rivi), ["aika", "pr", "repo", "sha", "syy", "tulos"])
+        self.assertEqual(rivi["tulos"], "EN_TIEDA")
+        self.assertIn("diff on yli", rivi["syy"])
+        self.assertNotIn("xxxx", rivi["syy"])                       # diffia ei kirjoiteta lokiin
+
+    def test_lukukelvoton_vastaus_saa_syyn(self):
+        def f(kom, **kw):
+            return SimpleNamespace(returncode=1, stdout="ei jsonia <!-- paatos=HYVAKSYTTY -->", stderr="")
+        tk.kierros(self.env, "t", suorita=f, avaa=Feikki([pr_olio()], [tiedosto()], []))
+        rivi = self.lokirivit()[0]
+        self.assertEqual(rivi["tulos"], "EN_TIEDA")
+        self.assertIn("ei ollut luettavissa", rivi["syy"])
+        self.assertNotIn("ei jsonia", rivi["syy"])                  # mallin raakatulostetta ei kirjoiteta lokiin
+
+    def test_pitka_en_tieda_perustelu_katkaistaan(self):
+        vastaus = json.dumps({"paatos": "EN_TIEDA", "perustelu": "<!-- " + "a" * 1000})
+        tk.kierros(self.env, "t", suorita=self.suorita(vastaus), avaa=Feikki([pr_olio()], [tiedosto()], []))
+        syy = self.lokirivit()[0]["syy"]
+        self.assertLessEqual(len(syy), tk.EN_TIEDA_SYY_MAX)
+        self.assertTrue(syy.startswith("a"))
+        self.assertNotIn("<!--", syy)
+
+    def test_hyvaksytty_ja_hylatty_ilman_syyta(self):
+        for vastaus, odotus in (('{"paatos": "HYVAKSY", "perustelu": "ok"}', "HYVAKSYTTY"),
+                                ('{"paatos": "HYLKAA", "perustelu": "bugi"}', "HYLATTY")):
+            with self.subTest(odotus=odotus):
+                (Path(self.d.name) / tk.LOKI).unlink(missing_ok=True)
+                (Path(self.d.name) / tk.TILA_TIEDOSTO).unlink(missing_ok=True)
+                tk.kierros(self.env, "t", suorita=self.suorita(vastaus), avaa=Feikki([pr_olio()], [tiedosto()], []))
+                rivi = self.lokirivit()[0]
+                self.assertEqual(rivi["tulos"], odotus)
+                self.assertEqual(sorted(rivi), ["aika", "pr", "repo", "sha", "tulos"])
+
     def test_kuiva_ei_aja_eika_kirjoita(self):
         api = Feikki([pr_olio()], [tiedosto()], [])
         tulos = tk.kierros(self.env, "t", suorita=self.suorita(), avaa=api, kuiva=True)

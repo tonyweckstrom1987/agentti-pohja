@@ -53,6 +53,7 @@ PERUSTELU_MAX = 1500
 LOYDOS_MAX = 300
 LOYDOKSIA_MAX = 10
 VIRHESYY_MAX = 200
+EN_TIEDA_SYY_MAX = 160                                          # lokirivin syy, kun arviota ei saatu
 OHITUS_SYITA_MAX = 20
 OHITUS_SYY_MAX = 200
 PAATOKSET = {"HYVAKSY": "HYVAKSYTTY", "HYLKAA": "HYLATTY", "RAJATTU": "RAJATTU", "EN_TIEDA": "EN_TIEDA"}
@@ -353,6 +354,15 @@ def ohitusrivi(repo, nro, sha, syyt):
     return {"repo": repo, "pr": nro, "tulos": "OHITETTU", "syyt": siistit, "sha": sha[:12]}
 
 
+def tarkastusrivi(repo, nro, paatos, perustelu, sha):
+    """Lokirivi tarkastuksesta. Vain EN_TIEDA saa kentan syy (perustelun alku rajattuna), jotta lokista nakee,
+    miksi arviota ei saatu. Perustelu on jo siivottu, eika siina ole diffia tai poikkeusviestia."""
+    rivi = {"repo": repo, "pr": nro, "tulos": paatos, "sha": sha[:12]}
+    if paatos == "EN_TIEDA":
+        rivi["syy"] = _siivoa(perustelu, EN_TIEDA_SYY_MAX) or "syy puuttuu"
+    return rivi
+
+
 def _kommentit(repo, nro, tunnus, avaa):
     return [{"user": (k.get("user") or {}).get("login"), "body": k.get("body")}
             for k in hae_sivutettu("%s/repos/%s/%s/issues/%s/comments" % (API, OMISTAJA, repo, nro), tunnus, avaa=avaa)]
@@ -423,7 +433,7 @@ def kierros(env, tunnus, nyt=None, suorita=subprocess.run, avaa=urllib.request.u
                 kulutus.kirjaa(tila_hak, malli, avain, 0, "tarkastus", paatos != "EN_TIEDA", time.monotonic() - alku, luvut)
                 _pyynto("%s/repos/%s/%s/issues/%s/comments" % (API, OMISTAJA, repo, nro), tunnus,
                         data={"body": kommentti(paatos, pr["head_sha"], perustelu, loydokset, malli)}, avaa=avaa)
-                tehty.append({"repo": repo, "pr": nro, "tulos": paatos, "sha": pr["head_sha"][:12]})
+                tehty.append(tarkastusrivi(repo, nro, paatos, perustelu, pr["head_sha"]))
             except TarkastajaVirhe as e:
                 tehty.append({"repo": repo, "pr": nro, "tulos": "virhe", "syy": str(e)})
     tila["per_pr"] = {k: v for k, v in tila["per_pr"].items() if k in auki or not auki}

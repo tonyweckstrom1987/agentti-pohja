@@ -1,0 +1,1 @@
+- tarkastaja: EN_TIEDA-tuloksen tarkastusriville kenttä syy (perustelun alku, enintään 160 merkkiä _siivoa-funktiolla), jotta lokista näkee, miksi PR jäi ilman arviota. Muiden tulosten rivit ennallaan.
