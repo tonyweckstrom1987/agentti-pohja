@@ -2746,10 +2746,27 @@ def tee_kasittelija(tila):
     return K
 
 
+class AivoPalvelin(ThreadingHTTPServer):
+    """ThreadingHTTPServer, joka ei kirjoita kasittelijan poikkeusta journaliin.
+
+    socketserver.BaseServer.handle_error tulostaa oletuksena koko jaljityksen viesteineen
+    ja asiakkaan osoitteen stderriin (systemd: journal). Viestissa voi olla salaisuuksia,
+    joten tulostetaan vain poikkeuksen tyypin nimi.
+    """
+
+    def handle_error(self, request, client_address):
+        tyyppi = sys.exc_info()[0]
+        nimi = tyyppi.__name__ if tyyppi is not None else "tuntematon"
+        try:
+            print("chat: kasittelijavirhe %s" % nimi, file=sys.stderr, flush=True)
+        except Exception:                   # lokin kirjoitusvirhe ei saa kaataa palvelinsaietta
+            pass
+
+
 def kaynnista(osoite, portti, tila):
     if not sallittu_osoite(osoite):
         raise ChatVirhe("osoite ei ole loopback eika Tailscale; kieltaydyn kuuntelemasta")
-    palvelin = ThreadingHTTPServer((osoite, portti), tee_kasittelija(tila))
+    palvelin = AivoPalvelin((osoite, portti), tee_kasittelija(tila))
     return palvelin
 
 
