@@ -590,3 +590,99 @@ class IbanJaHetuTesti(unittest.TestCase):
     def test_henkilotunnus_pienilla(self):
         for h in ("131052-308t", "010101a123b", "131052-308T"):
             self.assertEqual(vartija.mekaaniset_tyypit("tunnus " + h + "."), [vartija.SYY_HETU], h)
+
+
+# Patologiset syotteet lineaarisuustestiin (tehtava 26-33): jokainen toistuu, kunnes pituus on n merkkia.
+PATOLOGISET = (":a", "_1:", "(:", ".:", "a.", "x_1:fe80", "eth_1:" + "1:" * 30, "ip::", "_fe80:", "1.2.",
+               "FI21  ", "FI21\u200b", "DE89./", "131052\u2010", ":" * 40 + "_", "a_" + "0:" * 9,
+               "x.ab%_", ".a%_fe80::", "1.2::%eth_")
+
+
+class ValimerkkiJaAlaviivaTesti(unittest.TestCase):
+    """Valimerkki kaksoispisteen edella ((IPv6):fe80::1) ja alaviivan jalkeinen heksaryhma (eth_1:fe80::1) seka IBANin
+    ja henkilotunnuksen typografiset valimerkit (tehtava 26-33). Osoitteet ovat yksityisilta tai dokumentaatioalueilta."""
+
+    def osumat(self, teksti):
+        return [(o["kohta"], o["syy"]) for o in vartija.mekaaninen(teksti)]
+
+    def test_valimerkki_ennen_kaksoispistetta(self):
+        for teksti, osoite in (("(IPv6):fe80::1", "fe80::1"), ("**IP**:fd7a:115c:a1e0::1", "fd7a:115c:a1e0::1"),
+                               ("ip]:fe80::1", "fe80::1"), ('ip=":fe80::1"', "fe80::1"), ("katso.fe80::1", "fe80::1"),
+                               ("ip::fe80::1", "fe80::1"), ("- :fd12:3456::42", "fd12:3456::42"),
+                               (":fe80::1", "fe80::1")):
+            self.assertEqual(self.osumat(teksti), [(osoite, vartija.SYY_YKSITYINEN_IP)], teksti)
+            self.assertEqual(vartija.tekstin_paatos(teksti)["tulos"], vartija.TULOS_ESTA, teksti)
+
+    def test_alaviivan_jalkeinen_heksaryhma(self):
+        for teksti, osoite in (("vlan_10:fd7a:115c:a1e0::1", "fd7a:115c:a1e0::1"), ("eth_1:fe80::1", "fe80::1"),
+                               ("br_0:fe80::1", "fe80::1"), ("host_a:fe80::1", "fe80::1"),
+                               ("ip_1:fe80:0:0:0:0:0:1", "fe80:0:0:0:0:0:1"), ("dev eth_1:fe80::1%eth1 up", "fe80::1%eth1")):
+            self.assertEqual(vartija.mekaaniset_tyypit(teksti), [vartija.SYY_YKSITYINEN_IP], teksti)
+            self.assertEqual(self.osumat(teksti), [(osoite, vartija.SYY_YKSITYINEN_IP)], teksti)
+            self.assertEqual(vartija.tekstin_paatos(teksti)["tulos"], vartija.TULOS_ESTA, teksti)
+
+    def test_julkinen_osoite_pysyy_kysyna(self):
+        self.assertEqual(self.osumat("x_2001:db8::1"), [("2001:db8::1", vartija.SYY_IP)])
+        self.assertEqual(self.osumat("(IPv6):2001:db8::1"), [("2001:db8::1", vartija.SYY_IP)])
+        self.assertEqual(self.osumat("dead:beef::1"), [("dead:beef::1", vartija.SYY_IP)])
+
+    def test_ei_vaaria_halytyksia(self):
+        for t in ("x[1::2]", "a::b", "std::a", "Foo::Bar ja a_1::2", "versio 1.2.3", "v1.2.3:4", "Python 3.10.12",
+                  "1.2.fe80::1", "time:12:30:45", "localhost:8800", "sha256:9f86d0", "(huom):12:30",
+                  "pvm 12.11.2026", "klo 12.30-13.45", "polku a/b/c 1234/5678", "PR:ien 1:n", "a.b::c"):
+            self.assertEqual(vartija.mekaaniset_tyypit(t), [], t)
+
+    def test_iban_typografiset_valimerkit(self):
+        for vali in ("\u2009", "\u2007", "\u2013", "\u2011", "\u200b", "\u00ad", ".", "/", "\t", "  "):
+            fi = vali.join(("FI21", "1234", "5600", "0007", "85"))
+            de = vali.join(("DE89", "3704", "0044", "0532", "0130", "00"))
+            for iban in (fi, de):
+                self.assertEqual(self.osumat("tili " + iban + " ja muuta"), [(iban, vartija.SYY_IBAN)], repr(iban))
+                self.assertEqual(vartija.tekstin_paatos("tili " + iban)["tulos"], vartija.TULOS_ESTA, repr(iban))
+        self.assertNotIn(vartija.SYY_IBAN, vartija.mekaaniset_tyypit("tili DE88.3704.0044.0532.0130.00 loppu"))
+
+    def test_henkilotunnus_typografisilla_viivoilla(self):
+        for viiva in ("\u2010", "\u2011"):
+            teksti = "tunnus 131052" + viiva + "308T."
+            self.assertEqual(vartija.mekaaniset_tyypit(teksti), [vartija.SYY_HETU], repr(viiva))
+            self.assertEqual(vartija.tekstin_paatos(teksti)["tulos"], vartija.TULOS_ESTA)
+
+    def test_pisteen_jalkeinen_vyohyke_ei_niele_alaviivaa(self):
+        # Pisteesta alkava osuma ei saa nielaista vyohykkeen jalkeista alaviivaerotinta (PR #461:n katselmointi).
+        for teksti, tulos in (("x.ab%_fe80::1", vartija.TULOS_ESTA), ("eth0.100%_fe80::1", vartija.TULOS_ESTA),
+                              ("IPv6 osoite: ab.cd%_fe80::1", vartija.TULOS_ESTA),
+                              ("1.2::%eth_fd7a:115c:a1e0::1", vartija.TULOS_ESTA),
+                              ("x.ab%_2001:db8::1", vartija.TULOS_KYSY)):
+            malli = {"tila": vartija.TILA_TARKISTETTU, "arvio": "ei"}
+            self.assertEqual(vartija.tekstin_paatos(teksti, malli=malli)["tulos"], tulos, teksti)
+
+    def test_pistehaku_vain_lisaa_osumia(self):
+        # Pisteen erilliset haut (IPV6_PISTE_RE, IPV6_TAYSI_PISTE_RE) eivat saa poistaa yhtaan tyyppia, jonka
+        # muut haut loytavat: ilman niita saatu tyyppijoukko on aina osajoukko.
+        import random
+        ilman = tuple(p for p in vartija.MEKAANISET
+                      if p[0] is not vartija.IPV6_PISTE_RE and p[0] is not vartija.IPV6_TAYSI_PISTE_RE)
+        palat = ("fe80::1", "fd7a:115c:a1e0::1", "2001:db8::1", "%", "_", ".", ":", "::", "ab", "eth0", "1", "x", " ")
+        rnd = random.Random(461)
+        for _ in range(2000):
+            teksti = "".join(rnd.choice(palat) for _ in range(rnd.randint(1, 8)))
+            kaikki = set(vartija.mekaaniset_tyypit(teksti))
+            with mock.patch.object(vartija, "MEKAANISET", ilman):
+                osa = set(vartija.mekaaniset_tyypit(teksti))
+            self.assertLessEqual(osa, kaikki, repr(teksti))
+
+    def test_lineaarinen(self):
+        import time
+
+        def aika(teksti):
+            parhaat = []
+            for _ in range(3):
+                alku = time.perf_counter()
+                vartija.mekaaninen(teksti)
+                parhaat.append(time.perf_counter() - alku)
+            return min(parhaat)
+        for kuvio in PATOLOGISET:
+            ajat = {n: aika((kuvio * (n // len(kuvio) + 1))[:n]) for n in (5000, 20000, 80000)}
+            # lineaarinen: 4-kertainen pituus ~ 4-kertainen aika; nelioillinen olisi 16-kertainen
+            self.assertLess(ajat[80000], 2.0, repr(kuvio))
+            self.assertLess(ajat[80000], 8 * ajat[20000] + 0.02, (repr(kuvio), ajat))

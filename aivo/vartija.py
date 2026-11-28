@@ -95,11 +95,17 @@ IPV4_RE = re.compile(r"(?<![\d.])(?:\d{1,3}\.){3}\d{1,3}(?![\d.]*\d)")
 # Jakso alkaa vain sanan, kaksoispisteen ja pisteen ulkopuolelta, joten jokainen jakso kaydaan lapi kerran (lineaarinen).
 IPV6_RE = re.compile(r"(?<![\w:.%])[0-9A-Fa-f:.]{2,}(?:%[\w.-]{1,32})?")
 IPV6_EHDOKAS_MAX = 64
-# Lokimuotoinen IPv6 (ip:fe80::1, addr:fd7a:..., IPv6:fe80::1, a_fe80::1): IPV6_RE ei ala sanan tai kaksoispisteen
-# jalkeen, joten nama haetaan erikseen erottimen ([:_]) jalkeen. _etuliite_kelpaa hylkaa kaksoispisteen, jonka edella
-# on pelkka heksaryhma (dead:beef::1, 1:2:3), joten osuma ei ala keskelta heksajonoa. Yksi erotin per osuma ja
-# osuma nielee jakson loppuun, joten haku pysyy lineaarisena.
+# Lokimuotoinen IPv6 (ip:fe80::1, addr:fd7a:..., IPv6:fe80::1, a_fe80::1, katso.fe80::1, (IPv6):fe80::1,
+# ip::fe80::1): IPV6_RE ei ala sanan, kaksoispisteen tai pisteen jalkeen, joten nama haetaan erikseen erottimen
+# ([:_]) jalkeen. _etuliite_kelpaa hylkaa erottimen, jonka edella on pelkka heksaryhma (dead:beef::1, 1:2:3) tai
+# piste, joten osuma ei ala keskelta heksajonoa tai versionumeroa. Yksi erotin per osuma ja osuma nielee jakson
+# loppuun, joten haku pysyy lineaarisena. Jakson sisalla kokeillaan lisaksi myohempia alkukohtia (_myohempi_yksityinen),
+# jotta eth_1:fe80::1 ei jaa julkiseksi osoitteeksi 1:fe80::1.
 IPV6_ETULIITE_RE = re.compile(r"[:_](?P<ip>[0-9A-Fa-f:.]{2,}(?:%[\w.-]{1,32})?)")
+# Pisteen jalkeinen alku (katso.fe80::1) haetaan omalla regexilla. Jos piste olisi samassa erotinluokassa, pisteesta
+# alkava osuma voisi nielaista vyohykkeen (%...) jalkeisen alaviivan, eika finditer palaa taaksepain: x.ab%_fe80::1
+# jaisi loytymatta. Erillinen haku vain lisaa osumia, joten [:_]-haun tulos sailyy ennallaan.
+IPV6_PISTE_RE = re.compile(r"\.(?P<ip>[0-9A-Fa-f:.]{2,}(?:%[\w.-]{1,32})?)")
 # Lyhyt kahden ryhman muoto (x[1::2], a::b, std-tyyliset nimet) on useimmiten koodia. Se ohitetaan vain, jos osoite
 # ei ole estoluokassa (yksityinen, tailnet, link-local): estotunnistus ei heikkene.
 IPV6_LYHYT_RE = re.compile(r"(?i)\A[0-9a-f]{1,2}::[0-9a-f]{1,2}\Z")
@@ -107,20 +113,26 @@ IPV6_LYHYT_RE = re.compile(r"(?i)\A[0-9a-f]{1,2}::[0-9a-f]{1,2}\Z")
 # (esim. MAC-osoite). Saantoja saa vain tiukentaa, joten nama ovat edelleen "IP-osoite" (kysy).
 IPV6_TAYSI_RE = re.compile(r"(?i)(?<![\w:])(?:[0-9a-f]{1,4}:){4,7}[0-9a-f]{1,4}(?![\w:])")
 # Sama taysi muoto lokimuodossa (hwaddr:00:1A:..., a_fd12:...); etuliite tarkistetaan kuten IPV6_ETULIITE_RE:ssa.
+# Taysi muoto, joka alkaa annetusta kohdasta (_myohempi_yksityinen).
+IPV6_TAYSI_KOKO_RE = re.compile(r"(?i)(?:[0-9a-f]{1,4}:){4,7}[0-9a-f]{1,4}(?![\w:])")
 IPV6_TAYSI_ETULIITE_RE = re.compile(r"(?i)[:_](?P<ip>(?:[0-9a-f]{1,4}:){4,7}[0-9a-f]{1,4})(?![\w:])")
+IPV6_TAYSI_PISTE_RE = re.compile(r"(?i)\.(?P<ip>(?:[0-9a-f]{1,4}:){4,7}[0-9a-f]{1,4})(?![\w:])")
 # Tailnet-nimi: alku ei saa olla nimen osan ja pisteen jalkeen (a.a.a.a...: vain ensimmainen kohta on alku). Ilman tata
 # rajausta jokainen osa oli uusi alku, ja syote "a." * 8000 vei 2,7 s (neliollinen).
 TAILNET_RE = re.compile(r"(?i)(?<![\w-])(?<![\w-]\.)(?:[a-z0-9-]+\.)*[a-z0-9-]+\.ts\.net\b"
                         r"|(?<![\w-])tail[0-9a-f]{4,}\b")
-HETU_RE = re.compile(r"(?i)(?<!\w)\d{6}[-+A-FU-Y]\d{3}[0-9A-Y](?!\w)")
-# IBANin valimerkki: valilyonti, sitova valilyonti (U+00A0), kapea sitova valilyonti (U+202F) tai viiva.
-IBAN_VALI = "[ \u00a0\u202f-]"
-IBAN_VALIT = frozenset(" \u00a0\u202f-")
-IBAN_RE = re.compile(r"(?i)(?<!\w)FI\d{2}(?:%s?\d{4}){3}%s?\d{2}(?!\w)" % (IBAN_VALI, IBAN_VALI))
+# Henkilotunnuksen valimerkki: +, -, A-F, U-Y seka typografiset viivat (U+2010-U+2013, U+2212).
+HETU_RE = re.compile(r"(?i)(?<!\w)\d{6}[-+A-FU-Y\u2010-\u2013\u2212]\d{3}[0-9A-Y](?!\w)")
+# IBANin valimerkki: valilyonti, sarkain, sitova (U+00A0), kapea sitova (U+202F), ohut (U+2009) ja numeron levyinen
+# (U+2007) valilyonti, nollalevyinen valilyonti (U+200B), tavutusviiva (U+00AD), piste, kauttaviiva seka viivat
+# (-, U+2010-U+2013). Ryhmien valissa saa olla enintaan kaksi valimerkkia (esim. kaksoisvalilyonti).
+IBAN_VALIT = frozenset(" \t\u00a0\u202f\u2009\u2007\u200b\u00ad./-\u2010\u2011\u2012\u2013")
+IBAN_VALI = "[ \t\u00a0\u202f\u2009\u2007\u200b\u00ad./\u2010-\u2013-]{0,2}"
+IBAN_RE = re.compile(r"(?i)(?<!\w)FI\d{2}(?:%s\d{4}){3}%s\d{2}(?!\w)" % (IBAN_VALI, IBAN_VALI))
 # IBAN kaikista maista: maatunnus, kaksi tarkistenumeroa ja 11-30 merkkia (valilyonnit sallittu). Ehdokas kelpaa vain,
 # jos maan IBAN-pituus tasmaa ja mod 97 -tarkiste on 1 (_iban_osumat). Suomen IBAN_RE pysyy lisaksi ilman tarkistetta.
 # Ehdokas on nollapituinen ennakointi, joten edellinen ehdokas ei niele seuraavan alkua ("DE.. ja SE..").
-IBAN_YLEINEN_RE = re.compile(r"(?i)(?<!\w)(?=(?P<iban>[A-Z]{2}\d{2}(?:%s?[A-Z0-9]){11,30}))" % IBAN_VALI)
+IBAN_YLEINEN_RE = re.compile(r"(?i)(?<!\w)(?=(?P<iban>[A-Z]{2}\d{2}(?:%s[A-Z0-9]){11,30}))" % IBAN_VALI)
 # ISO 13616 -rekisterin maat ja IBAN-pituudet.
 IBAN_PITUUDET = {
     "AD": 24, "AE": 23, "AL": 28, "AT": 20, "AZ": 28, "BA": 20, "BE": 16, "BG": 22, "BH": 22, "BI": 27, "BR": 29,
@@ -163,6 +175,8 @@ MEKAANISET = (
     (IPV6_TAYSI_RE, SYY_IP),
     (IPV6_ETULIITE_RE, SYY_IP),
     (IPV6_TAYSI_ETULIITE_RE, SYY_IP),
+    (IPV6_PISTE_RE, SYY_IP),
+    (IPV6_TAYSI_PISTE_RE, SYY_IP),
     (TAILNET_RE, SYY_TAILNET),
     (HETU_RE, SYY_HETU),
     (IBAN_RE, SYY_IBAN),
@@ -333,15 +347,46 @@ def _ipv6_jakso(s, alku):
 
 
 def _etuliite_kelpaa(teksti, erotin):
-    """Lokimuodon erotin (teksti[erotin] on ":" tai "_") kelpaa osoitteen alkuun. Alaviiva kelpaa aina, koska se ei
-    kuulu heksajonoon. Kaksoispisteen edella pitaa olla sana, jossa on muukin kuin heksamerkki (ip, addr, IPv6)."""
+    """Lokimuodon erotin (teksti[erotin] on ":", "." tai "_") kelpaa osoitteen alkuun. Alaviiva kelpaa aina, koska se
+    ei kuulu heksajonoon. Kaksoispisteiden jono (ip::fe80::1) kasitellaan yhtena erottimena. Erotin hylataan vain, jos
+    sen edella on pelkista heksamerkeista koostuva sana (dead:beef::1, 1:2:3) tai piste tai kaksoispiste
+    (1.2.fe80::1); muu sana (ip, addr, IPv6, eth_1), valimerkki tai tekstin alku kelpaa."""
     if teksti[erotin] == "_":
         return True
     i = erotin
+    if teksti[i] == ":":
+        while i > 0 and teksti[i - 1] == ":":
+            i -= 1
+    loppu = i
     while i > 0 and (teksti[i - 1].isalnum() or teksti[i - 1] == "_"):
         i -= 1
-    sana = teksti[i:erotin]
-    return bool(sana) and any(c not in "0123456789abcdefABCDEF" for c in sana)
+    sana = teksti[i:loppu]
+    if sana:
+        return any(c not in "0123456789abcdefABCDEF" for c in sana)
+    return i == 0 or teksti[i - 1] not in ":."
+
+
+def _taysi_yksityinen(osoite):
+    """Taysi muoto (4-8 ryhmaa), jota ipaddress ei valttamatta hyvaksy (fe80:0:0:0:0:0:1): yksityinen, jos
+    ensimmainen ryhma on nelimerkkinen ja kuuluu estoluokkaan (fe80::/10, fc00::/7, fec0::/10)."""
+    eka = osoite.partition("%")[0].split(":", 1)[0]
+    return _yksityinen_ip(osoite) or (len(eka) == 4 and _yksityinen_ip(eka + "::"))
+
+
+def _myohempi_yksityinen(teksti, alku, loppu):
+    """Jakson teksti[alku:loppu] myohemmat alkukohdat (kaksoispisteen tai pisteen jalkeen, jos _etuliite_kelpaa) ->
+    (a, l) ensimmaiselle yksityiselle osoitteelle tai None. Vain IPV6_EHDOKAS_MAX viimeista merkkia kaydaan lapi,
+    koska osoitteen pitaa ulottua jakson loppuun: tyo on vakio jaksoa kohden (lineaarinen)."""
+    for i in range(max(alku + 1, loppu - IPV6_EHDOKAS_MAX), loppu):
+        if teksti[i - 1] not in ":." or teksti[i] in ":.%" or not _etuliite_kelpaa(teksti, i - 1):
+            continue
+        paikka = _ipv6_jakso(teksti[i:loppu], i)
+        if paikka is not None and _yksityinen_ip(teksti[paikka[0]:paikka[1]]):
+            return paikka
+        t = IPV6_TAYSI_KOKO_RE.match(teksti, i, loppu)
+        if t is not None and _taysi_yksityinen(t.group(0)):
+            return t.start(), t.end()
+    return None
 
 
 def _iban_osumat(osuma, teksti):
@@ -403,25 +448,39 @@ def _raaka_osumat(teksti, nimet=(), avainsanat=()):
                 continue
             if rx is IPV4_RE and any(int(o) > 255 for o in m.group(0).split(".")):
                 continue
-            if rx is IPV6_RE or rx is IPV6_ETULIITE_RE:
+            if rx is IPV6_RE or rx is IPV6_ETULIITE_RE or rx is IPV6_PISTE_RE:
                 if rx is IPV6_RE:
                     paikka = _ipv6_ehdokas(m)
                 else:
                     paikka = _ipv6_jakso(m.group("ip"), m.start("ip")) if _etuliite_kelpaa(teksti, m.start()) else None
+                yksityinen = paikka is not None and _yksityinen_ip(teksti[paikka[0]:paikka[1]])
+                if not yksityinen and rx is not IPV6_RE:
+                    # eth_1:fe80::1: alaviivan jalkeinen osuma 1:fe80::1 on julkinen, myohempi alku fe80::1 yksityinen.
+                    # Yksityinen osuma korvaa julkisen (sama jakso), joten nayttolistassa on estotyyppi.
+                    myohempi = _myohempi_yksityinen(teksti, m.start("ip"), m.end("ip"))
+                    if myohempi is not None:
+                        paikka, yksityinen = myohempi, True
                 if paikka is not None:
                     a, l = paikka
-                    yksityinen = _yksityinen_ip(teksti[a:l])
-                    if not yksityinen and IPV6_LYHYT_RE.match(teksti[a:l].partition("%")[0]):
-                        continue
-                    osumat.append((a, l, SYY_YKSITYINEN_IP if yksityinen else SYY_IP))
+                    if yksityinen or not IPV6_LYHYT_RE.match(teksti[a:l].partition("%")[0]):
+                        osumat.append((a, l, SYY_YKSITYINEN_IP if yksityinen else SYY_IP))
                 continue
-            if rx is IPV6_TAYSI_ETULIITE_RE:
+            if rx is IPV6_TAYSI_ETULIITE_RE or rx is IPV6_TAYSI_PISTE_RE:
                 if _etuliite_kelpaa(teksti, m.start()):
-                    osoite = m.group("ip")
-                    osumat.append((m.start("ip"), m.end("ip"), SYY_YKSITYINEN_IP if _yksityinen_ip(osoite) else SYY_IP))
+                    paikka, syy_ip = (m.start("ip"), m.end("ip")), SYY_IP
+                    if _taysi_yksityinen(m.group("ip")):
+                        syy_ip = SYY_YKSITYINEN_IP
+                    else:
+                        myohempi = _myohempi_yksityinen(teksti, m.start("ip"), m.end("ip"))
+                        if myohempi is not None:
+                            paikka, syy_ip = myohempi, SYY_YKSITYINEN_IP
+                    osumat.append(paikka + (syy_ip,))
                 continue
-            if rx is IPV4_RE or rx is IPV6_TAYSI_RE:
+            if rx is IPV4_RE:
                 osumat.append((m.start(), m.end(), SYY_YKSITYINEN_IP if _yksityinen_ip(m.group(0)) else SYY_IP))
+                continue
+            if rx is IPV6_TAYSI_RE:
+                osumat.append((m.start(), m.end(), SYY_YKSITYINEN_IP if _taysi_yksityinen(m.group(0)) else SYY_IP))
                 continue
             if rx is IBAN_YLEINEN_RE:
                 paikka = _iban_osumat(m, teksti)
