@@ -13,7 +13,9 @@ Turvarajat (koodi on laki):
   * Jokainen hyvaksytty luovutus kirjataan yksityiseen lokiin (aika, sha, teksti) ennen kuin se lahtee.
   * Vuotovartijan lopputulos (aivo/vartija.py, Tonyn paatos A1096) lasketaan hyvaksynnassa samasta tekstista:
     "esta" hylkaa hyvaksynnan aina (mekaaninen estotarkistus tehdaan tassa itse, eika kutsujan tarkistus voi
-    loiventaa sita), "kysy" vaatii lisavahvistuksen "tarkistin kohdat <sha8>", "turvallinen" kulkee kuten ennen."""
+    loiventaa sita), "kysy" vaatii lisavahvistuksen "tarkistin kohdat <sha8>", "turvallinen" kulkee kuten ennen.
+  * Jokainen hyvaksynta ja hylkays kirjataan vartijan osumiin (aivo/vartija_osumat.py: tunnus, vartijan arvio,
+    Tonyn ratkaisu, aika; ei tekstia). Kirjauksen virhe ei esta hyvaksyntaa eika hylkaysta."""
 import json
 import os
 import re
@@ -22,7 +24,7 @@ import stat
 from datetime import datetime, timezone
 from pathlib import Path
 
-from aivo import vartija, yksityinen
+from aivo import vartija, vartija_osumat, yksityinen
 from aivo.yksityinen import YksityinenVirhe
 
 OLETUS_LUOVUTUKSET = "/var/lib/aivo-yksityinen/luovutukset"
@@ -137,10 +139,21 @@ def muokkaa_ehdotus(hakemisto, tunnus, uusi_teksti):
     return d["sha"]
 
 
-def hylkaa_ehdotus(hakemisto, tunnus):
-    """Siirtaa ehdotuksen alikansioon hylatyt/ (0700). Ei poista eika korvaa mitaan."""
+def hylkaa_ehdotus(hakemisto, tunnus, tarkistus=None):
+    """Siirtaa ehdotuksen alikansioon hylatyt/ (0700). Ei poista eika korvaa mitaan.
+    Ratkaisu kirjataan vartijan osumiin (aivo/vartija_osumat.py) vartijan arviolla samasta tekstista
+    (tarkistus kuten hyvaksy:ssa). Arvion tai kirjauksen virhe ei esta hylkaysta."""
     _tunnus(tunnus)
-    return yksityinen.hylkaa_ehdotus(hakemisto, tunnus)
+    try:
+        d = lue_ehdotus(hakemisto, tunnus)
+        arvio = vartija_osumat.vartija_tuloksesta(vartijan_paatos(d["teksti"], d["sha"], tarkistus)["tulos"])
+    except Exception as e:
+        arvio = None
+        vartija_osumat._virhe(e)
+    tulos = yksityinen.hylkaa_ehdotus(hakemisto, tunnus)
+    if arvio is not None:
+        vartija_osumat.kirjaa_ratkaisu(hakemisto, "luovutus", tunnus, arvio, "hylatty")
+    return tulos
 
 
 def irrota_luovutukset(vastaus, tallenna):
@@ -229,6 +242,7 @@ def hyvaksy(hakemisto, tunnus, vahvistus, kirjasto, julkaise=yksityinen.julkaise
         raise YksityinenVirhe("vahvistus ei tasmaa; mitaan ei luovutettu")
     p = vartijan_paatos(d["teksti"], d["sha"], tarkistus)                                           # (1b)
     if p["tulos"] == vartija.TULOS_ESTA:
+        vartija_osumat.kirjaa_esto(hakemisto, "luovutus", tunnus)
         raise VartijaEsto("vuotovartija esti luovutuksen (%s); muokkaa teksti\u00e4, mit\u00e4\u00e4n ei luovutettu"
                           % ", ".join(p["syyt"]), p["tulos"], p["syyt"])
     if p["tulos"] == vartija.TULOS_KYSY and not vartija.lisavahvistus_kelpaa(lisavahvistus, d["sha"]):
@@ -249,6 +263,7 @@ def hyvaksy(hakemisto, tunnus, vahvistus, kirjasto, julkaise=yksityinen.julkaise
         _kirjaa_lokiin(hakemisto, {"aika": aika, "tunnus": tunnus, "tulos": "virhe: " + type(e).__name__})
         raise
     _kirjaa_lokiin(hakemisto, {"aika": aika, "tunnus": tunnus, "tulos": tulos})
+    vartija_osumat.kirjaa_ratkaisu(hakemisto, "luovutus", tunnus, vartija_osumat.vartija_tuloksesta(p["tulos"]), "hyvaksytty")
     hyv = yksityinen.tarkista_yksityinen_hakemisto(Path(hakemisto) / "hyvaksytyt") / (tunnus + ".json")    # (5)
     try:
         os.link(Path(hakemisto) / (tunnus + ".json"), hyv)

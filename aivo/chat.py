@@ -2417,7 +2417,7 @@ def tee_kasittelija(tila):
                 return self._json(429, {"virhe": "edellinen k\u00e4sittely on kesken"})
             vastaus = None
             try:
-                luovutus.hylkaa_ehdotus(tila.luovutukset, d.get("tunnus"))
+                luovutus.hylkaa_ehdotus(tila.luovutukset, d.get("tunnus"), tarkistus=tila.luovutuksen_tarkistus(d.get("tunnus")))
                 vastaus = (200, {"tulos": "hylatty", "teksti": "Luovutus hyl\u00e4tty ja siirretty kansioon hylatyt/."})
             except ChatVirhe as e:
                 vastaus = (409, {"virhe": str(e)})
