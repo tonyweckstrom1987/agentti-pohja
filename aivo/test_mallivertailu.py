@@ -329,6 +329,35 @@ class LippuTesti(unittest.TestCase):
         self.assertEqual(nahty, [True])
         self.assertIs(ok.kutsu, aito)
 
+    def _rungot_paattelylla(self, mallit, paattely):
+        rungot = []
+
+        def tehdas():
+            def laheta(runko):
+                rungot.append(runko)
+                return {"choices": [{"message": {"content": "v"}}], "usage": {"cost": 0.0}}
+            return laheta
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "kulut").mkdir(mode=0o700)
+            mv.aja(mallit, Path(d) / "ulos", tehdas, toistot=1, kulutila=str(Path(d) / "kulut"),
+                   loki=lambda s: None, paattely=paattely)
+        return rungot
+
+    def test_paattely_vain_tuotannon_malleille_ja_oletuksena_ei(self):
+        qwen, venice = "qwen/qwen3.8-2.4t-a95b", "cognitivecomputations/dolphin-mistral-24b-venice-edition"
+        self.assertTrue(yksityinen_or._paattelee_ja_tukee(qwen))
+        rungot = self._rungot_paattelylla([qwen, venice], 2000)
+        self.assertEqual(len(rungot), 2 * mv.TEHTAVIA)
+        for r in rungot:
+            self.assertEqual(r["provider"], {"zdr": True, "data_collection": "deny"})
+            if r["model"] == qwen:
+                self.assertEqual(r["reasoning"], {"max_tokens": 2000, "exclude": True})
+                self.assertGreater(r["max_tokens"], 2000)
+            else:
+                self.assertNotIn("reasoning", r)
+        for r in self._rungot_paattelylla([qwen], 0):
+            self.assertNotIn("reasoning", r)
+
     def test_ajo_kayttaa_lippua_listan_mukaan_ja_zdr_pysyy(self):
         nahty = []
         aito = ok.kutsu

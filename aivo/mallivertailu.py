@@ -4,6 +4,7 @@ Tony ajaa kontissa 122 palvelun kayttajana aivo (avain luetaan samalla tavalla k
   runuser -u aivo -- env PYTHONPATH=/opt/agentti-pohja python3 -B -m aivo.mallivertailu aja --ulos /var/lib/aivo-yksityinen/mallivertailu
   ... -m aivo.mallivertailu paketti --ulos <sama>        # tuomari_syote.jsonl + tuomari_avain.json
   ... -m aivo.mallivertailu taulukko --ulos <sama> [--tuomari tuomari_pisteet.json]
+  ... aja --mallit m1,m2 --toistot 1 --paattely 2000 --ulos <uusi kansio>   # tuotannon paattelyraja (28.11.)
 Itsetuntemuksen ja rehellisyyden sarja (aivo/itsetuntemus.py, ks. docs/aivo-itsetuntemus.md):
   ... -m aivo.mallivertailu itse-arvio [--mallit m1,m2]                  # vain kuluarvio, ei kutsuja
   ... -m aivo.mallivertailu itse-aja --ulos <kansio> [--mallit ..] --vahvista   # ilman --vahvista vain arvio
@@ -50,7 +51,7 @@ from . import chat, itsetuntemus, openrouter_kulut, openrouter_zdr, yhdistelma, 
 
 TEHTAVAT = Path(__file__).resolve().parent / "testidata" / "mallivertailu_tehtavat.json"
 NYKYINEN = "qwen/qwen3-235b-a22b-2507"
-# Ehdokkaat 19.11.2026: avoin painosto (OpenRouterin hugging_face_id) ja vahintaan yksi ZDR-endpoint.
+# Ehdokkaat 19.11.2026: avoin painosto (OpenRouterin hugging_face_id) ja vahintaan yksi ZDR-endpoint (poikkeus 28.11.: Venice, ks. alla).
 EHDOKKAAT = (
     NYKYINEN,
     "qwen/qwen3.5-397b-a17b",
@@ -61,6 +62,12 @@ EHDOKKAAT = (
     "google/gemma-4-31b-it",
     "minimax/minimax-m3",
     "openai/gpt-oss-120b",
+    # 28.11.2026 (Tony: kokeillaan sensuroimatonta mallia): tuotannon vastaaja ja Venice Uncensored
+    # (Dolphin Mistral 24B Venice Edition, painot julkaistu: cognitivecomputations/Dolphin-Mistral-24B-Venice-Edition).
+    # Venicen ZDR-endpointia ei ole todennettu: pyynto lahtee aina provider.zdr=true, joten ilman ZDR-endpointia
+    # OpenRouter hylkaa sen eika dataa lahde. Vain synteettinen sarja; AVOIMET_MALLIT-listaa ei muuteta.
+    "qwen/qwen3.8-2.4t-a95b",
+    "cognitivecomputations/dolphin-mistral-24b-venice-edition",
 )
 KULURAJA_USD = 3.0
 TOISTOT = 2
@@ -130,6 +137,14 @@ def tarkista_malli(malli: str) -> bool:
     if malli not in EHDOKKAAT or any(malli.endswith(l) for l in openrouter_zdr.KIELLETYT_LIITTEET):
         raise VertailuVirhe("malli ei ole ehdokaslistalla")
     return openrouter_zdr.avoin_malli(malli)
+
+
+def _paattelylisa(malli: str, paattely: int) -> dict[str, Any]:
+    """{"reasoning": ...} tuotannon rajalla, kun paattely > 0 ja tuotanto lahettaisi rajan mallille; muuten {}."""
+    if paattely <= 0:
+        return {}
+    r = yksityinen_or.paattelyparametri(malli, yksityinen_or.paattelyraja(malli, vastausraja(malli, MAX_TOKENIA), paattely))
+    return {"reasoning": r} if r else {}
 
 
 def vastausraja(malli: str, perus: int) -> int:
@@ -281,8 +296,11 @@ def mekaaninen(saanto: dict[str, Any] | None, vastaus: str) -> float | None:
 
 def aja(mallit: list[str], ulos: Path, laheta_tehdas: Callable[[], Callable[[dict], Any]], *,
         toistot: int = TOISTOT, raja: float = KULURAJA_USD, kulutila: Any = None,
-        kello: Callable[[], float] = time.monotonic, loki: Callable[[str], Any] = print) -> dict[str, Any]:
-    """Ajaa sarjan. Kirjoittaa vastaukset.jsonl (yksi rivi per kutsu). Palauttaa yhteenvedon (kulut, virheet)."""
+        kello: Callable[[], float] = time.monotonic, loki: Callable[[str], Any] = print,
+        paattely: int = 0) -> dict[str, Any]:
+    """Ajaa sarjan. Kirjoittaa vastaukset.jsonl (yksi rivi per kutsu). Palauttaa yhteenvedon (kulut, virheet).
+    `paattely` > 0: tuotannon paattelyraja (yksityinen_or.paattelyraja/paattelyparametri) malleille, joille tuotanto
+    sen lahettaa (PAATTELY_TUKI ja OLETUKSENA_PAATTELEVAT). Oletus 0 = ei reasoning-parametria kuten ennen (28.11.)."""
     sarja = lue_tehtavat()
     liput = {m: tarkista_malli(m) for m in mallit}           # kaikki tarkistetaan ennen ensimmaista kutsua
     ulos.mkdir(mode=0o700, parents=True, exist_ok=True)               # uusi kansio vain omistajalle
@@ -306,7 +324,7 @@ def aja(mallit: list[str], ulos: Path, laheta_tehdas: Callable[[], Callable[[dic
                         data = openrouter_kulut.kutsu(
                             malli, viestit(sarja, t), laheta, tehtava=TEHTAVA, tila=kulutila,
                             max_tokens=vastausraja(malli, MAX_TOKENIA), temperature=0.3, stream=False,
-                            usage={"include": True}, yksityinen_chat=liput[malli])
+                            usage={"include": True}, yksityinen_chat=liput[malli], **_paattelylisa(malli, paattely))
                         tiedot = vastauksen_tiedot(data)
                         kaytto = data.get("usage") or {}
                         kulu = float(kaytto.get("cost") or 0.0)
@@ -848,6 +866,8 @@ def main(argv: list[str] | None = None, env: Any = None) -> int:
     ap.add_argument("--ulos")
     ap.add_argument("--mallit")
     ap.add_argument("--toistot", type=int)
+    ap.add_argument("--paattely", type=int, default=0,
+                    help="aja: tuotannon paattelyraja (esim. 2000) malleille, joille tuotanto sen lahettaa; 0 = ei")
     ap.add_argument("--avain", default=yksityinen_or.OLETUS_AVAIN)
     ap.add_argument("--tuomari", help="JSON {nayte: pisteet 0-10}")
     ap.add_argument("--vahvista", action="store_true", help="itse-aja: tee oikeat kutsut (ilman tata vain kuluarvio)")
@@ -866,7 +886,8 @@ def main(argv: list[str] | None = None, env: Any = None) -> int:
             mallit = ",".join(EHDOKKAAT) if a.mallit is None else a.mallit
             toistot = TOISTOT if a.toistot is None else a.toistot
             yv = aja([m.strip() for m in mallit.split(",") if m.strip()], ulos,
-                     kuljetin_tehdas(avain), toistot=min(max(toistot, 1), TOISTOT))
+                     kuljetin_tehdas(avain), toistot=min(max(toistot, 1), TOISTOT),
+                     paattely=max(0, min(a.paattely, yksityinen_or.PAATTELY_MAX_YLARAJA)))
             print(json.dumps(yv, ensure_ascii=False))
         elif a.komento == "paketti":
             print("naytteita", paketti(ulos))
