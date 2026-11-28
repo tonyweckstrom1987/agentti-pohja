@@ -553,7 +553,7 @@ runuser -u aivo -- env PYTHONPATH=/opt/agentti-pohja python3 -m aivo.tarkista_as
 
 Komento tarkistaa asennetun commitin, chat-palvelun ja tiivistysajastimen tilan (`systemctl is-active`), reitin `/terve` portissa 8780, Aivon moduulien olemassaolon ja käännettävyyden sekä salasanatiedoston oikeudet. Moduulit luetaan lähdetiedostoina polusta, jonka `--koodi` antaa (oletus `/opt/agentti-pohja`), ja ne käännetään `compile`-kutsulla. Moduuleja ei tuoda, joten niiden tuontiaikaista koodia ei ajeta. Tarkistus ei siis löydä ajonaikaisia vikoja. Salasanatiedostoon käytetään vain `os.stat`ia: sisältöä ei avata eikä tulosteta.
 
-`/etc/aivo` on `aivo:aivo` ja tilassa 700. Jos komennon ajaa muu käyttäjä kuin hakemiston omistaja (esimerkiksi palvelun `User=` on eri kuin `aivo`), `os.stat` ei pääse tiedostoon ja rivi on `VIKA avain /etc/aivo/chat-salasana: ei oikeutta tarkistaa (PermissionError)`. Komento ei kaadu. Aja silloin komento hakemiston omistajana (`runuser -u <omistaja> -- ...`). Paluuarvo on 0 vain, jos kaikki rivit ovat OK. Asentamattomassa ympäristössä tulos on esimerkiksi:
+`/etc/aivo` on `aivo:aivo` ja tilassa 700. Jos komennon ajaa muu käyttäjä kuin hakemiston omistaja (esimerkiksi palvelun `User=` on eri kuin `aivo`), `os.stat` ei pääse tiedostoon ja rivi on `VIKA avain /etc/aivo/chat-salasana: ei oikeutta tarkistaa (PermissionError)`. Komento ei kaadu. Aja silloin komento hakemiston omistajana (`runuser -u <omistaja> -- ...`). Paluuarvo on 0 vain, jos yhtään VIKA-riviä ei ole. OHITETTU-rivit eivät muuta paluuarvoa. Asentamattomassa ympäristössä tulos on esimerkiksi:
 
 ```
 VIKA commit: asennettu 7c01f795a607, odotettu 141ab0075ba5
@@ -567,6 +567,35 @@ VIKA avain /etc/aivo/chat-salasana: puuttuu
 Valinnat `--koodi` (oletus `/opt/agentti-pohja`) ja `--portti` (oletus 8780) vaihtavat polun ja portin.
 
 **Päivitys: aja tarkistus sekä ennen päivitystä että sen jälkeen.** Komento tarkistaa myös tiivistyksen kansiot `chat`, `tiivistelmat` ja `indeksi` kummankin alueen juuressa (`--yksityinen-juuri`, oletus `/var/lib/aivo-yksityinen`, ja `--tyokalu-juuri`, oletus `/var/lib/aivo`). Kansion pitää olla hakemisto, eikä ryhmällä tai muilla saa olla siihen oikeuksia. Puuttuvasta kansiosta tulostetaan korjauskomento `install -d -m 700 -o <omistaja> -g <omistaja> <polku>`. Omistaja luetaan alueen juuresta. Jos juurikin puuttuu, komennossa lukee `<omistaja>`, koska käyttäjänimi on vielä avoin päätös. Tarkistus ei luo eikä muuta mitään, eikä se avaa kansioiden tiedostoja. Jos yksityisen alueen juuri kuuluu eri käyttäjälle kuin komennon ajaja, rivi on `ei oikeutta tarkistaa (PermissionError)`.
+
+**Taustaajo, Syvennä ja agenttipalvelu.** Komento tarkistaa myös nämä, jos ne on asennettu. Asennus tunnistetaan komennolla `systemctl show -p LoadState`. Jos yksikköä ei ole (`not-found`), tulostuu yksi OHITETTU-rivi. Jos yksikkö on olemassa mutta rikki (esim. `masked`), rivi on VIKA. Tarkistukset:
+
+- `ajastin aivo-taustaajo.timer`: `systemctl is-enabled` on `enabled` ja `is-active` on `active`.
+- `palvelu aivo-taustaajo.service`: viimeisen ajon `Result` on `success`. Arvo on `success` myös ennen ensimmäistä ajoa.
+- `syvenna aivo-chat`: chatin asetuksissa on sama jono kuin `--tausta-jono` (oletus `/var/lib/aivo-yksityinen/tyot`), ja chat ja taustaajo ajetaan samana käyttäjänä. Jono luetaan chatin `ExecStart`-rivin valinnasta `--tausta-jono` tai ympäristömuuttujasta `AIVO_TAUSTA_JONO`. Ympäristön muita arvoja ei tulosteta.
+- `taustajono <polku>`: kansio on olemassa, se ei ole linkki, sen oikeudet ovat 700 ja omistaja on taustaajon käyttäjä. Tarkistus käyttää vain `os.lstat`ia. Jonoa ei listata, eikä työ- tai vastaustiedostoja avata.
+- `taustaajon tila`: tila luetaan taustaajon omalla funktiolla `lue_tila`. Rivillä näkyvät vain päivä, tänään ajettujen töiden määrä ja ajurin viimeksi käyttämä päiväraja. Rikkinäisestä tilatiedostosta tulostuu vain virheen tyyppi, ei sisältöä.
+- `palvelu aivo-agentit.service`: `is-enabled` on `enabled` ja `is-active` on `active`.
+
+Valinnat `--ohita-taustaajo` ja `--ohita-agentit` ohittavat tarkistukset, ja rivillä lukee silloin OHITETTU. Jono ja tilatiedosto kuuluvat taustaajon käyttäjälle. Jos chatin käyttäjä ei ole `aivo`, aja komento chatin käyttäjänä:
+
+```
+U=$(systemctl show -p User --value aivo-chat); echo "CHAT=$U"
+runuser -u "$U" -- env PYTHONPATH=/opt/agentti-pohja python3 -m aivo.tarkista_asennus ODOTETTU_COMMIT
+```
+
+Esimerkki, kun taustaajo toimii mutta agenttipalvelu on kaatunut:
+
+```
+OK   ajastin aivo-taustaajo.timer: enabled, active
+OK   palvelu aivo-taustaajo.service: viimeisin ajo success, nyt inactive
+OK   syvenna aivo-chat: jono /var/lib/aivo-yksityinen/tyot, kayttaja aivo
+OK   taustajono /var/lib/aivo-yksityinen/tyot: hakemisto, oikeudet 700, omistaja aivo
+OK   taustaajon tila: paiva 2026-12-07, ajettu 2, raja 5
+VIKA palvelu aivo-agentit.service: enabled, failed
+```
+
+Tarkistus ei tee malli- eikä verkkokutsuja. Se ajaa vain lukukomentoja `systemctl show`, `is-enabled` ja `is-active`.
 
 ## OpenRouter-kulut chat-sivulla
 

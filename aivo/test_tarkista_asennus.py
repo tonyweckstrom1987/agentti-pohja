@@ -19,6 +19,8 @@ SHA = "a" * 40
 def ajuri_ok(komento):
     if komento[0] == "git":
         return 0, SHA
+    if komento[:4] == ["systemctl", "show", "-p", "LoadState"]:
+        return 0, "not-found"     # taustaajoa ja agenttipalvelua ei ole asennettu
     return 0, "active"
 
 
@@ -50,11 +52,16 @@ class TestMain(AvainFixture):
         with mock.patch.object(t, "tarkista_moduulit", return_value=(True, "3 moduulia")):
             rc, rivit = self.aja_main([SHA])
         self.assertEqual(rc, 0)
-        self.assertEqual(len(rivit), 6)
-        self.assertTrue(all(r.startswith("OK ") for r in rivit))
+        self.assertEqual(len(rivit), 8)
+        self.assertTrue(all(r.startswith("OK ") for r in rivit[:6]))
+        # vaarennetty ajuri ei tunne yksikoita (LoadState ei ole "loaded"): uudet tarkistukset ohitetaan
+        self.assertTrue(rivit[6].startswith("OHITETTU taustaajo: aivo-taustaajo.timer ei ole asennettu"), rivit)
+        self.assertTrue(rivit[7].startswith("OHITETTU agenttipalvelu: aivo-agentit.service ei ole"), rivit)
 
     def test_vika_antaa_1_ja_yksi_rivi_per_tarkistus(self):
         def ajuri(komento):
+            if komento[:4] == ["systemctl", "show", "-p", "LoadState"]:
+                return 0, "not-found"
             if komento[0] == "systemctl":
                 return 3, "inactive"
             return 0, SHA
@@ -440,6 +447,252 @@ class TestTiivistysKansiot(unittest.TestCase):
         viat = [r for r in rivit if r.startswith("VIKA")]
         self.assertEqual(len(viat), 1)
         self.assertTrue(viat[0].startswith("VIKA kansio yksityinen/indeksi: puuttuu; korjaus: install -d"), viat)
+
+
+class VaarennettySystemd:
+    """Vaarennetty ajuri: systemctl show/is-enabled/is-active sanakirjasta. Muut komennot (git) kuten ajuri_ok."""
+
+    def __init__(self, yksikot, kayttaja):
+        self.yksikot = yksikot      # nimi -> {"LoadState":..., "is-enabled":..., ...}
+        self.kayttaja = kayttaja
+        self.kutsut = []
+
+    def __call__(self, komento):
+        self.kutsut.append(list(komento))
+        if komento[0] == "git":
+            return 0, SHA
+        assert komento[0] == "systemctl", komento
+        if komento[1] == "show":
+            ominaisuus, yksikko = komento[3], komento[5]
+            arvo = self.yksikot.get(yksikko, {}).get(ominaisuus, "not-found" if ominaisuus == "LoadState" else "")
+            return 0, arvo
+        tila = self.yksikot.get(komento[2], {}).get(komento[1])
+        if tila is None:
+            return (0, "active") if komento[2] in ("aivo-chat", "aivo-tiivista.timer") else (4, "not-found")
+        return (0 if tila in ("enabled", "active") else 3), tila
+
+
+class TaustaFixture(AvainFixture):
+    def setUp(self):
+        super().setUp()
+        self.kayttaja = pwd.getpwuid(os.geteuid()).pw_name
+        self.jono = os.path.join(self.tmp.name, "tyot")
+        os.mkdir(self.jono, 0o700)
+        self.nyt = t.datetime(2026, 12, 7, 9, 0, tzinfo=t.taustaajo.TZ)
+        self.yksikot = {
+            "aivo-taustaajo.timer": {"LoadState": "loaded", "is-enabled": "enabled", "is-active": "active"},
+            "aivo-taustaajo.service": {"LoadState": "loaded", "Result": "success", "is-active": "inactive",
+                                       "User": self.kayttaja},
+            "aivo-chat": {"User": self.kayttaja, "ExecStart": "{ path=/usr/bin/python3 ; argv[]=/usr/bin/python3 "
+                          "-m aivo.chat --portti 8780 ; }",
+                          "Environment": "PYTHONPATH=/opt/agentti-pohja AIVO_TAUSTA_JONO=%s "
+                                         "AIVO_SALAISUUS=KANARIA-EI-SAA-NAKYA" % self.jono},
+            "aivo-agentit.service": {"LoadState": "loaded", "is-enabled": "enabled", "is-active": "active"},
+        }
+
+    def kirjoita_tila(self, teksti):
+        with open(os.path.join(self.jono, "tila.json"), "w") as f:
+            f.write(teksti)
+
+    def aja(self, *liput, ajuri=None):
+        ajuri = ajuri or VaarennettySystemd(self.yksikot, self.kayttaja)
+        with mock.patch.object(t, "tarkista_moduulit", return_value=(True, "3 moduulia")):
+            rc, rivit = self.aja_main([SHA, "--tausta-jono", self.jono] + list(liput), ajuri=ajuri, nyt=self.nyt)
+        return rc, rivit[6:]
+
+
+class TestTaustaajo(TaustaFixture):
+    def test_kaikki_ok(self):
+        self.kirjoita_tila('{"versio": 1, "paiva": "2026-12-07", "ajettu": 2, "paivaraja": 5}\n')
+        rc, rivit = self.aja()
+        self.assertEqual(rc, 0, rivit)
+        self.assertEqual(rivit, [
+            "OK   ajastin aivo-taustaajo.timer: enabled, active",
+            "OK   palvelu aivo-taustaajo.service: viimeisin ajo success, nyt inactive",
+            "OK   syvenna aivo-chat: jono %s, kayttaja %s" % (self.jono, self.kayttaja),
+            "OK   taustajono %s: hakemisto, oikeudet 700, omistaja %s" % (self.jono, self.kayttaja),
+            "OK   taustaajon tila: paiva 2026-12-07, ajettu 2, raja 5",
+            "OK   palvelu aivo-agentit.service: enabled, active",
+        ])
+        self.assertNotIn("KANARIA", "\n".join(rivit))
+
+    def test_tila_puuttuu_on_ok_nollalla(self):
+        rc, rivit = self.aja()
+        self.assertEqual(rc, 0)
+        self.assertIn("OK   taustaajon tila: paiva 2026-12-07, ajettu 0, raja ei kirjattu", rivit)
+
+    def test_eilinen_tila_nollautuu_raja_sailyy(self):
+        self.kirjoita_tila('{"versio": 1, "paiva": "2026-12-06", "ajettu": 4, "paivaraja": 3}')
+        rc, rivit = self.aja()
+        self.assertIn("OK   taustaajon tila: paiva 2026-12-07, ajettu 0, raja 3", rivit)
+
+    def test_rikkinainen_tila_vika_ilman_sisaltoa(self):
+        self.kirjoita_tila('{"versio": 1, "paiva": "KANARIA-EI-SAA-NAKYA", ')
+        rc, rivit = self.aja()
+        self.assertEqual(rc, 1)
+        self.assertIn("VIKA taustaajon tila: tila ei kelpaa (TaustaVirhe)", rivit)
+        self.assertNotIn("KANARIA", "\n".join(rivit))
+
+    def test_vaaran_muotoinen_tila_vika_ilman_sisaltoa(self):
+        self.kirjoita_tila('{"versio": 2, "paiva": "KANARIA-EI-SAA-NAKYA", "ajettu": 1}')
+        rc, rivit = self.aja()
+        self.assertIn("VIKA taustaajon tila: tila ei kelpaa (TaustaVirhe)", rivit)
+        self.assertNotIn("KANARIA", "\n".join(rivit))
+
+    def test_tyotiedostoja_ei_avata_eika_listata(self):
+        for nimi in ("20261207-090000-aaaaaaaaaaaa.json", "valmiit"):
+            polku = os.path.join(self.jono, nimi)
+            with open(polku, "w") as f:
+                f.write("KANARIA-EI-SAA-NAKYA")
+        self.kirjoita_tila('{"versio": 1, "paiva": "2026-12-07", "ajettu": 1}')
+        avatut = []
+        oikea = t.taustaajo.Path.read_text
+
+        def lue(polku, *a, **k):
+            avatut.append(polku.name)
+            return oikea(polku, *a, **k)
+        kielto = AssertionError("listaus kielletty")
+        with mock.patch.object(t.taustaajo.Path, "read_text", lue), \
+                mock.patch.object(os, "listdir", side_effect=kielto), \
+                mock.patch.object(os, "scandir", side_effect=kielto), \
+                mock.patch.object(t.taustaajo.Path, "iterdir", side_effect=kielto):
+            rc, rivit = self.aja()
+        self.assertEqual(rc, 0, rivit)
+        self.assertEqual(avatut, ["tila.json"])
+        self.assertNotIn("KANARIA", "\n".join(rivit))
+
+    def test_ei_luo_eika_muuta_mitaan(self):
+        os.rmdir(self.jono)
+        rc, rivit = self.aja()
+        self.assertEqual(rc, 1)
+        self.assertFalse(os.path.exists(self.jono))
+        self.assertTrue(any(r.startswith("VIKA taustajono %s: puuttuu; korjaus: install -d -m 700" % self.jono)
+                            for r in rivit), rivit)
+
+    def test_jonon_oikeudet_liian_laajat(self):
+        os.chmod(self.jono, 0o750)
+        rc, rivit = self.aja()
+        self.assertEqual(rc, 1)
+        self.assertIn("VIKA taustajono %s: oikeudet 750 (pitaa olla 700); korjaus: chmod 700 %s"
+                      % (self.jono, self.jono), rivit)
+
+    def test_jonon_omistaja_vaara(self):
+        self.yksikot["aivo-taustaajo.service"]["User"] = "joku-muu"
+        self.yksikot["aivo-chat"]["User"] = "joku-muu"
+        rc, rivit = self.aja()
+        self.assertIn("VIKA taustajono %s: omistaja %s (pitaa olla taustaajon kayttaja joku-muu)"
+                      % (self.jono, self.kayttaja), rivit)
+
+    def test_jono_linkki(self):
+        linkki = os.path.join(self.tmp.name, "linkki")
+        os.symlink(self.jono, linkki)
+        self.yksikot["aivo-chat"]["Environment"] = "AIVO_TAUSTA_JONO=" + linkki
+        self.jono = linkki
+        rc, rivit = self.aja()
+        self.assertIn("VIKA taustajono %s: on linkki, ei hakemisto" % linkki, rivit)
+
+    def test_ajastin_pois_paalta(self):
+        self.yksikot["aivo-taustaajo.timer"].update({"is-enabled": "disabled", "is-active": "inactive"})
+        rc, rivit = self.aja()
+        self.assertEqual(rc, 1)
+        self.assertIn("VIKA ajastin aivo-taustaajo.timer: disabled, inactive", rivit)
+
+    def test_ajastin_kaynnissa_mutta_ei_kaynnisty_uudelleenkaynnistyksessa(self):
+        self.yksikot["aivo-taustaajo.timer"]["is-enabled"] = "disabled"
+        rc, rivit = self.aja()
+        self.assertEqual(rc, 1)
+        self.assertIn("VIKA ajastin aivo-taustaajo.timer: disabled, active", rivit)
+
+    def test_palvelun_viimeisin_ajo_epaonnistui(self):
+        self.yksikot["aivo-taustaajo.service"].update({"Result": "exit-code", "is-active": "failed"})
+        rc, rivit = self.aja()
+        self.assertEqual(rc, 1)
+        self.assertIn("VIKA palvelu aivo-taustaajo.service: viimeisin ajo exit-code, nyt failed", rivit)
+
+    def test_syvenna_pois_kaytosta(self):
+        self.yksikot["aivo-chat"]["Environment"] = "PYTHONPATH=/opt/agentti-pohja AIVO_SALAISUUS=KANARIA-EI-SAA-NAKYA"
+        rc, rivit = self.aja()
+        self.assertEqual(rc, 1)
+        self.assertTrue(any(r.startswith("VIKA syvenna aivo-chat: chatilla ei ole AIVO_TAUSTA_JONO") for r in rivit))
+        self.assertNotIn("KANARIA", "\n".join(rivit))
+
+    def test_syvenna_komentorivin_jono_voittaa_ympariston(self):
+        self.yksikot["aivo-chat"]["ExecStart"] = ("{ path=/usr/bin/python3 ; argv[]=/usr/bin/python3 -m aivo.chat "
+                                                  "--tausta-jono /muu/jono ; }")
+        rc, rivit = self.aja()
+        self.assertIn("VIKA syvenna aivo-chat: chatin jono /muu/jono, tarkistettava jono %s" % self.jono, rivit)
+
+    def test_syvenna_eri_kayttaja(self):
+        self.yksikot["aivo-chat"]["User"] = "aivo-yksityinen"
+        rc, rivit = self.aja()
+        self.assertTrue(any(r.startswith("VIKA syvenna aivo-chat: chatin kayttaja aivo-yksityinen") for r in rivit))
+
+    def test_ei_asennettu_ohitetaan_yhdella_rivilla(self):
+        del self.yksikot["aivo-taustaajo.timer"]
+        del self.yksikot["aivo-agentit.service"]
+        rc, rivit = self.aja()
+        self.assertEqual(rc, 0)
+        self.assertEqual(rivit, [
+            "OHITETTU taustaajo: aivo-taustaajo.timer ei ole asennettu (LoadState not-found)",
+            "OHITETTU agenttipalvelu: aivo-agentit.service ei ole asennettu (LoadState not-found)",
+        ])
+
+    def test_rikkinainen_yksikko_on_vika(self):
+        self.yksikot["aivo-taustaajo.timer"]["LoadState"] = "masked"
+        self.yksikot["aivo-agentit.service"]["LoadState"] = "bad-setting"
+        rc, rivit = self.aja()
+        self.assertEqual(rc, 1)
+        self.assertEqual(rivit, ["VIKA taustaajo: aivo-taustaajo.timer on rikki (LoadState masked)",
+                                 "VIKA agenttipalvelu: aivo-agentit.service on rikki (LoadState bad-setting)"])
+
+    def test_liput_ohittavat_ilman_systemctl_kutsuja(self):
+        ajuri = VaarennettySystemd(self.yksikot, self.kayttaja)
+        rc, rivit = self.aja("--ohita-taustaajo", "--ohita-agentit", ajuri=ajuri)
+        self.assertEqual(rc, 0)
+        self.assertEqual(rivit, ["OHITETTU taustaajo: ohitettu lipulla --ohita-taustaajo",
+                                 "OHITETTU agenttipalvelu: ohitettu lipulla --ohita-agentit"])
+        kysytyt = {k[-1] for k in ajuri.kutsut if k[0] == "systemctl"}
+        self.assertFalse(kysytyt & {"aivo-taustaajo.timer", "aivo-taustaajo.service", "aivo-agentit.service"})
+
+    def test_agenttipalvelu_ei_kaynnissa(self):
+        self.yksikot["aivo-agentit.service"]["is-active"] = "failed"
+        rc, rivit = self.aja()
+        self.assertEqual(rc, 1)
+        self.assertEqual(rivit[-1], "VIKA palvelu aivo-agentit.service: enabled, failed")
+
+    def test_vain_lukukomennot(self):
+        ajuri = VaarennettySystemd(self.yksikot, self.kayttaja)
+        self.aja(ajuri=ajuri)
+        for k in ajuri.kutsut:
+            if k[0] == "systemctl":
+                self.assertIn(k[1], ("show", "is-enabled", "is-active"), k)
+
+    def test_ajurin_poikkeus_tunnistuksessa_on_vika(self):
+        def ajuri(komento):
+            if komento[0] == "systemctl" and komento[1] == "show":
+                raise RuntimeError("KANARIA-EI-SAA-NAKYA")
+            return ajuri_ok(komento)
+        rc, rivit = self.aja(ajuri=ajuri)
+        self.assertEqual(rc, 1)
+        self.assertEqual(rivit, ["VIKA taustaajo: poikkeus RuntimeError", "VIKA agenttipalvelu: poikkeus RuntimeError"])
+
+    def test_show_epaonnistuu_on_vika(self):
+        def ajuri(komento):
+            if komento[0] == "systemctl" and komento[1] == "show":
+                return 1, ""
+            return ajuri_ok(komento)
+        rc, rivit = self.aja(ajuri=ajuri)
+        self.assertEqual(rc, 1)
+        self.assertEqual(rivit[0], "VIKA taustaajo: aivo-taustaajo.timer on rikki (LoadState tuntematon)")
+
+    def test_chatin_jono_regex(self):
+        def aj(exe, env):
+            d = {"aivo-chat": {"ExecStart": exe, "Environment": env}}
+            return t.chatin_tausta_jono(VaarennettySystemd(d, "x"))
+        self.assertEqual(aj("argv[]=python3 -m aivo.chat --tausta-jono=/a/b ;", ""), "/a/b")
+        self.assertEqual(aj("argv[]=python3 -m aivo.chat --tausta-jono /a/b;", "AIVO_TAUSTA_JONO=/c"), "/a/b")
+        self.assertEqual(aj("", 'X=1 "AIVO_TAUSTA_JONO=/c/d" Y=2'), "/c/d")
+        self.assertEqual(aj("", "XAIVO_TAUSTA_JONO=/c"), "")
 
 
 class TestOhje(unittest.TestCase):
