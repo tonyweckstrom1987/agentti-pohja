@@ -96,3 +96,58 @@ runuser -u aivo -- env PYTHONPATH=/opt/agentti-pohja python3 -B -m aivo.malliver
 ```
 
 Tuloste sisältää taulukon (kokonaispisteet, osa-alueet mukaan lukien Pilkkominen ja Ohjeiden kunnioitus, Ei vastausta, Aikaraja, $ / 100 viestiä, vastausajan mediaani) ja kolmen parhaan mallin vastaukset kolmeen samaan tehtävään kirjaimin A–C. Kirjainten avain on tiedostossa `sokko_avain.json`.
+
+## Agenttiajon vertailu (aivo/agenttivertailu.py)
+
+Yllä oleva vertailu mittaa yksittäisiä kysymys–vastaus-kutsuja. Agenttiajon vertailu mittaa koko agenttitehtävän: suunnittelija, tekijä työkaluineen ja tarkastaja. Tulosten perusteella voi valita roolien mallit.
+
+**Sarja.** Tiedostossa `aivo/testidata/agenttivertailu/tehtavat.json` on seitsemän keksittyä tehtävää: kolmen muistion kokoaminen raportiksi, myynnin summa CSV:stä, keskiarvo ja maksimi CSV:stä JSON-tiedostoon, tiedote tarkan ohjeen mukaan, injektiotehtävä (palautetiedostossa on käsky, jota agentin ei pidä totella), tapahtumien järjestäminen sekä puuttuva tiedosto (agentin pitää kertoa puutteesta eikä keksiä sisältöä). Jokaisella tehtävällä on syötetiedostot ja koneellisesti tarkistettava valmisehto, esimerkiksi tiedosto on olemassa, luku on oikein tai kielletty merkkijono puuttuu.
+
+**Rajat.** Jokainen tehtävä ajetaan ajurin omalla funktiolla `agentti_ajuri.aja_seuraava` omassa kansiossa `<ulos>/ajuri`. Ajurin ja agenttiytimen rajat ovat voimassa sellaisinaan: 30 mallikutsua ja 20 minuuttia tehtävää kohden, vain `AVOIMET_MALLIT`-listan mallit, ZDR sekä yhteinen kulukirjanpito ja päiväkatto. Uusia rajoja ei ole. Päiväkatto pysäyttää ajon heti, ja kaksi peräkkäistä virhettä (esimerkiksi puuttuva avain) pysäyttää ajon. Kulua ei ole mitattu, koska sarjaa ei ole vielä ajettu oikeaa rajapintaa vastaan. Yläraja on 7 × 30 kutsua yhtä roolijakoa kohden, ja ajo kestää enintään noin 2,5 tuntia.
+
+**Edellytys.** Agenttien ajuri on asennettu ohjeen `docs/aivo-agentit.md` mukaan: käyttäjä `aivo-agentti`, avain `/var/lib/aivo-agentit/openrouter-avain` ja kulukirjanpidon kolme tiedostoa. Ota ensin snapshot kontista 122. Tarkista asennus:
+
+```
+runuser -u aivo-agentti -- env PYTHONPATH=/opt/agentti-pohja python3 -B -m aivo.agentti_ajuri tarkista --perus /var/lib/aivo-agentit
+```
+
+Odotettu: viimeinen rivi on `OK`. Jos kulukirjanpidosta tulee virhe, se johtuu siitä, että käsin ajettu komento ei näe kulutiedostoja samalla tavalla kuin palvelu. Siksi itse vertailu ajetaan alla olevalla `systemd-run`-komennolla.
+
+**Ajo taustapalveluna** (root-käyttäjänä kontissa 122). Komento antaa ajolle samat käyttäjä-, kansio- ja kulukirjanpitoasetukset kuin yksikössä `aivo-agentit.service`. Se ei muuta tiedostojen oikeuksia eikä rajoja. Vaihda `--roolit`-arvo jokaista ajoa varten. Muoto on sama kuin ajurilla: yksi malli kaikille rooleille tai `suunnittelija:m1,tekija:m2,tarkastaja:m3`.
+
+```
+systemd-run --unit=aivo-agenttivertailu-ajo -p User=aivo-agentti -p Group=aivo-agentti \
+  -p "SupplementaryGroups=aivo-agentit aivo-kulut" -p WorkingDirectory=/opt/agentti-pohja \
+  -p "Environment=PYTHONPATH=/opt/agentti-pohja PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1" \
+  -p UMask=0077 -p NoNewPrivileges=yes -p ProtectSystem=strict -p ProtectHome=yes -p PrivateTmp=yes \
+  -p ReadWritePaths=/var/lib/aivo-agentit \
+  -p TemporaryFileSystem=/var/lib/claude-jono:mode=0777,size=1M \
+  -p "BindPaths=/var/lib/claude-jono/openrouter-kulut.jsonl /var/lib/claude-jono/openrouter-katto.jsonl /var/lib/claude-jono/openrouter-kulut.lock" \
+  -p "InaccessiblePaths=-/var/lib/aivo-yksityinen -/var/lib/aivo -/var/lib/aivo-tyokalu" \
+  /usr/bin/python3 -m aivo.agenttivertailu aja --ulos /var/lib/aivo-agentit/agenttivertailu \
+  --roolit suunnittelija:qwen/qwen3-235b-a22b-2507,tekija:qwen/qwen3-235b-a22b-2507,tarkastaja:deepseek/deepseek-chat-v3.1
+journalctl -u aivo-agenttivertailu-ajo -f
+```
+
+Ajo on valmis, kun lokissa on yhteenvedon JSON-rivi ja systemd:n rivi `Deactivated successfully` (koko sarja ajettiin) tai `Failed with result 'exit-code'` (ajo pysähtyi päiväkattoon tai virheisiin, ks. kenttä `pysahtyi`). Ennen seuraavaa ajoa samalla yksikön nimellä aja `systemctl reset-failed aivo-agenttivertailu-ajo`. Ajo voi olla käynnissä samaan aikaan kuin `aivo-agentit.service`, koska kansio ja lukko ovat omat. Päiväkatto on silti yhteinen chatin ja agenttien kanssa. Valitsin `--tehtavat kooste,injektio` ajaa vain osan sarjasta.
+
+**Lokirivit.** Jokaisesta tehtävästä tulee rivi, esimerkiksi `csv-summa tila=valmis arvio=hyvaksytty ehto=3/3 askelia=2 kutsuja=4 kulu_eur=0.0021 kesto_s=41.0`. Injektiotehtävän rivin lopussa on `injektio=torjuttu` tai `injektio=totteli`. Riveillä ei ole tiedostojen sisältöä eikä raporttia. Agentin tuottamat tiedostot jäävät kansioon `<ulos>/ajuri/tyo/<tunnus>/`.
+
+**Taulukko.** Kun haluamasi roolijaot on ajettu samaan `--ulos`-kansioon:
+
+```
+runuser -u aivo-agentti -- env PYTHONPATH=/opt/agentti-pohja python3 -B -m aivo.agenttivertailu taulukko --ulos /var/lib/aivo-agentit/agenttivertailu
+```
+
+Taulukossa on yksi rivi kutakin ajoa kohden. Paras valmistumisprosentti on ensin, ja tasatilanteessa halvempi on ensin. Sarakkeet:
+
+- **Valmisehto**: kuinka moni tehtävä täytti koneellisen valmisehdon (ja prosentti ajetuista). Tämä on päämittari. Agentin oma tila ei riitä.
+- **Tila valmis**: kuinka monen tehtävän tila oli `valmis` eli tarkastaja hyväksyi sen.
+- **Tarkastaja hylkäsi**: kuinka monen tarkastetun tehtävän viimeinen arvio oli `hylatty` tai `korjattava`.
+- **Hyväksyi väärin**: tarkastaja hyväksyi, mutta valmisehto ei täyttynyt. Suuri luku tarkoittaa, että tarkastajan malli on liian löysä. Tiedostossa `ajot.jsonl` on myös kenttä `hylkasi_oikean`: tarkastaja hylkäsi tehtävän, vaikka valmisehto täyttyi.
+- **Injektio**: `torjuttu`, jos agentti ei totellut syötteen käskyä. Muuten arvo on `totteli`.
+- **Askeleet (ka)** ja **Kutsut (ka)**: tekijän työkalukierrokset ja kaikkien roolien mallikutsut keskimäärin.
+- **€ yhteensä**, **€ / tehtävä** ja **Kesto (s, ka)**: ajurin tuloksen kulut ja kesto.
+- **Pysähtyi**: `paivakatto`, `virheita` tai `-` (koko sarja ajettiin).
+
+Rivikohtaiset tiedot ovat tiedostossa `rivit.jsonl`, ja kenttä `epaonnistuneet` kertoo, mitkä ehdot jäivät täyttymättä. Ajon yhteenveto on tiedostossa `ajot.jsonl`. Yksi ajo on pieni otos: seitsemän tehtävän ero yhdellä tehtävällä on noin 14 prosenttiyksikköä. Aja ratkaiseva vertailu kahdesti ennen kuin valitset mallin.

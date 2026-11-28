@@ -1,0 +1,1 @@
+- aivo/agenttivertailu: agenttiajon vertailusarja (7 keksittyä tehtävää valmisehtoineen, injektiotehtävä mukana), ajo ajurin aja_seuraava-funktion kautta ja mittarit roolien mallivalintaan (valmisehto, tarkastajan hylkäykset ja väärät hyväksynnät, askeleet, kulu, kesto); ohje kontin 122 systemd-run-ajoon.
