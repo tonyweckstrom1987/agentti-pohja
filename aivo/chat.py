@@ -77,6 +77,7 @@ from aivo import kontekstiraja     # OpenRouter-taustapaan kehoteraja mallin kon
 from aivo import syvennys, taustaajo   # Syvenna-painike: Tonyn painallus kirjoittaa taustaajon tyon (oma rivi)
 from aivo import korjaukset        # Tonyn palaute ja korjaukset yksityisen tilan vastauksiin (oma rivi)
 from aivo import hakukytkenta      # verkkohaun [[HAKU]]-merkinta ja Tonyn vahvistus (oma rivi)
+from aivo import lahdeviite        # [lahde: X] -viitteen sisaltotarkistus muistia vasten (oma rivi)
 
 OLETUS_SALASANA = "/etc/aivo/chat-salasana"
 OLETUS_KIRJASTO = "/var/lib/aivo/kirjasto"
@@ -931,6 +932,17 @@ def tarkista_lahteet(vastaus, tiedostot):
         tunn.append(nimi)
         return "[l\u00e4hde: %s \u2013 EI L\u00d6YDY MUISTISTA]" % nimi
     return LAHDE_RE.sub(korvaa, vastaus), tunn
+
+
+def lahteiden_sisalto(vastaus, muisti, tiedostot):
+    """Tarkistaa, etta viitatussa tiedostossa on vaitteen A-numero, paivamaara tai luku (lahdeviite.tarkista).
+    Ainoaan oikeaan tiedostoon osoittava viite korjataan, muut vaarat viitteet merkitaan. Ei mallikutsua.
+    Ajetaan tarkista_lahteet-funktion jalkeen: tuntemattomiin tiedostoihin osoittavia viitteita ei kosketa."""
+    try:
+        return lahdeviite.tarkista(vastaus, muisti, tiedostot)
+    except Exception as e:      # tarkistus ei saa kaataa vastausta; lokiin vain tyyppi, ei sisaltoa
+        print("aivo: lahdetarkistus ohitettu (%s)" % type(e).__name__, file=sys.stderr)
+        return vastaus, []
 
 
 # --- Claude ---------------------------------------------------------------------------------------
@@ -2040,6 +2052,7 @@ def tee_kasittelija(tila):
                     valinnat = haku_valinnat or valinnat
                 vastaus, ehdotus = erota_paatosehdotus(vastaus, historia)
                 vastaus, tunn = tarkista_lahteet(vastaus, tiedostot)
+                vastaus, lahdekorjaukset = lahteiden_sisalto(vastaus, muisti, tiedostot)
                 vastaus = tyhjan_paikka(vastaus, bool(valinnat) or ehdotus is not None or bool(tallennetut)
                                         or bool(luovutukset) or bool(paketit) or bool(lisapalat) or bool(agentit)
                                         or haku is not None)
@@ -2065,6 +2078,8 @@ def tee_kasittelija(tila):
                     tulos[1].update({k: v for k, v in lisatiedot.items() if k != "tarkistus"})
                     if yhd.luonnos:
                         tulos[1]["luonnos"] = yhd.luonnos
+                if lahdekorjaukset:            # mekaaninen sisaltotarkistus (lahdeviite.py), ei mallikutsua
+                    tulos[1]["lahdekorjaukset"] = lahdekorjaukset
                 if tarkistustieto is not None:
                     tulos[1]["tarkistus"] = tarkistustieto
                     if tarkistus.alkuperainen is not None:
@@ -2145,9 +2160,12 @@ def tee_kasittelija(tila):
                 vastaus, valinnat = erota_valinnat(vastaus)
                 vastaus, ehdotus = erota_paatosehdotus(vastaus, historia)
                 vastaus, tunn = tarkista_lahteet(vastaus, tiedostot)
+                vastaus, lahdekorjaukset = lahteiden_sisalto(vastaus, muisti, tiedostot)
                 vastaus = tyhjan_paikka(vastaus, bool(valinnat) or ehdotus is not None)
                 tila.keskustelut.lisaa(kid, "aivo", vastaus, [t for t in tiedostot if t in vastaus])
                 tulos = (200, {"vastaus": vastaus, "tuntemattomia_lahteita": len(tunn), "indeksi": oma_idx})
+                if lahdekorjaukset:
+                    tulos[1]["lahdekorjaukset"] = lahdekorjaukset
                 if ehdotus is not None:
                     tulos[1]["paatosehdotus"] = ehdotus
                 if valinnat:
