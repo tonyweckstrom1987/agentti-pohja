@@ -7,13 +7,13 @@ Tämä ohje on Tonylle. Rajattu ulkoinen mallipalvelu (A728). Tonyn sha-sidottu 
 ## Mitä muuttuu
 
 - Yksityisellä tilalla on kaksi taustapäätä. Oletus on edelleen paikallinen mallipalvelin (loopback). Uusi vaihtoehto on OpenRouterin avoin malli: `--yksityinen-taustapaa openrouter`.
-- Muisti, keskustelut, ydinohjeet ja ehdotukset tallennetaan kontissa 122. OpenRouterille lähtee jokaisella viestillä koko kehote: ydinohjeet, muisti (kirjasto, agenttidata, tiivistelmät ja muistihaun osumat) ja keskusteluhistoria. Kehotteen koko seuraa mallin kontekstia (A1106), mutta muistiosio on enintään `AIVO_YKSITYINEN_MUISTI_MAX` merkkiä (oletus 40 000, A1123). Muistihaku liittää kysymykseen osuvat kohdat ensimmäisinä, joten koko muistia ei lähetetä joka viestissä. Itsetarkistus lähettää samat tiedot tarkastajamallille samalla rajalla.
-- Jokainen kutsu kulkee `openrouter_kulut.kutsu`n kautta. Se tarkistaa yhteisen päiväkatkaisimen (10 €/vrk, sama kirjanpito ja sama katto kuin ajurilla, #309; yksityisellä tilalla ei ole omaa kulutilaa), rakentaa pyynnön `openrouter_zdr.rakenna_runko`lla (ZDR ja `data_collection=deny` pakotettuina) ja kirjaa kulun. Kuljetin kieltäytyy lähettämästä, jos ZDR puuttuu rungosta.
+- Muisti, keskustelut, ydinohjeet ja ehdotukset pysyvät kontissa 122. OpenRouterille lähtee jokaisella viestillä koko kehote: ydinohjeet, muisti (kirjasto, agenttidata, tiivistelmät ja muistihaun osumat) ja keskusteluhistoria. Kehotteen koko seuraa mallin kontekstia (A1106), mutta muistiosio on enintään `AIVO_YKSITYINEN_MUISTI_MAX` merkkiä (oletus 40 000, A1123). Muistihaku liittää kysymykseen osuvat kohdat ensimmäisinä, joten koko muistia ei lähetetä joka viestissä. Itsetarkistus lähettää samat tiedot tarkastajamallille samalla rajalla.
+- Jokainen kutsu kulkee `openrouter_kulut.kutsu`n kautta. Se tarkistaa päiväkatkaisimen (10 €/vrk, sama koodi ja sama kiinteä kansio kuin ajurilla, #309), rakentaa pyynnön `openrouter_zdr.rakenna_runko`lla (ZDR ja `data_collection=deny` pakotettuina) ja kirjaa kulun. Kirjanpito on sen koneen tai kontin omassa kansiossa `/var/lib/claude-jono`, jossa koodi ajetaan. Aivon kirjanpito on siis kontissa 122 ja ajurin kirjanpito kontissa 115: ne ovat erilliset (ks. kohta Katto ja kirjanpito). Yksityisellä tilalla ei ole omaa kulutilaa asetuksena. Kuljetin kieltäytyy lähettämästä, jos ZDR puuttuu rungosta.
 - Mallin pitää olla täsmälleen listalla `AVOIMET_MALLIT` tiedostossa `aivo/openrouter_zdr.py`. Lista on tarkka luettelo mallitunnisteista, ei etuliitteitä, ja jokaisen rivin kommentissa on mallin `hugging_face_id`. Suljetut mallit (esim. `qwen/qwen3.7-max`) ja kaikki liitteet (`:free`, `:batch`, `:online`, `:nitro` ja muut) hylätään. Oletusmallia ei ole.
 - Avain luetaan tiedostosta, jonka omistaa palvelun käyttäjä ja jonka oikeudet ovat 0600. Ympäristömuuttujaa ei lueta. Avain luetaan joka kutsulla, joten sen voi vaihtaa ilman uudelleenkäynnistystä.
 - Puuttuva tai väärin suojattu avain antaa selkeän virheen (HTTP 502 ja teksti "OpenRouter-avain puuttuu…"), eikä päiväkattovarausta kirjata.
 - Työkalutila ei käytä tätä taustapäätä. Testit tarkistavat sen.
-- Yksityisen alueen keskustelujen tiivistys käyttää samaa taustapäätä, kun `AIVO_YKSITYINEN_TAUSTAPAA=openrouter` (sama malli ja avain). Tiivistyksellä on lisäksi oma raja, 10 kutsua vuorokaudessa, ja sen kulut lasketaan samaan 10 €/vrk kattoon. Katso `docs/aivo-yksityinen.md`, kohta Keskustelujen tiivistys.
+- Yksityisen alueen keskustelujen tiivistys käyttää samaa taustapäätä, kun `AIVO_YKSITYINEN_TAUSTAPAA=openrouter` (sama malli ja avain). Tiivistyksellä on lisäksi oma raja, 10 kutsua vuorokaudessa, ja sen kulut lasketaan samaan 10 €/vrk kattoon (kontin 122 kirjanpito). Katso `docs/aivo-yksityinen.md`, kohta Keskustelujen tiivistys.
 - Kehote kertoo mallille totuudenmukaisesti, että kehote kulkee OpenRouterin kautta nollasäilytyksellä. Sivun valinnan teksti kertoo taustapään: loopback-tilassa "Yksityinen (oma malli, ei verkkoa)" ja OpenRouter-tilassa "Yksityinen (avoin malli OpenRouterissa, ZDR: ei tallennusta)".
 
 ## Suositeltu malli ja kustannusarvio
@@ -115,36 +115,161 @@ Malleilla, jotka eivät päättele oletuksena, kulu ei muutu: niiden kutsuun ei 
 
 Päiväkatto 10 €/vrk on huomattavasti suurempi kuin yksityisen tilan odotettu kulu (alle 0,6 €/vrk raskaimmassakin laskelmassa). Virheellinen tai aikakatkaistu kutsu kirjataan varovaisesti 0,50 $:n kuluna, joten toistuvat virheet näkyvät kirjanpidossa.
 
+## Katto ja kirjanpito
+
+- Koodissa on yksi kiinteä kirjanpitokansio: `/var/lib/claude-jono` (`openrouter_kulut.OLETUS_TILA`). Sitä ei voi vaihtaa asetuksella. Kansion pitää olla olemassa, ja palvelun käyttäjän pitää päästä kirjoittamaan siihen. Muuten kutsu estyy (fail closed) eikä mitään lähde OpenRouteriin.
+- Kontissa 122 ei ole tätä kansiota valmiina. Ohje luo sen kontin 122 omaksi kansioksi, jonka omistaa `aivo-yksityinen`. Se ei ole ajurin kansio kontissa 115 eikä jaettu liitos.
+- Päiväkatto on 10 €/vrk, ja se on konttikohtainen: kontilla 115 (ajuri) ja kontilla 122 (Aivo) on kummallakin oma kirjanpito ja oma 10 € katto. Katto ei näe toisen kontin kulutusta, joten OpenRouterin kokonaiskulu voi olla enintään noin 20 €/vrk (10 € + 10 €). Koodin arvo `PAIVAKATTO_EUR = 10` ei muutu tässä ohjeessa.
+- Tonyn päätös 17.11.2026 (A1005): Aivon kontille riittää päiväkatto. OpenRouter-avaimen kuukausiraja ei ole pakollinen askel, eikä ohje vaadi sitä.
+- Yhteistä kattoa ajurin ja Aivon välille varten tarvittaisiin koodimuutos tai jaettu kansio. Se on kattoa koskeva muutos, jota ei tehdä ilman Tonyn lupaa.
+- Ohje muuttaa palvelun `ReadWritePaths`-asetusta vain yhden kansion verran: lisättävä kansio on `/var/lib/claude-jono`. Syy: `ProtectSystem=strict` estää kirjoituksen kaikkialle muualle, ja kirjanpito on koodissa kiinteästi tässä kansiossa. Kansio on `aivo-yksityinen`-käyttäjän oma (tila 700), eikä muita kansioita avata.
+
+## Uudet asetukset kontin 122 päivityksessä
+
+Nämä kaksi asetusta ovat tulleet mainiin tämän ohjeen ensimmäisen version jälkeen. Kumpikaan ei vaadi muutosta palvelutiedostoon: jos muuttujaa ei ole asetettu, käytetään oletusarvoa. Virheellinen arvo estää palvelun käynnistymisen. Molemmat koskevat vain OpenRouter-taustapäätä.
+
+| Muuttuja (valitsin) | Oletus | Sallittu | Mihin vaikuttaa | Missä luetaan |
+|---|---|---|---|---|
+| `AIVO_YKSITYINEN_MUISTI_MAX` (`--yksityinen-muisti-max`) | 40 000 merkkiä | 4 000–1 000 000 | Muistiosion enimmäiskoko kehotteessa ja itsetarkistuksen lähteissä. Voi vain pienentää kehotetta. Katso kohta Muistin enimmäiskoko ja kustannus. | `aivo/chat.py:2821`, tarkistus `yksityinen_or.tarkista_muisti_max` |
+| `AIVO_YKSITYINEN_PAATTELY_MAX` (`--yksityinen-paattely-max`) | 2 000 tokenia | 0–6 000 (0 = `reasoning`-parametria ei lähetetä) | Ajattelevan mallin päättelyn yläraja. Raja on aina pienempi kuin vastauksen `max_tokens`. Katso kohta Päättelyn yläraja ja uusinta. | `aivo/chat.py:2824`, `aivo/taustaajo.py:737`, `aivo/tiivista_yksityinen.py:501`, tarkistus `yksityinen_or.tarkista_paattely_max` |
+
+Oletusarvot ovat vakioissa `yksityinen_or.MUISTI_MAX_OLETUS` ja `yksityinen_or.PAATTELY_MAX_OLETUS`. Taustaajo (`aivo-taustaajo.service`) ja yksityisen alueen tiivistys (`aivo-tiivista-yksityinen.service`, jos se on asennettu) ovat omia yksiköitään. Ne lukevat päättelyn rajan omasta ympäristöstään, eivät chat-palvelun valitsimesta. Jos haluat muun arvon kuin oletuksen, lisää sama `Environment=AIVO_YKSITYINEN_PAATTELY_MAX=…`-rivi jokaiseen näistä yksiköistä. Muuten ne käyttävät oletusta 2 000.
+
 ## Käyttöönotto (Tony tekee kontissa 122)
 
-Ota ensin snapshot kontista 122. Käyttäjänimi `aivo-yksityinen` on sama kuin yllä olevassa ohjeessa.
+Tee yksi komento kerrallaan ja tarkista Odotettu-rivi ennen seuraavaa. Avainta ei näytetä eikä kirjoiteta mihinkään muualle kuin avaintiedostoon.
 
-1. **Kulukirjanpidon kansio.** Kirjanpito on yhteinen: koodi käyttää kansiota `/var/lib/claude-jono` (`openrouter_kulut.OLETUS_TILA`), eikä sitä voi vaihtaa palvelun asetuksista. Palvelun käyttäjän `aivo-yksityinen` pitää päästä kirjoittamaan sinne, ja kansion pitää olla sama kuin ajurilla. Katso avoimet kohdat.
+**A. Yhteys**
 
-2. **Avaintiedosto.** Kirjoita avain itse. Tämä komento kysyy sen piilotettuna eikä jätä sitä komentohistoriaan:
+1. Avaa PowerShell Windowsissa ja yhdistä Proxmox-isäntään:
 
    ```
-   sudo -u aivo-yksityinen sh -c 'umask 077; printf "Avain: "; stty -echo; read -r K; stty echo; printf "%s" "$K" > /var/lib/aivo-yksityinen/openrouter-avain'
+   ssh root@PROXMOX-ISANTA
+   ```
+
+   Korvaa `PROXMOX-ISANTA` Proxmox-isännän osoitteella (se ei ole tässä repossa).
+
+   Odotettu: isännän komentokehote (esimerkiksi `root@agenttifirma:~#`).
+
+2. Ota snapshot kontista 122 ennen muutoksia:
+
+   ```
+   pct snapshot 122 ennen-or-yksityinen
+   ```
+
+   Odotettu: komento päättyy ilman virheilmoitusta.
+
+3. Siirry konttiin 122:
+
+   ```
+   pct enter 122
+   ```
+
+   Odotettu: kehote vaihtuu kontin kehotteeksi (`root@...:~#`). Seuraavat komennot ajetaan tässä kontissa.
+
+**B. Kulukirjanpidon kansio kontissa 122**
+
+4. Tarkista, onko kansio jo olemassa:
+
+   ```
+   ls -ld /var/lib/claude-jono
+   ```
+
+   Odotettu: `No such file or directory`. Jos kansio on jo olemassa, älä poista sitä; ilmoita Tonylle (pilvi-Claudelle) sen omistaja ja sisältö ennen jatkamista.
+
+5. Luo kansio kontin 122 omaksi kirjanpidoksi:
+
+   ```
+   install -d -m 700 -o aivo-yksityinen -g aivo-yksityinen /var/lib/claude-jono
+   ```
+
+   Odotettu: ei tulostetta.
+
+6. Tarkista oikeudet:
+
+   ```
+   ls -ld /var/lib/claude-jono
+   ```
+
+   Odotettu: `drwx------ 2 aivo-yksityinen aivo-yksityinen ... /var/lib/claude-jono`.
+
+**C. Avaintiedosto**
+
+7. Kirjoita avain itse. Komento kysyy sen piilotettuna eikä jätä sitä komentohistoriaan. Luo avain OpenRouterissa omalla, vain tätä käyttöä varten tehdyllä avaimella:
+
+   ```
+   runuser -u aivo-yksityinen -- sh -c 'umask 077; printf "Avain: "; stty -echo; read -r K; stty echo; printf "%s" "$K" > /var/lib/aivo-yksityinen/openrouter-avain'
+   ```
+
+   Odotettu: kehote `Avain: `, jonka jälkeen liität avaimen (ruudulla ei näy mitään) ja painat Enter.
+
+8. Tarkista oikeudet näyttämättä sisältöä:
+
+   ```
    ls -l /var/lib/aivo-yksityinen/openrouter-avain
    ```
 
-   Tiedoston pitää olla `-rw-------` ja omistajan `aivo-yksityinen`. Luo avain OpenRouterissa omalla, vain tätä käyttöä varten tehdyllä avaimella ja aseta sille tarvittaessa kulutuskatto OpenRouterin puolella.
+   Odotettu: `-rw------- 1 aivo-yksityinen aivo-yksityinen ...`.
 
-3. **Palvelun asetukset.** Lisää `aivo-chat.service`-tiedoston `ExecStart`-riville: `--yksityinen-taustapaa openrouter --openrouter-malli qwen/qwen3-235b-a22b-2507` (toinen valitsin: `--openrouter-avain-tiedosto`). Useamman mallin lista annetaan valitsimella `--openrouter-mallit` tai muuttujalla `AIVO_OPENROUTER_MALLIT` (pilkuin erotettu, ensimmäinen on oletus); katso `aivo-yksityinen.md`, osio "Mallin valinta". Usean mallin yhdistelmä (tarkastus, rinnakkais tai reititys) valitaan valitsimella `--yksityinen-yhdistelma` ja roolit valitsimella `--yksityinen-roolit`; katso osio "Usean mallin yhdistelmät". Oletus on yksi malli. Lisää `/var/lib/claude-jono` kohtaan `ReadWritePaths`, koska `ProtectSystem=strict` estää kirjoituksen muuten. Kontin 122 pitää päästä HTTPS-yhteydellä osoitteeseen `openrouter.ai`. Palomuuria ei muuteta tämän muutoksen mukana, joten tarkista saanti itse.
+**D. Palvelun asetukset**
 
-4. **Uudelleenkäynnistys ja testi.**
+9. Avaa palvelutiedosto muokattavaksi:
 
    ```
-   sudo systemctl daemon-reload
-   sudo systemctl restart aivo-chat
-   sudo systemctl status aivo-chat --no-pager
+   nano /etc/systemd/system/aivo-chat.service
    ```
 
-   Avaa Aivo, valitse Yksityinen ja lähetä viesti. Odotettu tulos: vastaus tulee muutamassa sekunnissa, ja kulutiedostoon ilmestyy rivi: `sudo tail -n 2 /var/lib/claude-jono/openrouter-kulut.jsonl` (rivillä on vain malli, aika ja luvut). Jos avain puuttuu, sivu näyttää virheen "OpenRouter-avain puuttuu".
+   Odotettu: tiedosto aukeaa. Lisää `ExecStart`-riville `--yksityinen-taustapaa openrouter --openrouter-malli qwen/qwen3-235b-a22b-2507` (tarvittaessa myös `--openrouter-avain-tiedosto`). Useamman mallin lista annetaan valitsimella `--openrouter-mallit` tai muuttujalla `AIVO_OPENROUTER_MALLIT` (pilkuin erotettu, ensimmäinen on oletus); katso `aivo-yksityinen.md`, osio "Mallin valinta". Usean mallin yhdistelmä (tarkastus, rinnakkais, reititys tai tiimi) valitaan valitsimella `--yksityinen-yhdistelma` ja roolit valitsimella `--yksityinen-roolit`; katso osio "Usean mallin yhdistelmät". Oletus on yksi malli. Lisää `ReadWritePaths`-riville kansio `/var/lib/claude-jono` nykyisten kansioiden rinnalle, koska `ProtectSystem=strict` estää kirjoituksen muuten. Tallenna (Ctrl+O, Enter) ja sulje (Ctrl+X).
 
-5. **Takaisin paikalliseen malliin.** Poista `--yksityinen-taustapaa`-valitsin (oletus on `loopback`) ja käynnistä palvelu uudelleen.
+10. Tarkista, että kontti pääsee OpenRouteriin (vain yhteys, ei avainta):
+
+    ```
+    curl -s -o /dev/null -w '%{http_code}\n' https://openrouter.ai/api/v1/models
+    ```
+
+    Odotettu: `200`. Muu tulos tai virhe tarkoittaa, ettei yhteys toimi; palomuuria ei muuteta tämän ohjeen mukana.
+
+**E. Käynnistys ja testi**
+
+11. Lataa asetukset:
+
+    ```
+    systemctl daemon-reload
+    ```
+
+    Odotettu: ei tulostetta.
+
+12. Käynnistä palvelu uudelleen:
+
+    ```
+    systemctl restart aivo-chat
+    ```
+
+    Odotettu: ei tulostetta.
+
+13. Tarkista tila:
+
+    ```
+    systemctl status aivo-chat --no-pager
+    ```
+
+    Odotettu: `Active: active (running)`.
+
+14. Avaa Aivo selaimessa, valitse Yksityinen ja lähetä lyhyt viesti. Odotettu: vastaus tulee muutamassa sekunnissa. Jos avain puuttuu tai on väärin suojattu, sivu näyttää virheen "OpenRouter-avain puuttuu".
+
+15. Tarkista kirjanpito kontissa 122:
+
+    ```
+    tail -n 2 /var/lib/claude-jono/openrouter-kulut.jsonl
+    ```
+
+    Odotettu: 1–2 riviä, joilla on malli, aika ja luvut (ei viestien sisältöä). Jos tiedostoa ei ole, kutsu ei kulkenut katkaisimen kautta; tarkista kohdat 5–6 ja `ReadWritePaths`.
+
+**F. Takaisin paikalliseen malliin**
+
+16. Poista `--yksityinen-taustapaa`-valitsin (oletus on `loopback`) palvelutiedostosta ja aja `systemctl daemon-reload` ja `systemctl restart aivo-chat`.
 
 ## Avoimet kohdat
 
-- Katto on yksi, koska koodissa on yksi kulutila. Jos Aivo ajetaan kontissa 122 eikä siellä ole samaa `/var/lib/claude-jono`-kansiota kuin ajurilla (esim. jaettu liitos), kontin kirjanpito on tosiasiassa erillinen ja katto kaksinkertainen. Tämä on käyttöönoton ehto: Tonyn pitää päättää, miten kansio jaetaan. Koodi ei tarjoa kiertotietä (ei omaa kulutilaa asetuksena).
+- Yhteinen katto ajurin ja Aivon välillä puuttuu, ja katto on konttikohtainen (ks. kohta Katto ja kirjanpito). Jos Tony haluaa yhteisen kirjanpidon, se vaatii koodi- tai jakomuutoksen, ja siihen tarvitaan hänen lupansa erikseen.
 - Mallin suomen kielen laatua ei ole mitattu.

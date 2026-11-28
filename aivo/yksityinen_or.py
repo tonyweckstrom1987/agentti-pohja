@@ -5,9 +5,10 @@ palvelun omissa kansioissa; OpenRouterille lahtee jokaisella viestilla koko keho
 keskusteluhistoria) ja ZDR on pakotettu.
 
 Saannot (koodi on laki):
-  * Yksi yhteinen kulukirjanpito ja yksi paivakatto: ei omaa kulutilaa. Oletus on `openrouter_kulut.OLETUS_TILA`,
-    joten yksityisen tilan kutsut kuluttavat samaa 10 EUR/vrk kattoa kuin ajurin kutsut (A963, #309). `kulutila`-parametri
-    on vain testeja varten eika sita voi asettaa palvelun asetuksista.
+  * Ei omaa kulutilaa: oletus on `openrouter_kulut.OLETUS_TILA`, ja paivakatto on sama 10 EUR/vrk (A963, #309).
+    Kirjanpito on sen koneen tai kontin oma kansio, jossa koodi ajetaan: Aivon kirjanpito kontissa 122 ja ajurin
+    kirjanpito kontissa 115 ovat erilliset, joten katto ei nae toisen kulutusta. `kulutila`-parametri on vain testeja
+    varten eika sita voi asettaa palvelun asetuksista.
   * Pyynto rakennetaan aina lipulla `yksityinen_chat=True` (A984): saantomoduuli hyvaksyy sen vain avoimella mallilla.
   * Kaikki kutsut kulkevat `openrouter_kulut.kutsu`n kautta: paivakatkaisin (10 EUR/vrk) tarkistetaan ennen kutsua,
     pyynto rakennetaan `openrouter_zdr.rakenna_runko`lla (ZDR ja data_collection=deny) ja kulu kirjataan.
