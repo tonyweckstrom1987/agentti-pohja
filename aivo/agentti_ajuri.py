@@ -27,6 +27,10 @@ Verkkohaku (A1101, valinnainen): jos palvelulla on --haku-osoite (tai AIVO_HAKU_
 hakuasetuksen ja agentin tekija tyokalut hae ja sivu (aivo.verkkohaku hakuvalittajan kautta). Avain on tiedostossa
 --haku-avain (oletus <perus>/haku-avain, 0600, palvelun kayttajan oma; Tony luo). Hakuloki (aika, tunnus, tila)
 kirjoitetaan kansioon <perus>/hakuloki (0700, 30 paivaa). Lausekkeet ja osoitteet nakyvat tuloksen kentassa verkko.
+
+Paattelyn ylaraja: sama ymparistomuuttuja ja tarkistus kuin chatissa (AIVO_YKSITYINEN_PAATTELY_MAX, oletus 2 000,
+sallittu 0-6 000). Lapsiprosessi perii ympariston ja valittaa arvon funktiolle malli.aja. Palvelu ja tarkista
+hylkaavat kelvottoman arvon heti kaynnistyksessa (asetusvirhe), jottei jokainen tehtava paaty virheeseen.
 """
 import argparse
 import fcntl
@@ -43,6 +47,7 @@ from pathlib import Path
 from .agentti import malli, polut, tyokalut
 
 OLETUS_PERUS = "/var/lib/aivo-agentit"
+PAATTELY_MUUTTUJA = "AIVO_YKSITYINEN_PAATTELY_MAX"   # sama kuin chatissa, taustaajossa ja tiivistyksessa
 JONO = "jono"
 KASITELLYT = "kasitellyt"
 TYO = "tyo"
@@ -485,6 +490,7 @@ def aja_seuraava(perus, roolit, komento=None, aikaraja_s=PROSESSIN_AIKARAJA_S, k
 def palvelu(perus, roolit, odotus_s=ODOTUS_S, kierroksia=None, kulutila=None, haku_osoite=""):
     """Pitkaikainen silmukka: yksi tehtava kerrallaan. `kierroksia` ja `kulutila` ovat testeja varten."""
     mallit = malli.tarkista_roolit(roolit)
+    paattely_max_ymparistosta()          # kelvoton arvo -> AgenttiVirhe (main: asetusvirhe, koodi 2)
     virheet = tarkista_kansiot(perus) + tarkista_kulukirjanpito(kulutila)
     if virheet:
         for v in virheet:
@@ -509,8 +515,15 @@ def palvelu(perus, roolit, odotus_s=ODOTUS_S, kierroksia=None, kulutila=None, ha
         lukko.vapauta()
 
 
+def paattely_max_ymparistosta(env=None):
+    """AIVO_YKSITYINEN_PAATTELY_MAX ymparistosta tarkistettuna (malli.tarkista_paattely_max). Virhe: AgenttiVirhe."""
+    return malli.tarkista_paattely_max((os.environ if env is None else env).get(PAATTELY_MUUTTUJA))
+
+
 def lapsi(juuri, roolit, syote=None, haku_osoite="", **kw):
-    """Aliprosessin runko: lukee {"teksti"} syotteesta, ajaa agentin ja palauttaa tuloksen sanakirjana."""
+    """Aliprosessin runko: lukee {"teksti"} syotteesta, ajaa agentin ja palauttaa tuloksen sanakirjana.
+    Paattelyn ylaraja luetaan ymparistosta (PAATTELY_MUUTTUJA), ellei `paattely_max` ole annettu."""
+    kw.setdefault("paattely_max", os.environ.get(PAATTELY_MUUTTUJA))
     data = json.load(syote if syote is not None else sys.stdin)
     teksti = data["teksti"] if isinstance(data, dict) and isinstance(data.get("teksti"), str) else ""
     if not teksti:
@@ -540,6 +553,10 @@ def main(argv=None):
             return 0
         if a.komento == "tarkista":
             virheet = tarkista_kansiot(a.perus) + tarkista_kulukirjanpito()
+            try:
+                paattely_max_ymparistosta()
+            except malli.AgenttiVirhe as e:
+                virheet.append("%s: %s" % (PAATTELY_MUUTTUJA, e))
             if a.roolit:
                 try:
                     malli.tarkista_roolit(a.roolit)

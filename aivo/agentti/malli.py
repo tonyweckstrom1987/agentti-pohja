@@ -18,6 +18,12 @@ Saannot (koodi on laki; Tonyn paatos A1072):
     Chatin avaintiedostoa ei hyvaksyta. Avain luetaan ennen ensimmaista kutsua, joten puuttuva avain ei jata
     varausta kulukirjanpitoon. Avainta ei kirjoiteta tulokseen, lokiin eika virheisiin.
   * Parametrit `avain_tiedosto`, `kulutila`, `avaa`, `nyt` ja `kello` ovat testeja varten.
+  * Paattelyn ylaraja (sama kuin chatissa, A1127): `aja(..., paattely_max=...)` tarkistetaan funktiolla
+    `yksityinen_or.tarkista_paattely_max` (puuttuva -> PAATTELY_MAX_OLETUS, sallittu 0-PAATTELY_MAX_YLARAJA;
+    kelvoton arvo -> tila VIRHE ennen ensimmaista kutsua). Jokainen rooli saa kutsuun reasoning-kentan samoilla
+    funktioilla kuin chat (`paattelyraja`, `paattelyparametri`): vain oletuksena paattelevalle mallille, ja raja on
+    aina pienempi kuin roolin MAX_TOKENIA. Agentti ei tee uusintakutsua (askelraja ja kulut pysyvat ennallaan).
+    Ajuri lukee arvon ymparistomuuttujasta AIVO_YKSITYINEN_PAATTELY_MAX.
   * Verkkohaku (A1101, valinnainen `haku`): tekija saa tyokalut hae ja sivu, jotka kulkevat vain
     aivo.verkkohaku.Hakuistunnon kautta (hakuvalittaja, Tor). Jokainen lauseke tarkistetaan vartijalla: mekaaninen
     esitarkistus ja vartijamalli (rooli "vartija" = tarkastajan malli, sama kutsureitti ja askelraja kuin muilla
@@ -132,6 +138,15 @@ def tarkista_roolit(asetus):
     return roolit
 
 
+def tarkista_paattely_max(arvo):
+    """Paattelyn ylaraja samalla tarkistuksella kuin chatissa (yksityinen_or.tarkista_paattely_max).
+    Palauttaa kokonaisluvun; kelvoton arvo -> AgenttiVirhe (viesti turvallinen, ei sisaltoa)."""
+    try:
+        return yksityinen_or.tarkista_paattely_max(arvo)
+    except yksityinen_or.YksityinenVirhe as e:
+        raise AgenttiVirhe(str(e)) from None
+
+
 def _lue_oma_avain(polku):
     if os.path.realpath(str(polku)) == os.path.realpath(yksityinen_or.OLETUS_AVAIN):
         raise AgenttiVirhe("agentti ei kayta chatin avainta; avain luetaan tiedostosta " + OLETUS_AVAIN)
@@ -158,8 +173,10 @@ class _Tila:
 class _Kutsuja:
     """Ainoa mallikutsun reitti tassa moduulissa: askel- ja aikarajan tarkistus -> openrouter_kulut.kutsu."""
 
-    def __init__(self, roolit, avain, kulutila, avaa, nyt, ilmoita, kello, takaraja):
+    def __init__(self, roolit, avain, kulutila, avaa, nyt, ilmoita, kello, takaraja,
+                 paattely_max=yksityinen_or.PAATTELY_MAX_OLETUS):
         self.roolit, self.avain, self.kulutila, self.avaa = roolit, avain, kulutila, avaa
+        self.paattely_max = paattely_max
         self.nyt, self.ilmoita, self.kello, self.takaraja = nyt, ilmoita, kello, takaraja
         self.tila = _Tila()
 
@@ -185,11 +202,14 @@ class _Kutsuja:
         self.tila.kutsuja += 1
         malli = self.roolit[VARTIJAN_MALLI if rooli == "vartija" else rooli]
         laheta = yksityinen_or.tee_kuljetin(self.avain, self.avaa, aikaraja_s=jaljella)
+        # paattelyn ylaraja kuten chatissa: reasoning-kentta vain oletuksena paattelevalle mallille, < max_tokens
+        paattely = yksityinen_or.paattelyparametri(
+            malli, yksityinen_or.paattelyraja(malli, MAX_TOKENIA[rooli], self.paattely_max))
         try:
             data = openrouter_kulut.kutsu(
                 malli, viestit, laheta, tehtava=TEHTAVA + ":" + rooli, nyt=self.nyt, tila=self.kulutila,
                 ilmoita=self.ilmoita, max_tokens=MAX_TOKENIA[rooli], temperature=0.2, stream=False,
-                usage={"include": True}, yksityinen_chat=True)
+                usage={"include": True}, yksityinen_chat=True, **({"reasoning": paattely} if paattely else {}))
         except openrouter_kulut.KutsuEstetty:
             # sama poikkeus kertoo taydesta katosta ja kelvottomasta kirjanpidosta; molemmat pysayttavat (fail closed)
             raise _Keskeytys(KATTO_SYY) from None
@@ -293,9 +313,10 @@ def tee_hakuistunto(haku, kysy_vartija, laheta=None):
 
 
 def aja(tehtava, juuri, roolit, *, avain_tiedosto=OLETUS_AVAIN, kulutila=None, avaa=None, nyt=None, ilmoita=None,
-        kello=time.monotonic, haku=None, haku_laheta=None):
+        kello=time.monotonic, haku=None, haku_laheta=None, paattely_max=None):
     """Ajaa tehtavan tyokansiossa `juuri`. Palauttaa Tulos-olion; ei nosta poikkeusta mallin tai kuljettimen takia.
-    `haku` = hakuasetus (tee_hakuistunto) tai None (ei verkkotyokaluja). `haku_laheta` vain testeille."""
+    `haku` = hakuasetus (tee_hakuistunto) tai None (ei verkkotyokaluja). `haku_laheta` vain testeille.
+    `paattely_max` = AIVO_YKSITYINEN_PAATTELY_MAX (None tai tyhja = oletus; kelvoton -> VIRHE ennen kutsuja)."""
     alku = kello()
     loki = []
     mallit = {}
@@ -312,10 +333,11 @@ def aja(tehtava, juuri, roolit, *, avain_tiedosto=OLETUS_AVAIN, kulutila=None, a
 
     try:
         mallit = tarkista_roolit(roolit)
+        paattely = tarkista_paattely_max(paattely_max)
         avain = _lue_oma_avain(avain_tiedosto)
     except AgenttiVirhe as e:
         return tulos(VIRHE, str(e))
-    k = _Kutsuja(mallit, avain, kulutila, avaa, nyt, ilmoita, kello, alku + AIKARAJA_S)
+    k = _Kutsuja(mallit, avain, kulutila, avaa, nyt, ilmoita, kello, alku + AIKARAJA_S, paattely_max=paattely)
     if haku:
         try:
             istunto = tee_hakuistunto(haku, lambda viestit: k.kysy("vartija", viestit), haku_laheta)
