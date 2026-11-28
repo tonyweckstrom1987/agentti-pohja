@@ -69,6 +69,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from aivo import itsetarkistus, kalenteri, kalenteri_kehote, luovutus, luovutuspaketti, vartija, openrouter_kulut, tiivistelmat_kehote, yksityinen, yksityinen_or
+from aivo import muistinakyma      # yksityisen tilan muistinakyma (#337, oma rivi)
 from aivo.yksityinen import YksityinenVirhe as ChatVirhe, julkaise_kirjastoon   # sama poikkeus kaikkialla
 from aivo import agenttidata_kehote   # agenttidata-kopion kompassi, faktat ja paatokset (vain luku)
 from aivo import yhdistelma        # usean mallin yhdistelmat (oma rivi: ei ristiriitaa rinnakkaisten tuontimuutosten kanssa)
@@ -180,7 +181,7 @@ textarea{resize:none;height:3.2rem}button{font:inherit;padding:.5rem .9rem;borde
 <header><strong>Aivo</strong><span><select id="tila" aria-label="Tila">
 <option value="yksityinen" selected>{YKSITYINEN_TEKSTI}</option>
 <option value="tyokalu">Ty\u00f6kalu (Claude pilvess\u00e4)</option></select>
-<select id="malli" aria-label="Malli" hidden></select> <button id="uusi">Uusi keskustelu</button>
+<select id="malli" aria-label="Malli" hidden></select> <a id="muisti" href="/muisti" target="_blank" rel="noopener" title="Vain ty\u00f6kalutilan tiivistelm\u00e4t">Muisti (ty\u00f6kalu)</a> <button id="uusi">Uusi keskustelu</button>
 <a href="#" id="odottavat" class="pieni" hidden>Odottavat ehdotukset</a>
 <a href="#" id="luovutukset" class="pieni" hidden>Odottavat luovutukset</a>
 <a href="#" id="luovutetut" class="pieni" hidden>Luovutetut</a>
@@ -1208,6 +1209,34 @@ def sallittu_host(host_otsake, sallitut):
     return any(nimi == s or (s.startswith(".") and nimi.endswith(s)) for s in sallitut)
 
 
+def tiivistelmakansio_ristiriita(tyokalu, yksityiset):
+    """True, jos tyokalutilan kansio on sama kuin jokin yksityinen kansio, sen sisalla tai sen ylakansio (puhdas polkuvertailu)."""
+    tyokalu = Path(tyokalu).resolve()
+    for y in yksityiset:
+        y = Path(y).resolve()
+        if tyokalu == y or y in tyokalu.parents or tyokalu in y.parents:
+            return True
+    return False
+
+
+MUISTINAKYMA_TILAT = ("tyokalu", "yksityinen")   # tunnetut arvot; HTTP:lla luettavissa vain "tyokalu"
+
+
+def muistinakyma_tila(kysely):
+    """Muistinakyman tila kyselysta. Tyhja kysely -> "tyokalu". Sallittu vain tasan yksi tila-parametri, jonka
+    (dekoodattu) arvo on MUISTINAKYMA_TILAT-joukossa; muu (muut avaimet, toisto, tuntematon arvo, jasennysvirhe) -> None."""
+    if kysely == "":
+        return "tyokalu"
+    try:
+        parit = urllib.parse.parse_qsl(kysely, keep_blank_values=True, strict_parsing=True,
+                                       encoding="utf-8", errors="strict")
+    except (ValueError, UnicodeDecodeError):
+        return None
+    if len(parit) != 1 or parit[0][0] != "tila" or parit[0][1] not in MUISTINAKYMA_TILAT:
+        return None
+    return parit[0][1]
+
+
 def lue_kulukerroin(arvo):
     """Nayton USD->EUR-kerroin asetuksesta ("0.92" tai "0,92"). Sallittu 0 < k <= 10; muu -> ChatVirhe."""
     try:
@@ -1448,6 +1477,11 @@ class Tila:
         self.julkaise = julkaise
         self.julkaise_yks = julkaise_yks
         self.vastauslukko = threading.Lock()   # yksi Claude-kutsu kerrallaan
+        # Muistinakyma (vain luku) lukee vain tyokalutilan tiivistelmia. Yksityisen tilan tiivistelmia ei voi lukea HTTP:n kautta
+        # lainkaan, eika yksityiselle tilalle luoda tiivistelmakansiota kaynnistyksessa.
+        # Nakyma lukee vain asetettua kansiota (sama kuin self.tiivistelmat). Ilman asetusta nakyma ei lue mitaan:
+        # ei oletuskansiota, koska tuotanto ei kirjoita sinne ennen kuin tiivistelmat on kytketty.
+        self.nakyma_tiivistelmat = str(tiivistelmat) if tiivistelmat else None
         self.yks = None
         self.or_mallit = ()                       # sallitut OpenRouter-mallit; ensimmainen on oletus (vain openrouter)
         self.yhdistelmat = (yhdistelma.OLETUS,)   # usean mallin yhdistelmat ovat kaytossa vain OpenRouter-taustapaalla
@@ -1492,6 +1526,7 @@ class Tila:
                 if tiivistelmat and os.path.realpath(yks_tiivistelmat) == os.path.realpath(tiivistelmat):
                     raise ChatVirhe("yksityisen ja tyokalutilan tiivistelmat eivat saa olla samassa kansiossa")
                 self.yks_tiivistelmat = str(yks_tiivistelmat)
+            self._tarkista_tiivistelmakansiot(yks_data)
             if kysy_yks:
                 self.kysy_yks = kysy_yks
             elif taustapaa == "openrouter":
@@ -1682,6 +1717,15 @@ class Tila:
         m = self.yks.lue_malli(kid)
         return m if m in self.or_mallit else self.or_mallit[0]
 
+    def _tarkista_tiivistelmakansiot(self, yks_data):
+        """Kieltaytyy kaynnistymasta vain, jos tyokalutilan kansio on yksityisen alueen kansio, sen sisalla tai ylakansio.
+        Ei luo kansioita eika koske levyyn (vain polkujen vertailu)."""
+        if self.nakyma_tiivistelmat is None:
+            return
+        yksityiset = [yks_data, self.yks_muisti, self.ehdotukset] + ([self.yks_tiivistelmat] if self.yks_tiivistelmat else [])
+        if tiivistelmakansio_ristiriita(self.nakyma_tiivistelmat, yksityiset):
+            raise ChatVirhe("tyokalutilan tiivistelmakansio on yksityisen tilan kansio tai sen sisalla; kieltaydyn kaynnistymasta")
+
     def tila_ja_kasittelija(self, kid):
         """Palauttaa (tila, keskustelut) sen mukaan, kummassa kansiossa keskustelu on."""
         if self.yks is not None:
@@ -1767,6 +1811,16 @@ def tee_kasittelija(tila):
                 if not self._kirjautunut():
                     return self._laheta(302, "", "text/plain", [("Location", "/kirjaudu")])
                 return self._laheta(200, sivu_html(tila.taustapaa), "text/html; charset=utf-8")
+            if self.path.split("?", 1)[0] == "/muisti":
+                if not self._kirjautunut():
+                    return self._laheta(302, "", "text/plain", [("Location", "/kirjaudu")])
+                valinta = muistinakyma_tila(self.path.partition("?")[2])
+                if valinta == "yksityinen":      # yksityista tilaa ei voi lukea HTTP:lla
+                    return self._json(404, {"virhe": "ei loydy"})
+                if valinta is None:              # tuntematon tai moniselitteinen kysely: ei oletusta
+                    return self._json(400, {"virhe": "tuntematon tila"})
+                return self._laheta(200, muistinakyma.sivu(tila.nakyma_tiivistelmat, "ty\u00f6kalutila"),
+                                    "text/html; charset=utf-8")
             if self.path == "/terve":
                 return self._json(200, {"tila": "ok"})
             osat = urllib.parse.urlsplit(self.path)

@@ -1,0 +1,1 @@
+- aivo-muistinakyma: chat-sivun /muisti-nakyma (vain luku) nayttaa vain tyokalutilan tiivistelmat; ilman asetettua tiivistelmakansiota nakyma ei lue mitaan (ei oletuskansiota), ja tila valitaan tiukasti sallituista arvoista (tuntematon kysely -> 400, yksityinen -> 404).
